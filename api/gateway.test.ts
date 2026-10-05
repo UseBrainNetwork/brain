@@ -24,7 +24,7 @@ describe("validateChat", () => {
     const c = validateChat({ stream: true, messages: [{ role: "user", content: "hi" }] });
     expect(c.stream).toBe(true);
     expect(c.model).toBe("brain/auto");
-    expect(c.max_tokens).toBe(512);
+    expect(c.max_tokens).toBe(2048);
   });
   it("rejects unknown models and bad messages", () => {
     expect(() => validateChat({ model: "gpt-9", messages: [{ role: "user", content: "hi" }] })).toThrow(GatewayError);

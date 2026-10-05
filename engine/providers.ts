@@ -76,7 +76,7 @@ export class BrowserNetworkExecutionProvider implements IntelligenceProvider {
 
   async estimate(req: ExecutionRequest): Promise<ExecutionEstimate> {
     // Chat never runs on browser nodes, so a slow store must not delay routing: unknown reads as zero nodes.
-    const nodes = req.kind === "chat" ? await withTimeout(liveNodes().catch(() => []), 2_000, []) : await liveNodes();
+    const nodes = req.kind === "chat" ? await withTimeout(liveNodes().catch(() => []), 1_200, []) : await liveNodes();
     const notes: string[] = [];
     const base = { provider: this.id, target: this.type, availableCapacity: Math.min(1, nodes.length / 10), available: nodes.length > 0, qualityTier: null };
     if (nodes.length === 0) notes.push("no real nodes online");

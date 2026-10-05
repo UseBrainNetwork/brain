@@ -19,6 +19,9 @@ interface Msg {
   content: string;
   /** Assistant only. */
   brain?: BrainRunSummary;
+  /** Model reasoning streamed before the answer (reasoning models only). */
+  reasoning?: string;
+  finishReason?: string;
   error?: string;
   streaming?: boolean;
 }
@@ -206,6 +209,7 @@ export function ChatApp() {
           return;
         }
         let acc = "";
+        let think = "";
         let first = true;
         for await (const ev of sse(r.body)) {
           if (ev.data === "[DONE]") break;
@@ -225,8 +229,19 @@ export function ChatApp() {
             continue;
           }
           try {
-            const j = JSON.parse(ev.data) as { choices?: { delta?: { content?: string } }[] };
-            const delta = j.choices?.[0]?.delta?.content;
+            const j = JSON.parse(ev.data) as { choices?: { delta?: { content?: string; reasoning?: string }; finish_reason?: string | null }[] };
+            const choice = j.choices?.[0];
+            const delta = choice?.delta?.content;
+            const thought = choice?.delta?.reasoning;
+            if (typeof thought === "string" && thought) {
+              think += thought;
+              if (first) {
+                first = false;
+                setBusy("streaming");
+              }
+              const snapshot = think;
+              patch((m) => ({ ...m, reasoning: snapshot }));
+            }
             if (typeof delta === "string" && delta) {
               acc += delta;
               if (first) {
@@ -235,6 +250,10 @@ export function ChatApp() {
               }
               const snapshot = acc;
               patch((m) => ({ ...m, content: snapshot }));
+            }
+            if (choice?.finish_reason) {
+              const fr = choice.finish_reason;
+              patch((m) => ({ ...m, finishReason: fr }));
             }
           } catch {
             /* ignore partial */
@@ -514,6 +533,22 @@ function CellField() {
   );
 }
 
+/** Reasoning stream: open and live while the model is still thinking, a one-line toggle once the answer starts. */
+function Reasoning({ text, live }: { text: string; live: boolean }) {
+  const [open, setOpen] = useState(false);
+  const show = live || open;
+  return (
+    <div className="mb-3">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="font-mono text-[11px] uppercase tracking-[0.14em] text-chalk/40 hover:text-chalk/70">
+        {live ? "Thinking" : "Thought"} · {text.length.toLocaleString()} chars {live ? "" : open ? "· hide" : "· show"}
+      </button>
+      {show && (
+        <div className={`mt-2 max-h-[180px] overflow-y-auto whitespace-pre-wrap border-l border-chalk/15 pl-3 text-[13px] leading-[1.5] text-chalk/45`}>{text}</div>
+      )}
+    </div>
+  );
+}
+
 function Message({ m, onRetry }: { m: Msg; onRetry?: () => void }) {
   if (m.role === "user") {
     return (
@@ -524,10 +559,13 @@ function Message({ m, onRetry }: { m: Msg; onRetry?: () => void }) {
   }
   return (
     <div className="my-5">
+      {m.reasoning && <Reasoning text={m.reasoning} live={Boolean(m.streaming && !m.content)} />}
       <div className="text-[15px] text-chalk/90">
         {m.content ? renderMarkdown(m.content) : null}
         {m.streaming && <span className="ml-0.5 inline-block h-[1em] w-[7px] translate-y-[2px] animate-blink bg-chalk/80 align-baseline" />}
-        {!m.content && !m.streaming && !m.error && <span className="text-chalk/40">No content returned.</span>}
+        {!m.content && !m.streaming && !m.error && (
+          <span className="text-chalk/40">{m.finishReason === "length" ? "The token limit was reached before the answer started. Ask again or ask for a shorter answer." : "No content returned."}</span>
+        )}
       </div>
       {m.error && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-[10px] border border-signal/30 bg-signal/[0.06] px-4 py-3 font-mono text-[12px] text-chalk/80">

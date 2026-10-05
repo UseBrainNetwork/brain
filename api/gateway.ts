@@ -133,7 +133,8 @@ export function validateChat(body: unknown): ChatRequest {
   const stop = validateStop(b.stop);
   if (chatChars(messages, tools) > MAX_CHARS + MAX_TOOLS_CHARS) throw new GatewayError(413, "too_large", `Total content exceeds ${MAX_CHARS} characters.`);
   if (chatChars(messages) > MAX_CHARS) throw new GatewayError(413, "too_large", `Total content exceeds ${MAX_CHARS} characters.`);
-  const max_tokens = Math.min(4096, Math.max(1, Number(b.max_tokens ?? b.max_completion_tokens) || 512));
+  // Reasoning models spend completion tokens thinking before they answer; a small default starves the answer.
+  const max_tokens = Math.min(8192, Math.max(1, Number(b.max_tokens ?? b.max_completion_tokens) || 2048));
   const temperature = Math.min(2, Math.max(0, Number(b.temperature ?? 0.4)));
   return { model, messages, max_tokens, temperature, stream: b.stream === true, ...(tools ? { tools } : {}), ...(tool_choice ? { tool_choice } : {}), ...(response_format ? { response_format } : {}), ...(stop ? { stop } : {}) };
 }

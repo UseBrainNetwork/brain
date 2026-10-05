@@ -35,7 +35,7 @@ export interface ProviderStats {
 
 const EMPTY: ProviderStats = { samples: 0, medianLatencyMs: null, lastLatencyMs: null, reliability: null };
 const STATS_TTL_MS = 20_000;
-const STATS_READ_TIMEOUT_MS = 2_500;
+const STATS_READ_TIMEOUT_MS = 1_200;
 const statsCache = new Map<string, { at: number; value: ProviderStats }>();
 
 /**
