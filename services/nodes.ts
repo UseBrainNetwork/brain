@@ -246,13 +246,27 @@ export async function leave(node: StoredNode) {
   }
 }
 
+const liveCache = globalThis as typeof globalThis & { __brainLive?: { at: number; value: Promise<ComputeNode[]> } };
+/** Public live-node list is read by almost every endpoint; one store read serves all callers on an instance for 2 s. */
+const LIVE_TTL_MS = 2_000;
+
 export async function liveNodes(): Promise<ComputeNode[]> {
-  await sweepOffline();
   const now = Date.now();
-  // Filter by heartbeat age as well as status, so a throttled sweep never shows a silent node as online.
-  return (await getStore().listNodes())
-    .filter((n) => (n.status === "idle" || n.status === "computing") && now - n.lastHeartbeatAt <= networkConfig.nodes.offlineAfterMs)
-    .map(publicNode);
+  const hit = liveCache.__brainLive;
+  if (hit && now - hit.at < LIVE_TTL_MS) return hit.value;
+  const value = (async () => {
+    await sweepOffline();
+    const t = Date.now();
+    // Filter by heartbeat age as well as status, so a throttled sweep never shows a silent node as online.
+    return (await getStore().listNodes())
+      .filter((n) => (n.status === "idle" || n.status === "computing") && t - n.lastHeartbeatAt <= networkConfig.nodes.offlineAfterMs)
+      .map(publicNode);
+  })();
+  liveCache.__brainLive = { at: now, value };
+  value.catch(() => {
+    if (liveCache.__brainLive?.value === value) liveCache.__brainLive = undefined;
+  });
+  return value;
 }
 
 /* ---------------------------------------------------------------- dispatch */

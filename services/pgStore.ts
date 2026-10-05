@@ -1,10 +1,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { Pool } from "pg";
 import type { DistributedJob, RewardAllocation, RewardClaim, RewardEpoch } from "@/domain/types";
 import { KeyedMutex, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode, type WorkAggregate } from "./store";
 
 /** Postgres implementation of NetworkStore. Schema: db/schema.sql. */
+/** Content hash of schema.sql: the DDL re-runs only when the file changes. */
+function schemaVersion(sql: string) {
+  return createHash("sha256").update(sql).digest("hex").slice(0, 16);
+}
+
 export class PgStore implements NetworkStore {
   private pool: Pool;
   /**
@@ -32,9 +38,11 @@ export class PgStore implements NetworkStore {
     const ssl = local ? undefined : { rejectUnauthorized: false };
     // Fail fast rather than hang: a serverless instance that cannot get a connection in 8s or finish
     // a statement in 15s should return an error, not hold the request open until the platform kills it.
-    // Behind Supabase/pgbouncer the whole project shares ~200 client slots, and every warm serverless
-    // instance holds its idle connections. Keep per-instance pools small and release idle sockets fast.
-    const common = { connectionString: cs, ssl, connectionTimeoutMillis: 8_000, idleTimeoutMillis: 2_000, allowExitOnIdle: true, statement_timeout: 15_000, query_timeout: 15_000 };
+    // Behind Supabase/pgbouncer the whole project shares a few hundred client slots, and every warm
+    // serverless instance holds its idle connections, so per-instance pools stay small. But every
+    // reconnect is a TLS handshake plus pooler auth, and with a 2 s idle timeout the instances were
+    // reconnecting on nearly every request: `SELECT 1` measured 6 s under load. Hold sockets for 45 s.
+    const common = { connectionString: cs, ssl, connectionTimeoutMillis: 8_000, idleTimeoutMillis: 45_000, allowExitOnIdle: true, statement_timeout: 15_000, query_timeout: 15_000 };
     this.pool = new Pool({ ...common, max: 3 });
     this.lockPool = new Pool({ ...common, max: 2 });
     // Idle-client errors (pooler closing a socket) must not become unhandled rejections that kill the instance.
@@ -57,7 +65,19 @@ export class PgStore implements NetworkStore {
       return; // schema not shipped with this build; assume it was applied out of band
     }
     try {
+      // One cheap read decides whether the DDL needs to run at all. Every cold start used to replay
+      // all fifteen IF NOT EXISTS statements (catalog locks on busy tables, hundreds of times a day).
+      const version = schemaVersion(sql);
+      const marker = await this.pool
+        .query<{ v: string }>(`SELECT data->>'version' AS v FROM brain_documents WHERE kind = 'meta' AND id = 'schema' LIMIT 1`)
+        .then((r) => r.rows[0]?.v ?? null)
+        .catch(() => null); // table missing on a fresh database: run the DDL
+      if (marker === version) return;
       await this.pool.query(sql);
+      await this.pool.query(
+        `INSERT INTO brain_documents (kind, id, key, at, data) VALUES ('meta', 'schema', NULL, $1, $2) ON CONFLICT (kind, id) DO UPDATE SET at = $1, data = $2`,
+        [Date.now(), JSON.stringify({ version, appliedAt: Date.now() })],
+      );
       // Advisory locks held for more than a minute belong to a frozen or dead instance. Clear them.
       await this.pool.query(
         `SELECT pg_terminate_backend(a.pid) FROM pg_locks l JOIN pg_stat_activity a USING (pid)
@@ -121,7 +141,7 @@ export class PgStore implements NetworkStore {
     const t0 = Date.now();
     await this.q("SELECT 1");
     const pingMs = Date.now() - t0;
-    const [tables, conns, slow, idx, settings] = await Promise.all([
+    const [tables, conns, slow, idx, settings, dbStats] = await Promise.all([
       this.q<{ relname: string; live: string; dead: string; bytes: string; last_autovacuum: string | null; last_autoanalyze: string | null }>(
         `SELECT relname, n_live_tup::text AS live, n_dead_tup::text AS dead, pg_total_relation_size(relid)::text AS bytes,
                 last_autovacuum::text, last_autoanalyze::text
@@ -134,7 +154,11 @@ export class PgStore implements NetworkStore {
       ),
       this.q<{ tablename: string; indexname: string }>(`SELECT tablename, indexname FROM pg_indexes WHERE tablename LIKE 'brain_%' ORDER BY 1, 2`),
       this.q<{ name: string; setting: string }>(`SELECT name, setting FROM pg_settings WHERE name IN ('max_connections', 'server_version', 'shared_buffers', 'work_mem')`),
+      this.q<{ xact: string; hit: string; read: string; reset: string | null }>(
+        `SELECT xact_commit::text AS xact, blks_hit::text AS hit, blks_read::text AS read, stats_reset::text AS reset FROM pg_stat_database WHERE datname = current_database()`,
+      ),
     ]);
+    const db = dbStats.rows[0];
     let statements: { calls: number; meanMs: number; totalS: number; rows: number; query: string }[] | null = null;
     try {
       const r = await this.q<{ calls: string; mean_exec_time: string; total_exec_time: string; rows: string; query: string }>(
@@ -154,6 +178,7 @@ export class PgStore implements NetworkStore {
       slowActive: { count: Number(slow.rows[0]?.n ?? 0), oldestSeconds: slow.rows[0]?.oldest_s == null ? null : Number(slow.rows[0].oldest_s) },
       indexes: idx.rows.map((x) => `${x.tablename}.${x.indexname}`),
       settings: Object.fromEntries(settings.rows.map((x) => [x.name, x.setting])),
+      database: db ? { transactions: Number(db.xact), cacheHitRatio: Number(db.hit) + Number(db.read) > 0 ? Math.round((Number(db.hit) / (Number(db.hit) + Number(db.read))) * 1000) / 1000 : null, statsSince: db.reset } : null,
       statements,
     };
   }

@@ -121,7 +121,7 @@ export interface NetworkStore {
   withLock<T>(key: string, fn: () => Promise<T>): Promise<T>;
 }
 
-export type DocKind = "receipt" | "accounting" | "order" | "decision" | "plan" | "customer" | "apikey" | "request" | "treasury" | "epochv2" | "metric" | "account" | "credit" | "session" | "interest" | "notify";
+export type DocKind = "receipt" | "accounting" | "order" | "decision" | "plan" | "customer" | "apikey" | "request" | "treasury" | "epochv2" | "metric" | "account" | "credit" | "session" | "interest" | "notify" | "meta";
 
 export interface DocQuery {
   limit?: number;
