@@ -4,6 +4,7 @@ import { Chrome } from "@/components/layout/Chrome";
 import { Footer } from "@/components/layout/Footer";
 import { Nav } from "@/components/layout/Nav";
 import { RevealObserver } from "@/components/layout/RevealObserver";
+import { PrivyBridge } from "@/components/wallet/PrivyBridge";
 import { siteUrl, social } from "@/lib/site";
 import "./globals.css";
 
@@ -40,6 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </Chrome>
         <div aria-hidden className="grain" />
         <RevealObserver />
+        <PrivyBridge />
         <Stupified />
       </body>
     </html>

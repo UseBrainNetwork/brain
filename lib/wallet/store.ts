@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from "react";
 import type { TokenHolding } from "@/domain/types";
 import { walletAdapters, type WalletAdapter } from "./adapters";
+import { PRIVY_ADAPTER_ID, privyEnabled } from "./privy";
 
 export interface WalletState {
   status: "disconnected" | "connecting" | "signing" | "connected" | "error";
@@ -13,13 +14,27 @@ export interface WalletState {
   verified: boolean;
   demo: boolean;
   error: string | null;
+  /** Adapter that owns the connect UI (Privy once its bridge mounts); null → built-in wallet picker. */
+  primaryAdapterId: string | null;
 }
 
-const initial: WalletState = { status: "disconnected", adapterId: null, address: null, holding: null, verified: false, demo: false, error: null };
+const initial: WalletState = {
+  status: "disconnected",
+  adapterId: null,
+  address: null,
+  holding: null,
+  verified: false,
+  demo: false,
+  error: null,
+  primaryAdapterId: null,
+};
 
 class WalletStore {
   private state = initial;
   private listeners = new Set<() => void>();
+  /** Adapters registered at runtime (Privy bridge); built-in ones live in `walletAdapters`. */
+  private runtime = new Map<string, WalletAdapter>();
+  private awaiting = new Map<string, Set<(a: WalletAdapter) => void>>();
   /** Provided by the contributor engine so a verified wallet links to the running node. */
   sessionToken: () => string | null = () => null;
   /** Server-signed proof of the last verified wallet; lets a recovered node re-link without a new signature. */
@@ -36,6 +51,59 @@ class WalletStore {
   private set(p: Partial<WalletState>) {
     this.state = { ...this.state, ...p };
     this.listeners.forEach((l) => l());
+  }
+
+  adapter(id: string | null): WalletAdapter | null {
+    if (!id) return null;
+    return this.runtime.get(id) ?? walletAdapters.find((x) => x.id === id) ?? null;
+  }
+
+  /** Called by runtime bridges (Privy) once their hooks are live. `primary` makes it own the connect button. */
+  registerAdapter(adapter: WalletAdapter, opts: { primary?: boolean } = {}) {
+    this.runtime.set(adapter.id, adapter);
+    if (opts.primary) this.set({ primaryAdapterId: adapter.id });
+    this.awaiting.get(adapter.id)?.forEach((fn) => fn(adapter));
+    this.awaiting.delete(adapter.id);
+  }
+
+  unregisterAdapter(id: string) {
+    this.runtime.delete(id);
+    if (this.state.primaryAdapterId === id) this.set({ primaryAdapterId: null });
+  }
+
+  /** True when the connect button should hand off to Privy (configured, even if its bridge is still loading). */
+  get usesPrivy() {
+    return privyEnabled;
+  }
+
+  private whenAdapter(id: string, timeoutMs: number): Promise<WalletAdapter> {
+    const now = this.adapter(id);
+    if (now) return Promise.resolve(now);
+    return new Promise((resolve, reject) => {
+      const set = this.awaiting.get(id) ?? new Set();
+      const t = setTimeout(() => {
+        set.delete(fn);
+        reject(new Error("Wallet login is still loading. Try again in a moment."));
+      }, timeoutMs);
+      const fn = (a: WalletAdapter) => {
+        clearTimeout(t);
+        resolve(a);
+      };
+      set.add(fn);
+      this.awaiting.set(id, set);
+    });
+  }
+
+  /** Connects through the primary adapter (Privy), waiting briefly for its bridge if it has not mounted yet. */
+  async connectPrimary() {
+    if (!privyEnabled) return;
+    this.set({ status: "connecting", adapterId: PRIVY_ADAPTER_ID, error: null });
+    try {
+      const adapter = await this.whenAdapter(PRIVY_ADAPTER_ID, 15_000);
+      await this.connect(adapter);
+    } catch (e) {
+      this.set({ status: "error", error: describe(e) });
+    }
   }
 
   async connect(adapter: WalletAdapter) {
@@ -57,24 +125,42 @@ class WalletStore {
         this.set({ status: "connected", address, holding, verified: false, demo: true });
       }
     } catch (e) {
-      this.set({ status: "error", error: e instanceof Error ? e.message : "Connection failed" });
+      this.set({ status: "error", address: null, error: describe(e) });
     }
   }
 
   /** Signs a UTF-8 message with the connected wallet. Demo wallets cannot sign. */
   async sign(message: string): Promise<string> {
-    const a = walletAdapters.find((x) => x.id === this.state.adapterId);
+    const a = this.adapter(this.state.adapterId);
     if (!a?.signMessage || !this.state.verified) throw new Error("This wallet cannot sign");
     const sig = await a.signMessage(new TextEncoder().encode(message));
     return btoa(String.fromCharCode(...sig));
   }
 
-  async disconnect() {
-    const a = walletAdapters.find((x) => x.id === this.state.adapterId);
-    await a?.disconnect();
-    this.linkToken = null;
-    this.set(initial);
+  dismissError() {
+    if (this.state.status === "error") this.set({ status: "disconnected", error: null, adapterId: null });
   }
+
+  async disconnect() {
+    const a = this.adapter(this.state.adapterId);
+    await a?.disconnect().catch(() => {});
+    this.linkToken = null;
+    this.set({ ...initial, primaryAdapterId: this.state.primaryAdapterId });
+  }
+}
+
+/** Human-readable connect/sign failure. Never leaks internals; wallets and Privy throw a variety of shapes. */
+function describe(e: unknown): string {
+  const raw = e instanceof Error ? e.message : typeof e === "string" ? e : (e as { message?: unknown })?.message;
+  const m = typeof raw === "string" ? raw : "";
+  const l = m.toLowerCase();
+  if (l.includes("reject") || l.includes("declined") || l.includes("denied") || l.includes("cancel")) return "Signature declined in your wallet. Nothing was linked.";
+  if (l.includes("exited") || l.includes("closed")) return "Login closed before a wallet was connected.";
+  if (l === "rate_limited" || l.includes("too many")) return "Too many attempts. Wait a minute and try again.";
+  if (l === "bad_signature") return "That signature did not match the wallet. Try again.";
+  if (l === "request_failed" || l.includes("fetch") || l.includes("network")) return "Could not reach the server. Try again.";
+  if (l.includes("timed out") || l.includes("timeout")) return "Timed out waiting for the wallet. Try again.";
+  return m || "Connection failed. Try again.";
 }
 
 async function post<T>(url: string, body: unknown, bearer?: string | null): Promise<T> {

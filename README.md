@@ -79,7 +79,7 @@ npm test             # 102 tests
 npm run typecheck && npm run build
 ```
 
-Node 20+. With no configuration the app runs on an in-memory store and the inference API returns an honest `503`. Copy `.env.example` to `.env.local` to configure a provider, prices or Postgres. Every variable is server-only except `NEXT_PUBLIC_BRAIN_WS_URL`. The full table is in [the environment reference](#environment) below.
+Node 20+. With no configuration the app runs on an in-memory store and the inference API returns an honest `503`. Copy `.env.example` to `.env.local` to configure a provider, prices or Postgres. Every variable is server-only except `NEXT_PUBLIC_BRAIN_WS_URL` and `NEXT_PUBLIC_PRIVY_APP_ID`. The full table is in [the environment reference](#environment) below.
 
 <img src=".github/assets/divider.svg" width="100%" alt="">
 
@@ -230,6 +230,7 @@ heartbeat 5 s    ─────────────────────
 | `BRAIN_EPOCH_MINUTES` | Epoch length (default 1440). Closed epochs with work settle automatically on the next dashboard read or cron run |
 | `BRAIN_POOL_PACE_DAYS` | Spread the contributors' share of the treasury over this many days per epoch (default 1) |
 | `NEXT_PUBLIC_BRAIN_WS_URL` | External WebSocket event bus (default: built-in SSE) |
+| `NEXT_PUBLIC_PRIVY_APP_ID` | Privy app ID (public). Wallet login runs through Privy (Solana browser wallets or email → embedded Solana wallet); ownership is still proven by a signed server nonce. Unset = built-in wallet picker |
 
 Exercise the inference path without a real provider:
 

@@ -270,16 +270,18 @@ function NodeDashboard({ s, onWallet }: { s: ContributorState; onWallet: () => v
             </>
           ) : (
             <>
-              <Button tone="dark" variant="secondary" className="mt-2 h-9 px-4 text-[13px]" onClick={onWallet}>
-                Connect wallet
+              <Button tone="dark" variant="secondary" className="mt-2 h-9 px-4 text-[13px]" onClick={onWallet} disabled={w.status === "connecting" || w.status === "signing"}>
+                {w.status === "signing" ? "Sign in wallet…" : w.status === "connecting" ? "Connecting…" : w.status === "error" ? "Try again" : "Connect wallet"}
               </Button>
-              <div className="mt-2 font-mono text-[11px] text-chalk/40">Optional. Links accrued earnings to you and to your BRAIN account.</div>
+              <div className={cx("mt-2 font-mono text-[11px]", w.status === "error" ? "text-signal" : "text-chalk/40")}>
+                {w.status === "error" && w.error ? w.error : "Links accrued earnings to you and to your BRAIN account."}
+              </div>
             </>
           )}
         </div>
       </div>
       <div className="border-t border-chalk/[0.07] bg-warn/[0.06] px-5 py-3 font-mono text-[11px] leading-relaxed text-warn md:px-6">
-        PAYOUTS ARE NOT ENABLED. Earnings accrue as ledger lines and become claimable only when payouts go live. No return is promised.
+        Rewards settle hourly from claimed creator fees to wallets linked to verified work. Zero verified compute earns zero. No return is promised.
       </div>
 
       <div className="px-5 pb-2 pt-5 md:px-6">

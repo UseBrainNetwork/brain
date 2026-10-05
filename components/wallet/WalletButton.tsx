@@ -14,6 +14,7 @@ export function WalletButton({ dark, className }: { dark?: boolean; className?: 
   const [menu, setMenu] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const connected = w.status === "connected" && w.address;
+  const busy = w.status === "connecting" || w.status === "signing";
   useEffect(() => {
     if (!menu) return;
     const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setMenu(false);
@@ -21,10 +22,18 @@ export function WalletButton({ dark, className }: { dark?: boolean; className?: 
     return () => document.removeEventListener("mousedown", close);
   }, [menu]);
 
+  const start = () => {
+    if (connected) return setMenu((m) => !m);
+    if (busy) return;
+    if (walletStore.usesPrivy) void walletStore.connectPrimary();
+    else setOpen(true);
+  };
+
   return (
     <div ref={ref} className="relative inline-flex">
       <button
-        onClick={() => (connected ? setMenu((m) => !m) : setOpen(true))}
+        onClick={start}
+        disabled={busy}
         aria-expanded={connected ? menu : undefined}
         className={cx(
           "group inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 text-[13.5px] font-semibold transition-colors duration-300",
@@ -37,8 +46,12 @@ export function WalletButton({ dark, className }: { dark?: boolean; className?: 
             <span className={cx("size-[6px]", w.demo ? "bg-fog" : "bg-ok")} />
             <span className="font-mono text-[12.5px]">{shortAddr(w.address!)}</span>
           </>
-        ) : w.status === "connecting" || w.status === "signing" ? (
+        ) : busy ? (
           <span>{w.status === "signing" ? "Sign in wallet…" : "Connecting…"}</span>
+        ) : w.status === "error" ? (
+          <>
+            Try again <span className="transition-transform group-hover:translate-x-0.5">↻</span>
+          </>
         ) : (
           <>
             Connect wallet <span className="transition-transform group-hover:translate-x-0.5">→</span>
@@ -61,6 +74,21 @@ export function WalletButton({ dark, className }: { dark?: boolean; className?: 
           </button>
         </div>
       )}
+      {w.status === "error" && w.error && !open && (
+        <div
+          role="alert"
+          className={cx(
+            "absolute right-0 top-full z-50 mt-2 w-[280px] rounded-2xl p-3 text-left text-[12.5px] leading-snug shadow-[0_20px_60px_rgba(0,0,0,0.45)]",
+            dark ? "border border-chalk/10 bg-ink-2 text-chalk/80" : "border border-ink/10 bg-paper text-ink/80",
+          )}
+        >
+          <div className="label mb-1 text-signal">Wallet not connected</div>
+          {w.error}
+          <button onClick={() => walletStore.dismissError()} className="mt-2 block font-mono text-[11px] uppercase tracking-[0.08em] opacity-50 hover:opacity-100">
+            dismiss
+          </button>
+        </div>
+      )}
       {open && <WalletModal onClose={() => setOpen(false)} />}
     </div>
   );
@@ -69,16 +97,25 @@ export function WalletButton({ dark, className }: { dark?: boolean; className?: 
 export function WalletModal({ onClose }: { onClose: () => void }) {
   const sim = useSim();
   const w = useWallet();
+  const privy = walletStore.usesPrivy;
   const [installed, setInstalled] = useState<Record<string, boolean>>({});
   useEffect(() => {
+    if (privy) return;
     setInstalled(Object.fromEntries(walletAdapters.map((a) => [a.id, a.installed()])));
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
-  }, [onClose]);
+  }, [onClose, privy]);
   useEffect(() => {
     if (w.status === "connected") onClose();
   }, [w.status, onClose]);
+  // With Privy configured, Privy's own modal is the picker: hand off and close ours.
+  useEffect(() => {
+    if (!privy) return;
+    if (w.status === "disconnected" || w.status === "error") void walletStore.connectPrimary();
+    onClose();
+  }, [privy, w.status, onClose]);
+  if (privy) return null;
 
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center bg-ink/50 p-4 backdrop-blur-[2px]" onClick={onClose}>

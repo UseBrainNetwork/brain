@@ -8,7 +8,8 @@
 export interface WalletAdapter {
   id: string;
   name: string;
-  kind: "injected" | "demo";
+  /** `privy` adapters are registered at runtime by the Privy bridge and own the login UI. */
+  kind: "injected" | "demo" | "privy";
   installed(): boolean;
   installUrl?: string;
   connect(): Promise<string>;
