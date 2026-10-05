@@ -186,6 +186,8 @@ export interface PayoutStatus {
   cluster: string;
   /** Public address claims are paid from, when configured. The key never leaves the server. */
   wallet?: string;
+  /** Epoch ms when claims open, if a scheduled opening is configured and still in the future. */
+  opensAt?: number;
 }
 
 export interface CurrentEpochProgress {

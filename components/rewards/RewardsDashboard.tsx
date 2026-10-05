@@ -74,7 +74,9 @@ export function RewardsDashboard() {
 
   const canSign = w.verified;
   const blocked = !data.payouts.enabled
-    ? data.payouts.reason
+    ? data.payouts.opensAt && data.payouts.opensAt > now
+      ? `Payouts open ${fmtCountdown(data.payouts.opensAt - now)}. Verified work accrues now; claim then.`
+      : data.payouts.reason
     : !canSign
       ? "Connect a wallet that can sign (Phantom, Solflare or Backpack) to claim."
       : data.claimableLamports < data.payouts.minLamports
@@ -326,4 +328,13 @@ function Skeleton({ error }: { error: boolean }) {
       ))}
     </div>
   );
+}
+
+function fmtCountdown(ms: number): string {
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  const sec = Math.floor((ms % 60_000) / 1000);
+  if (h > 0) return `in ${h}h ${m}m`;
+  if (m > 0) return `in ${m}m ${sec}s`;
+  return `in ${sec}s`;
 }

@@ -33,7 +33,7 @@ export interface ProtocolWalletView {
   rpc: "configured" | "public" | "unavailable";
   token: TokenStatus;
   /** Hot wallet claims are paid from. null when payouts are not configured. */
-  payout: { address: string; balanceSol: number | null; enabled: boolean } | null;
+  payout: { address: string; balanceSol: number | null; enabled: boolean; opensAt?: number } | null;
   /** Unclaimed creator fees sitting in pump.fun's vault PDAs for our wallet. On-chain; null = unreadable. */
   creatorVault: { bonding: { address: string; sol: number | null }; amm: { address: string; sol: number | null }; totalSol: number | null };
 }
@@ -75,7 +75,7 @@ export async function getProtocolWallet(limit = 8): Promise<ProtocolWalletView> 
   const address = protocolWallet.address;
   const tokenStatus = await getTokenStatus();
   const ps = payoutStatus();
-  const payout = ps.wallet ? { address: ps.wallet, balanceSol: null as number | null, enabled: ps.enabled } : null;
+  const payout = ps.wallet ? { address: ps.wallet, balanceSol: null as number | null, enabled: ps.enabled, ...(ps.opensAt ? { opensAt: ps.opensAt } : {}) } : null;
   const vaults = creatorVaults(address);
   const creatorVault: ProtocolWalletView["creatorVault"] = { bonding: { address: vaults.bonding, sol: null }, amm: { address: vaults.amm, sol: null }, totalSol: null };
   const base: ProtocolWalletView = { address, cluster: protocolWallet.cluster, source: "REAL", balanceSol: null, recent: [], fetchedAt: Date.now(), rpc: "unavailable", token: tokenStatus, payout, creatorVault };

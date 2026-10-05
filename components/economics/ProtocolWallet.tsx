@@ -84,7 +84,7 @@ export function ProtocolWalletCard({ className, tone = "dark" }: { className?: s
               {shortAddr(v.payout.address)}
             </a>
             <CopyButton text={v.payout.address} dark={dark} />
-            <span className={cx("rounded-sm px-1 text-[9.5px] uppercase tracking-[0.08em] ring-1", v.payout.enabled ? "text-ok ring-ok/40" : "text-warn ring-warn/40")}>{v.payout.enabled ? "claims open" : "claims off"}</span>
+            <span className={cx("rounded-sm px-1 text-[9.5px] uppercase tracking-[0.08em] ring-1", v.payout.enabled ? "text-ok ring-ok/40" : "text-warn ring-warn/40")}>{v.payout.enabled ? "claims open" : v.payout.opensAt ? <Countdown at={v.payout.opensAt} prefix="claims open in" /> : "claims off"}</span>
           </span>
           <span>{v.payout.balanceSol == null ? <span className={muted}>UNKNOWN</span> : sol(v.payout.balanceSol)}</span>
         </div>
@@ -224,4 +224,18 @@ export function ContractLine({ className }: { className?: string }) {
       )}
     </div>
   );
+}
+
+/** Live countdown; re-renders every 30 s. Falls back to the wall-clock time once under a minute. */
+export function Countdown({ at, prefix }: { at: number; prefix?: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const ms = at - now;
+  if (ms <= 0) return <>{prefix ? "claims open" : "now"}</>;
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.ceil((ms % 3_600_000) / 60_000);
+  return <>{prefix ? `${prefix} ` : ""}{h > 0 ? `${h}h ` : ""}{m}m</>;
 }

@@ -30,7 +30,25 @@ export function payoutStatus(): PayoutStatus {
   if (!process.env.SOLANA_RPC_URL || !process.env.BRAIN_PAYOUT_SECRET_KEY) return { ...base, enabled: false, reason: "Payout wallet is not configured." };
   const sender = getSender();
   if (!sender) return { ...base, enabled: false, reason: "Payout wallet key is invalid." };
+  const opensAt = scheduledOpen();
+  if (opensAt != null && opensAt > Date.now()) return { ...base, enabled: false, wallet: sender.address, opensAt, reason: `Payouts open ${countdown(opensAt)}.` };
   return { ...base, enabled: true, wallet: sender.address };
+}
+
+/** BRAIN_PAYOUTS_OPEN_AT: ISO-8601 or epoch ms. Claims are refused before it; no redeploy needed after. */
+function scheduledOpen(): number | null {
+  const raw = process.env.BRAIN_PAYOUTS_OPEN_AT;
+  if (!raw) return null;
+  const n = /^\d+$/.test(raw) ? Number(raw) : Date.parse(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function countdown(at: number): string {
+  const ms = at - Date.now();
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.ceil((ms % 3_600_000) / 60_000);
+  if (h <= 0 && m <= 1) return "in under a minute";
+  return `in ${h > 0 ? `${h}h ` : ""}${m}m`;
 }
 
 function getSender(): PayoutSender | null {
