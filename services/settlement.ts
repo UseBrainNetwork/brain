@@ -59,15 +59,27 @@ function paceDays(): number {
  * Throttled per process so a busy dashboard does not hammer the database.
  */
 export async function settleDueEpochs(now = Date.now(), maxEpochs = 24): Promise<RewardEpoch[]> {
-  const g = globalThis as typeof globalThis & { __brainSettleAt?: number };
-  if (now - (g.__brainSettleAt ?? 0) < 30_000) return [];
+  const g = globalThis as typeof globalThis & { __brainSettleAt?: number; __brainSettling?: boolean };
+  if (g.__brainSettling || now - (g.__brainSettleAt ?? 0) < 30_000) return [];
   g.__brainSettleAt = now;
   const store = getStore();
   const len = epochLengthMs();
   const last = epochAt(now - len);
+  // Cheapest possible exit for the common case: the last closed epoch is already settled.
+  if (await store.getEpoch(last.id)) return [];
+  g.__brainSettling = true;
+  try {
+    return await settleDueUnlocked(store, now, len, last.startsAt, maxEpochs);
+  } finally {
+    g.__brainSettling = false;
+  }
+}
+
+async function settleDueUnlocked(store: ReturnType<typeof getStore>, now: number, len: number, lastStart: number, maxEpochs: number): Promise<RewardEpoch[]> {
   const settled: RewardEpoch[] = [];
   // Never auto-write simulated epochs: only settle when there is a real pool to distribute.
   if ((await treasuryPoolLamports(len)) <= 0 && configuredPoolLamports() == null) return [];
+  const last = { startsAt: lastStart };
   // Only epochs after the first verified job need settling; before that there is nothing to pay.
   for (let i = 0, start = last.startsAt; i < maxEpochs && start >= 0; i++, start -= len) {
     if (await store.getEpoch(epochAt(start).id)) break; // everything older is settled already

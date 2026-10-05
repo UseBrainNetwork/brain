@@ -89,7 +89,7 @@ export class PgStore implements NetworkStore {
       let locked = false;
       try {
         await c.query("BEGIN");
-        await c.query("SET LOCAL lock_timeout = '10s'");
+        await c.query("SET LOCAL lock_timeout = '3s'");
         try {
           await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [key]);
           locked = true;

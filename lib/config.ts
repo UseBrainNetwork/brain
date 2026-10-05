@@ -24,9 +24,9 @@ export const networkConfig = {
     maxPlausibleOpsPerMs: 5e9,
   },
   nodes: {
-    heartbeatMs: 4_000,
+    heartbeatMs: 10_000,
     /** A node silent this long is LOST: its pending work units are reassigned. */
-    offlineAfterMs: 12_000,
+    offlineAfterMs: 30_000,
   },
   distributed: {
     /** Work-unit dims per size. Integer matmul, rows hashed per output row. Calibrated for 3–6 s jobs. */
