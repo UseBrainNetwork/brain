@@ -22,24 +22,30 @@ export interface FinalizeInput {
   now?: number;
 }
 
+/**
+ * Per-node verified work in a window, from the store's SQL aggregate (grouped by node, status,
+ * verified). This used to load every job record in the window as full JSON: tens of megabytes per
+ * call once the fleet grew, and it ran once per node poll. Now it is a few hundred small rows.
+ */
 export async function measureNodes(from: number, to: number) {
   const store = getStore();
-  const jobs = await store.listJobsBetween(from, to);
+  const rows = await store.aggregateWork(from, to, 60_000);
   const perNode = new Map<string, { verified: number; ok: number; total: number }>();
-  for (const j of jobs) {
-    if (j.status === "assigned") continue;
-    const row = perNode.get(j.assignedTo) ?? { verified: 0, ok: 0, total: 0 };
-    row.total++;
-    if (j.verified) {
-      row.ok++;
-      row.verified += j.computeUnits;
+  for (const a of rows) {
+    if (a.status === "assigned") continue;
+    const row = perNode.get(a.nodeId) ?? { verified: 0, ok: 0, total: 0 };
+    row.total += a.jobs;
+    if (a.verified) {
+      row.ok += a.jobs;
+      row.verified += a.computeUnits;
     }
-    perNode.set(j.assignedTo, row);
+    perNode.set(a.nodeId, row);
   }
   const inputs: EngineInput[] = [];
   const nodes = new Map<string, StoredNode>();
+  const found = await store.getNodes([...perNode.keys()]);
   for (const [nodeId, r] of perNode) {
-    const n = await store.getNode(nodeId);
+    const n = found.get(nodeId);
     if (!n) continue;
     nodes.set(nodeId, n);
     inputs.push({

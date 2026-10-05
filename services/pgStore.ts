@@ -156,7 +156,7 @@ export class PgStore implements NetworkStore {
       this.q<{ name: string; setting: string }>(`SELECT name, setting FROM pg_settings WHERE name IN ('max_connections', 'server_version', 'shared_buffers', 'work_mem')`),
       this.q<{ state: string | null; wait: string | null; secs: string; xact_secs: string | null; query: string }>(
         `SELECT state, wait_event_type || ':' || wait_event AS wait, extract(epoch FROM now() - query_start)::numeric(10,1)::text AS secs,
-                extract(epoch FROM now() - xact_start)::numeric(10,1)::text AS xact_secs, left(regexp_replace(query, '\s+', ' ', 'g'), 110) AS query
+                extract(epoch FROM now() - xact_start)::numeric(10,1)::text AS xact_secs, left(regexp_replace(query, '\\s+', ' ', 'g'), 110) AS query
            FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND state IS NOT NULL AND state <> 'idle'
           ORDER BY query_start LIMIT 25`,
       ),

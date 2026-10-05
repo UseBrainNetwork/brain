@@ -104,11 +104,30 @@ export interface NodeEconomics {
   source: "REAL";
 }
 
+/** The open epoch's dry-run allocation is network-wide; one computation per instance per 15 s serves every node poll. */
+const DRY_TTL_MS = 15_000;
+const dryCache = globalThis as typeof globalThis & { __brainDry?: { at: number; epochId: string; value: Promise<ReturnType<typeof allocate>> } };
+async function openEpochDryRun(now: number) {
+  const e = epochAt(now);
+  const hit = dryCache.__brainDry;
+  if (hit && hit.epochId === e.id && now - hit.at < DRY_TTL_MS) return hit.value;
+  const value = (async () => {
+    const { measureNodes } = await import("./epochs");
+    const { inputs } = await measureNodes(e.startsAt, now);
+    return allocate(inputs, 1, 1, defaultEngineConfig);
+  })();
+  dryCache.__brainDry = { at: now, epochId: e.id, value };
+  value.catch(() => {
+    if (dryCache.__brainDry?.value === value) dryCache.__brainDry = undefined;
+  });
+  return value;
+}
+
 export async function nodeEconomics(nodeId: string, now = Date.now()): Promise<NodeEconomics | null> {
   const store = getStore();
   const n = await store.getNode(nodeId);
   if (!n) return null;
-  const jobs = (await store.listJobsForNode(nodeId, 500)).filter((j) => j.parentId && j.verified);
+  const jobs = (await store.listJobsForNode(nodeId, 200)).filter((j) => j.parentId && j.verified);
   let customerJobs = 0;
   let subsidizedJobs = 0;
   const seen = new Map<string, boolean>();
@@ -121,14 +140,14 @@ export async function nodeEconomics(nodeId: string, now = Date.now()): Promise<N
     if (seen.get(pid)) customerJobs++;
     else subsidizedJobs++;
   }
-  const earned = (await store.listDocs<AccountingEvent>("accounting", { key: "REAL", limit: 50_000 })).filter((e) => e.type === "COMPUTE_PROVIDER_EARNED" && e.relatedNodeId === nodeId);
-  const epochs = await store.listDocs<RewardEpochV2>("epochv2", { key: "REAL", limit: 200 });
+  const [earnedAll, epochs, dry] = await Promise.all([
+    store.listDocs<AccountingEvent>("accounting", { key: "REAL", limit: 5_000 }),
+    store.listDocs<RewardEpochV2>("epochv2", { key: "REAL", limit: 200 }),
+    openEpochDryRun(now),
+  ]);
+  const earned = earnedAll.filter((e) => e.type === "COMPUTE_PROVIDER_EARNED" && e.relatedNodeId === nodeId);
   const allocs = epochs.flatMap((e) => e.allocations.filter((a) => a.nodeId === nodeId));
-  // Dry-run the open epoch.
   const e = epochAt(now);
-  const { measureNodes } = await import("./epochs");
-  const { inputs } = await measureNodes(e.startsAt, now);
-  const dry = allocate(inputs, 1, 1, defaultEngineConfig);
   const row = dry.rows.find((r) => r.nodeId === nodeId);
   return {
     nodeId,

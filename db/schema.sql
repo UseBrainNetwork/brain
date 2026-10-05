@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS brain_jobs (
 );
 CREATE INDEX IF NOT EXISTS brain_jobs_recent ON brain_jobs (submitted_at DESC);
 CREATE INDEX IF NOT EXISTS brain_jobs_pending ON brain_jobs (assigned_to) WHERE status = 'assigned';
+-- Per-node history (node pages, reputation): without this every lookup walked the recent index.
+CREATE INDEX IF NOT EXISTS brain_jobs_by_node ON brain_jobs (assigned_to, submitted_at DESC);
 
 CREATE TABLE IF NOT EXISTS brain_challenges (
   id         TEXT PRIMARY KEY,
@@ -81,3 +83,5 @@ CREATE TABLE IF NOT EXISTS brain_documents (
 );
 CREATE INDEX IF NOT EXISTS brain_documents_recent ON brain_documents (kind, at DESC);
 CREATE INDEX IF NOT EXISTS brain_documents_key ON brain_documents (kind, key);
+-- Keyed listings are always "newest first with a limit"; let the index deliver that order.
+CREATE INDEX IF NOT EXISTS brain_documents_key_recent ON brain_documents (kind, key, at DESC);
