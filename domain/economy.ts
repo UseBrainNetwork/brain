@@ -68,6 +68,8 @@ export interface ComputeReceipt {
    * verification workload sized by that request; they did not produce the request's answer.
    */
   attachedTo?: { orderId: string; model: string };
+  /** Operator-scheduled network workload: no customer. */
+  scheduled?: { by: "operator"; reason: string };
   /** Final outcome. A FAILED job also gets a receipt so the failure is auditable. */
   status: "VERIFIED" | "PARTIAL" | "FAILED";
 }

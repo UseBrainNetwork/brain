@@ -45,6 +45,8 @@ export interface CreateJobInput {
   attachedTo?: DistributedJob["attachedTo"];
   /** Upper bound on nodes used (attached jobs spread thin on purpose). */
   maxNodes?: number;
+  /** Operator-scheduled baseline work. Runs alongside other jobs like attached compute. */
+  scheduled?: DistributedJob["scheduled"];
 }
 
 const live = (n: StoredNode) => n.status === "idle" || n.status === "computing";
@@ -63,8 +65,10 @@ const spotConfidence = (rows: number) => 1 - Math.pow(0.75, rows);
  */
 const ATTACHED_UNIT_DEADLINE_MS = 90_000;
 const ATTACHED_JOB_TTL_MS = 10 * 60_000;
-export const unitDeadlineMs = (job: DistributedJob) => (job.attachedTo ? ATTACHED_UNIT_DEADLINE_MS : cfg.unitDeadlineMs);
-export const jobTtlMs = (job: DistributedJob) => (job.attachedTo ? ATTACHED_JOB_TTL_MS : cfg.jobTtlMs);
+/** Background work (attached, scheduled) is not interactive: it gets patient deadlines so slow pollers still count. */
+const relaxed = (job: DistributedJob) => Boolean(job.attachedTo || job.scheduled);
+export const unitDeadlineMs = (job: DistributedJob) => (relaxed(job) ? ATTACHED_UNIT_DEADLINE_MS : cfg.unitDeadlineMs);
+export const jobTtlMs = (job: DistributedJob) => (relaxed(job) ? ATTACHED_JOB_TTL_MS : cfg.jobTtlMs);
 
 function makeUnitJob(parent: DistributedJob, unit: WorkUnit, spec: WorkloadSpec, now: number): StoredJob {
   const rows = spec.kernel === "matmul_u32" ? spec.m : 0;
@@ -118,11 +122,11 @@ function slotOpen(job: DistributedJob, index: number, replica: number) {
   return job.units.some((u) => u.index === index && u.replica === replica && (u.status === "assigned" || u.status === "computing" || u.status === "returned"));
 }
 
-/** The in-flight interactive (demo / compute-order) job, if any. Attached jobs are excluded: they run concurrently. */
+/** The in-flight interactive (demo / compute-order) job, if any. Attached and scheduled jobs are excluded: they run concurrently. */
 export async function activeJob(): Promise<DistributedJob | null> {
   const now = Date.now();
   for (const j of await getStore().listDistributedJobs(20)) {
-    if (j.attachedTo) continue;
+    if (j.attachedTo || j.scheduled) continue;
     if (j.status !== "completed" && j.status !== "failed" && now - j.createdAt < jobTtlMs(j)) return j;
   }
   return null;
@@ -134,7 +138,7 @@ export function createJob(input: CreateJobInput = {}): Promise<DistributedJob> {
 
 async function createJobUnlocked(input: CreateJobInput): Promise<DistributedJob> {
   const store = getStore();
-  if (!input.attachedTo && (await activeJob())) throw new NodeError("job_in_progress", 409);
+  if (!input.attachedTo && !input.scheduled && (await activeJob())) throw new NodeError("job_in_progress", 409);
   let nodes = (await store.listNodes()).filter(live).sort((a, b) => b.computeScore - a.computeScore);
   if (nodes.length === 0) throw new NodeError("no_real_nodes", 409);
   if (input.maxNodes && input.maxNodes > 0 && nodes.length > input.maxNodes) {
@@ -166,7 +170,8 @@ async function createJobUnlocked(input: CreateJobInput): Promise<DistributedJob>
     orderId: input.orderId,
     decisionId: input.decisionId,
     attachedTo: input.attachedTo,
-    lifecycle: [{ stage: "queued", at: now, detail: `${unitCount} work units · ${nodes.length} real nodes${input.attachedTo ? ` · attached to ${input.attachedTo.orderId}` : ""}` }],
+    scheduled: input.scheduled,
+    lifecycle: [{ stage: "queued", at: now, detail: `${unitCount} work units · ${nodes.length} real nodes${input.attachedTo ? ` · attached to ${input.attachedTo.orderId}` : ""}${input.scheduled ? ` · scheduled by operator (${input.scheduled.reason})` : ""}` }],
   };
   await store.saveDistributedJob(job);
   eventBus.publish({ type: "djob.created", at: now, job: structuredClone(job) });

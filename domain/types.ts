@@ -306,6 +306,11 @@ export interface DistributedJob {
    * that request and dispatched to the browser network after it completed. It did NOT produce the answer.
    */
   attachedTo?: { orderId: string; model: string; inputUnits: number; outputUnits: number };
+  /**
+   * Set when the operator scheduled this job to keep the fleet exercised. There is no customer and no
+   * customer charge; nodes are paid for the verified units from the hourly pool like any other work.
+   */
+  scheduled?: { by: "operator"; reason: string };
 }
 
 export type NetworkEvent =

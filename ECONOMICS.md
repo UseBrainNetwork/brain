@@ -73,6 +73,15 @@ Every completed chat request (`/chat`, `/v1/chat/completions`) dispatches one di
 - Nodes are paid for these units the same way as for every other verified unit: they count in `measureWork` for the hourly pool. Zero verified → zero.
 - Attached jobs run concurrently with each other and with the single interactive (demo / routed) job; `activeJob()` ignores them. They are skipped, not faked, when no node is live. `BRAIN_ATTACHED_COMPUTE=off` disables them.
 
+## Scheduled work (`services/scheduledWork.ts`)
+
+Customer traffic alone leaves most of the fleet idle between requests. The operator schedules fleet-wide distributed jobs to fill that time: whenever no scheduled job is in flight, the hourly cap (`BRAIN_SCHEDULED_WORK_PER_HOUR`, default 40) is not reached and the gap since the last one (`BRAIN_SCHEDULED_WORK_GAP_MS`, default 45 s) has passed, a node poll that found nothing dispatches one job across every live node. Sizes rotate small / medium / large.
+
+- Labeled `scheduled: { by: "operator", reason }` on `DistributedJob` and `ComputeReceipt`; the receipt page says so in plain words.
+- No customer. `customerCost: null`; no `CUSTOMER_PAYMENT`, no `PROTOCOL_REVENUE` from it.
+- Nodes are paid for verified units through the hourly pool like every other verified unit. Zero verified → zero.
+- Runs concurrently with attached and interactive jobs; `activeJob()` ignores it. Skipped, never faked, when no node is live or the store is slow. `BRAIN_SCHEDULED_WORK=off` disables it.
+
 ## Contributor rewards (engine v2, `rewards/engine.ts`)
 
 For each node in an epoch:

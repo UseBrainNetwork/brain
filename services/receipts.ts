@@ -43,8 +43,10 @@ export async function issueReceipt(job: DistributedJob): Promise<ComputeReceipt>
   // Attached compute is paid for by the request it was attached to (that request's receipt carries the
   // customer charge). No second customer charge is recorded; nodes are paid for these units through the
   // hourly verified-compute pool like all other verified work.
+  // Scheduled work has no customer either: nothing is charged or claimed as revenue.
   const attached = Boolean(job.attachedTo);
-  const customerCost = job.status === "completed" && !attached ? priceForComputeUnits(t.computeUnits) : null;
+  const scheduled = Boolean(job.scheduled);
+  const customerCost = job.status === "completed" && !attached && !scheduled ? priceForComputeUnits(t.computeUnits) : null;
   const split = defaultRevenueSplit.inferenceRevenue;
 
   const receipt: ComputeReceipt = {
@@ -73,6 +75,7 @@ export async function issueReceipt(job: DistributedJob): Promise<ComputeReceipt>
     route: { target: "BROWSER_NETWORK", providerId: "brain-browser-pool", decisionId: job.decisionId },
     orderId: job.orderId,
     attachedTo: job.attachedTo ? { orderId: job.attachedTo.orderId, model: job.attachedTo.model } : undefined,
+    scheduled: job.scheduled,
     status: job.status === "completed" ? (t.failed > 0 || t.reassigned > 0 ? "PARTIAL" : "VERIFIED") : "FAILED",
   };
   await store.putDoc("receipt", receipt.receiptId, receipt, { at: receipt.completedAt, key: receipt.source });
