@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Button, Container, Section } from "@/components/ui";
-import { creditUsd, paymentsConnected, visiblePlans } from "@/lib/plans";
+import { comingSoon, creditUsd, paymentsConnected, plans } from "@/lib/plans";
+import { NotifyButton } from "@/components/pricing/NotifyButton";
 import { earn } from "@/lib/site";
 import { snapshot } from "@/services/accounting";
 import { computeUnitListPriceUsd, tokenListPricePer1MUsd } from "@/lib/pricing";
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 const fmtUsd = (n: number) => (n === 0 ? "$0" : `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`);
 
 export default async function PricingPage() {
-  const ps = visiblePlans();
+  const ps = plans();
   const cu = creditUsd();
   const snap = await snapshot("REAL");
   const avgReq = snap.avgCostPerJob;
@@ -35,59 +36,61 @@ export default async function PricingPage() {
           </p>
         </div>
 
-        <div className={cx("mt-10 grid gap-px overflow-hidden rounded-[22px] bg-ink/10", ps.length >= 3 ? "md:grid-cols-3" : "md:grid-cols-2")}>
+        <div className="mt-10 grid gap-px overflow-hidden rounded-[22px] bg-ink/10 md:grid-cols-2 xl:grid-cols-4">
           {ps.map((p) => {
-            const live = p.id === "FREE" || payments;
+            const soon = comingSoon(p);
+            const dark = p.id === "MAX";
             return (
-              <div key={p.id} className={cx("flex flex-col bg-paper p-7", p.id === "PRO" && "md:bg-white")}>
+              <div key={p.id} className={cx("flex flex-col p-7", dark ? "bg-ink text-chalk" : p.id === "CODE" ? "bg-white" : "bg-paper")}>
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.14em]">{p.name}</span>
-                  {live && <span className="rounded-full bg-ok/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-ink">LIVE</span>}
+                  {soon ? (
+                    <span className={cx("rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold", dark ? "bg-chalk/15 text-chalk" : "bg-ink/10 text-ink")}>COMING SOON</span>
+                  ) : (
+                    <span className="rounded-full bg-ok/20 px-2 py-0.5 font-mono text-[10px] font-semibold text-ink">LIVE</span>
+                  )}
                 </div>
                 <div className="mt-6 flex items-baseline gap-2">
                   <span className="num text-[52px] leading-none">{p.priceUsd == null ? "—" : fmtUsd(p.priceUsd)}</span>
-                  <span className="font-mono text-[12px] text-fog">/ month</span>
+                  <span className={cx("font-mono text-[12px]", dark ? "text-chalk/50" : "text-fog")}>/ month</span>
                 </div>
-                <p className="mt-4 min-h-[48px] text-[14.5px] leading-relaxed text-ink/65">{p.blurb}</p>
-                <div className="mt-6 space-y-0 font-mono text-[12px]">
-                  <Row k="Credits / month" v={p.includedCredits.toLocaleString("en-US")} />
-                  <Row k="What that buys" v={perMonth(p.includedCredits)} />
-                  <Row k="Routing modes" v={p.modes.filter((m) => m !== "BROWSER_ONLY").join(" · ")} />
-                  <Row k="Private routing" v={p.privateRouting ? "Yes" : "No"} />
-                  <Row k="Rate limit" v={`${p.rateLimit} / min`} />
-                  <Row k="Receipts" v="Every answer" />
+                <div className="mt-3 text-[17px] font-semibold leading-snug">{p.tagline}</div>
+                <p className={cx("mt-2 min-h-[66px] text-[14px] leading-relaxed", dark ? "text-chalk/60" : "text-ink/60")}>{p.blurb}</p>
+                <ul className={cx("mt-5 space-y-2 border-t pt-5 text-[13.5px] leading-snug", dark ? "border-chalk/15" : "border-ink/10")}>
+                  {p.highlights.map((h) => (
+                    <li key={h} className="flex gap-2.5">
+                      <span className={cx("mt-[7px] size-[6px] shrink-0 rounded-full", dark ? "bg-chalk/70" : soon ? "bg-ink/50" : "bg-ok")} />
+                      <span className={dark ? "text-chalk/85" : "text-ink/80"}>{h}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className={cx("mt-5 font-mono text-[11px]", dark ? "text-chalk/45" : "text-fog")}>
+                  {perMonth(p.includedCredits)}
+                  <br />
+                  {p.rateLimit} requests / min · private routing {p.privateRouting ? "yes" : "no"}
                 </div>
-                <div className="mt-7">
-                  {p.id === "FREE" ? (
+                <div className="mt-auto pt-7">
+                  {!soon ? (
                     <Button href="/chat" arrow className="w-full">
                       Use BRAIN free
                     </Button>
-                  ) : (
+                  ) : payments ? (
                     <Button disabled className="w-full" variant="secondary">
-                      {payments ? `Choose ${p.name}` : "Payments not connected"}
+                      Choose {p.name}
                     </Button>
+                  ) : (
+                    <NotifyButton plan={p.id} dark={dark} />
                   )}
                 </div>
               </div>
             );
           })}
-          {!payments && (
-            <div className="flex flex-col justify-between bg-ink p-7 text-chalk">
-              <div>
-                <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-chalk/70">Paid plans</span>
-                <h3 className="display-md mt-6 text-[30px] leading-[1.05] md:text-[36px]">More credits, every routing mode, private routing.</h3>
-                <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/60">
-                  Paid plans open when billing does. Until then the Free plan is the whole product, and your own machines can pay for it: verified compute earns credits now, and USDC or SOL when payouts open.
-                </p>
-              </div>
-              <div className="mt-8 flex flex-wrap gap-3">
-                <Button href="/earn" tone="dark" variant="secondary" arrow>
-                  {earn.line}
-                </Button>
-              </div>
-            </div>
-          )}
         </div>
+        {!payments && (
+          <p className="mt-4 font-mono text-[11.5px] leading-relaxed text-ink/50">
+            Coming-soon plans show their intended price and what they will include. Nothing can be purchased yet and no one is charged. Model names are not listed because BRAIN routes by capability and the set changes; the receipt on every answer names the exact model that ran.
+          </p>
+        )}
 
         <div className="mt-16 grid gap-10 lg:grid-cols-2">
           <div>
