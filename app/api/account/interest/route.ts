@@ -20,10 +20,23 @@ export const POST = nodeRoute(async (req) => {
   return res;
 }, 20);
 
+/** Optional contact so the "tell me" promise can be kept. One per account, stored as `${accountId}:email`. */
+export const PATCH = nodeRoute(async (req) => {
+  const { account, setCookie } = await ensureAccount(req);
+  const { email } = await body<{ email?: string }>(req);
+  const v = typeof email === "string" ? email.trim().toLowerCase() : "";
+  if (!v || v.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return json({ error: { code: "bad_request", message: "invalid email" } }, 400);
+  await getStore().putDoc("interest", `${account.accountId}:email`, { accountId: account.accountId, email: v, at: Date.now() }, { at: Date.now(), key: "email" });
+  const res = json({ ok: true });
+  if (setCookie) res.headers.set("set-cookie", setCookie);
+  return res;
+}, 10);
+
 export const GET = nodeRoute(async (req) => {
   const { account, setCookie } = await ensureAccount(req);
-  const all = await getStore().listDocs<{ accountId: string; plan: PlanId }>("interest", { limit: 5000 });
-  const res = json({ plans: all.filter((d) => d.accountId === account.accountId).map((d) => d.plan) });
+  const all = await getStore().listDocs<{ accountId: string; plan?: PlanId; email?: string }>("interest", { limit: 5000 });
+  const mine = all.filter((d) => d.accountId === account.accountId);
+  const res = json({ plans: mine.filter((d) => d.plan).map((d) => d.plan), email: mine.find((d) => d.email)?.email ?? null });
   if (setCookie) res.headers.set("set-cookie", setCookie);
   res.headers.set("cache-control", "no-store");
   return res;

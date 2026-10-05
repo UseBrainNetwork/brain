@@ -79,7 +79,7 @@ export default async function PricingPage() {
                       Choose {p.name}
                     </Button>
                   ) : (
-                    <NotifyButton plan={p.id} dark={dark} />
+                    <NotifyButton plan={p.id} planName={p.name} dark={dark} />
                   )}
                 </div>
               </div>
