@@ -84,6 +84,7 @@ export class PgStore implements NetworkStore {
          WHERE l.locktype = 'advisory' AND a.pid <> pg_backend_pid() AND a.state_change < now() - interval '60 seconds'`,
       );
     } catch (e) {
+      this.migrationError = (e as Error).message;
       console.error("[pgStore] schema migration failed:", (e as Error).message);
     }
   }
@@ -132,6 +133,7 @@ export class PgStore implements NetworkStore {
     return this.portNum;
   }
   private portNum: number | null = null;
+  private migrationError: string | null = null;
 
   /**
    * Aggregate health facts for operators and the public status page. Contains no row data, no
@@ -176,9 +178,19 @@ export class PgStore implements NetworkStore {
     } catch {
       statements = null; // extension not enabled
     }
+    let schema: { applied: string | null; expected: string | null } = { applied: null, expected: null };
+    try {
+      const sql = readFileSync(path.join(process.cwd(), "db", "schema.sql"), "utf8");
+      const r = await this.q<{ v: string }>(`SELECT data->>'version' AS v FROM brain_documents WHERE kind = 'meta' AND id = 'schema' LIMIT 1`);
+      schema = { applied: r.rows[0]?.v ?? null, expected: schemaVersion(sql) };
+    } catch {
+      /* schema file not shipped */
+    }
     return {
       pingMs,
       port: this.port(),
+      schema,
+      migrationError: this.migrationError,
       tables: tables.rows.map((x) => ({ table: x.relname, liveRows: Number(x.live), deadRows: Number(x.dead), mb: Math.round(Number(x.bytes) / 1048576), lastAutovacuum: x.last_autovacuum, lastAutoanalyze: x.last_autoanalyze })),
       connections: Object.fromEntries(conns.rows.map((x) => [x.state ?? "other", Number(x.n)])),
       slowActive: { count: Number(slow.rows[0]?.n ?? 0), oldestSeconds: slow.rows[0]?.oldest_s == null ? null : Number(slow.rows[0].oldest_s) },
