@@ -13,8 +13,9 @@ import { WalletModal } from "@/components/wallet/WalletButton";
 import { contributor, useContributor, type ContributorState } from "@/network/client/contributor";
 import { useWallet, walletStore } from "@/lib/wallet/store";
 import { deviceLabel } from "@/services/mock/mockData";
-import { cx, fmtDuration, fmtInt, fmtPct, fmtUsd, shortAddr } from "@/lib/format";
+import { cx, fmtDuration, fmtInt, fmtPct, fmtSol, fmtUsd, shortAddr } from "@/lib/format";
 import type { NodeEconomics } from "@/services/nodeProfile";
+import type { RewardsSummary } from "@/domain/types";
 import { BenchResult, BenchViz, DeviceReport, JobRow, MomentTicker, StepShell } from "./parts";
 
 export function ContributeFlow() {
@@ -203,12 +204,30 @@ function NodeDashboard({ s, onWallet }: { s: ContributorState; onWallet: () => v
         .then((d) => !stop && d?.economics && setEco(d.economics))
         .catch(() => {});
     void load();
-    const t = setInterval(load, 10_000);
+    const t = setInterval(load, 30_000);
     return () => {
       stop = true;
       clearInterval(t);
     };
-  }, [nodeId, s.jobsCompleted]);
+  }, [nodeId]);
+  // The node's real position in hourly settlement: projected share of the open epoch + settled, claimable SOL.
+  const linked = w.status === "connected" && w.verified ? w.address : null;
+  const [rw, setRw] = useState<RewardsSummary | null>(null);
+  useEffect(() => {
+    if (!linked) return setRw(null);
+    let stop = false;
+    const load = () =>
+      fetch(`/api/rewards/summary?address=${encodeURIComponent(linked)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => !stop && d?.current && setRw(d))
+        .catch(() => {});
+    void load();
+    const t = setInterval(load, 30_000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, [linked]);
   const status = s.phase === "joining" ? "JOINING" : s.current?.status === "computing" ? "COMPUTING" : s.current?.status === "verifying" ? "VERIFYING" : "ONLINE";
 
   const cells: [string, string, "live" | "estimated" | "simulated" | null][] = [
@@ -249,14 +268,52 @@ function NodeDashboard({ s, onWallet }: { s: ContributorState; onWallet: () => v
         ))}
       </div>
 
-      <div className="grid gap-px bg-chalk/[0.07] sm:grid-cols-[1.2fr_1fr]">
+      {!linked && (
+        <div className="border-t border-warn/30 bg-warn/[0.1] px-5 py-4 md:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="label text-warn">Not linked · this node is earning nothing</div>
+              <div className="mt-1 max-w-[520px] text-[13.5px] leading-snug text-chalk/80">
+                Rewards settle every hour to wallets linked to verified work. Your {fmtInt(s.jobsCompleted)} verified jobs count toward reputation, but no SOL is allocated to this node until a wallet is linked.
+              </div>
+              {w.status === "error" && w.error && <div className="mt-1.5 font-mono text-[11px] text-signal">{w.error}</div>}
+            </div>
+            <Button tone="dark" className="h-10 px-5 text-[14px]" onClick={onWallet} disabled={w.status === "connecting" || w.status === "signing"}>
+              {w.status === "signing" ? "Sign in wallet…" : w.status === "connecting" ? "Connecting…" : w.status === "error" ? "Try again" : "Link wallet to get paid"}
+            </Button>
+          </div>
+        </div>
+      )}
+      <div className="grid gap-px bg-chalk/[0.07] sm:grid-cols-3">
         <div className="bg-ink-2 px-5 py-4 md:px-6">
           <div className="label flex items-center gap-1.5 text-chalk/45">
-            Accrued earnings <Prov p="live" />
+            This hour <Prov p="estimated" />
           </div>
-          <div className={cx("num mt-1.5 text-[24px]", accrued != null ? "text-ok" : "text-chalk/60")}>{accrued != null ? fmtUsd(accrued) : "$0"}</div>
+          <div className={cx("num mt-1.5 text-[22px]", linked && rw ? "text-chalk" : "text-chalk/50")}>{linked ? (rw ? `~${fmtSol(rw.current.projectedLamports)}` : "…") : "0 SOL"}</div>
           <div className="mt-1 font-mono text-[11px] leading-relaxed text-chalk/40">
-            {accrued != null ? "Owed at list price for customer-funded verified work. Usable as credits now; USDC or SOL when payouts open." : "No customer-funded jobs yet. Subsidized jobs build reputation, not money."}
+            {linked
+              ? rw
+                ? `${fmtInt(rw.current.verifiedCompute)} of ${fmtInt(rw.current.networkVerifiedCompute)} network units · epoch ${rw.current.epochId.slice(2)} · settles on the hour`
+                : "Loading your share of the open epoch…"
+              : "Projected share of the open epoch. Needs a linked wallet."}
+          </div>
+        </div>
+        <div className="bg-ink-2 px-5 py-4 md:px-6">
+          <div className="label flex items-center gap-1.5 text-chalk/45">
+            Claimable <Prov p="live" />
+          </div>
+          <div className={cx("num mt-1.5 text-[22px]", linked && rw && rw.claimableLamports > 0 ? "text-ok" : "text-chalk/50")}>{linked && rw ? fmtSol(rw.claimableLamports) : "0 SOL"}</div>
+          <div className="mt-1 font-mono text-[11px] leading-relaxed text-chalk/40">
+            {linked && rw ? (
+              <>
+                {fmtSol(rw.earnedLamports)} settled · {fmtSol(rw.claimedLamports, false)} claimed ·{" "}
+                <Link href="/rewards" className="text-chalk/70 underline-offset-2 hover:underline">
+                  claim →
+                </Link>
+              </>
+            ) : (
+              "Settled epochs, minus what you have claimed."
+            )}
           </div>
         </div>
         <div className="bg-ink-2 px-5 py-4 md:px-6">
@@ -265,23 +322,24 @@ function NodeDashboard({ s, onWallet }: { s: ContributorState; onWallet: () => v
             <>
               <div className="num mt-1.5 text-[18px]">{shortAddr(w.address)}</div>
               <div className="mt-1 font-mono text-[11px] text-chalk/40">
-                {w.verified ? "linked · earnings accrue to this wallet" : "demo wallet · not linked"} · {w.holding?.supplyShare != null ? `${fmtPct(w.holding.supplyShare, 3)} of supply` : "holdings unknown"}
+                {w.verified ? "linked · rewards settle to this wallet" : "demo wallet · not linked"} · {w.holding?.supplyShare != null ? `${fmtPct(w.holding.supplyShare, 3)} of supply` : "holdings unknown"}
               </div>
             </>
           ) : (
             <>
-              <Button tone="dark" variant="secondary" className="mt-2 h-9 px-4 text-[13px]" onClick={onWallet} disabled={w.status === "connecting" || w.status === "signing"}>
-                {w.status === "signing" ? "Sign in wallet…" : w.status === "connecting" ? "Connecting…" : w.status === "error" ? "Try again" : "Connect wallet"}
-              </Button>
-              <div className={cx("mt-2 font-mono text-[11px]", w.status === "error" ? "text-signal" : "text-chalk/40")}>
-                {w.status === "error" && w.error ? w.error : "Links accrued earnings to you and to your BRAIN account."}
-              </div>
+              <div className="num mt-1.5 text-[18px] text-chalk/50">none</div>
+              <div className="mt-1 font-mono text-[11px] text-chalk/40">Phantom, Solflare, Backpack or email. One signature; moves no funds.</div>
             </>
           )}
         </div>
       </div>
+      {accrued != null && (
+        <div className="border-t border-chalk/[0.07] bg-ink-2 px-5 py-3 font-mono text-[11px] leading-relaxed text-chalk/50 md:px-6">
+          Customer-funded work: {fmtUsd(accrued)} owed at list price, usable as credits now.
+        </div>
+      )}
       <div className="border-t border-chalk/[0.07] bg-warn/[0.06] px-5 py-3 font-mono text-[11px] leading-relaxed text-warn md:px-6">
-        Rewards settle hourly from claimed creator fees to wallets linked to verified work. Zero verified compute earns zero. No return is promised.
+        50% of claimed creator fees is paced out hourly to linked wallets by verified compute. Zero verified compute earns zero. No return is promised.
       </div>
 
       <div className="px-5 pb-2 pt-5 md:px-6">

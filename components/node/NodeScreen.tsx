@@ -4,7 +4,10 @@ import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Prov } from "@/components/ui";
-import { cx, fmtInt } from "@/lib/format";
+import { WalletButton } from "@/components/wallet/WalletButton";
+import type { RewardsSummary } from "@/domain/types";
+import { cx, fmtInt, fmtSol, shortAddr } from "@/lib/format";
+import { useWallet } from "@/lib/wallet/store";
 import { contributor, useContributor } from "@/network/client/contributor";
 import { loadIdentity } from "@/network/client/identity";
 import { useReal } from "@/network/realtime/real";
@@ -53,6 +56,65 @@ function GpuActivity({ active }: { active: boolean }) {
         const warm = active && ((i * 40503) >>> 0) % 5 === (tick + 2) % 5;
         return <span key={i} className={cx("aspect-square rounded-[1.5px] transition-colors duration-150", on ? "bg-signal" : warm ? "bg-chalk/40" : active ? "bg-chalk/[0.1]" : "bg-chalk/[0.05]")} />;
       })}
+    </div>
+  );
+}
+
+/**
+ * The strip that decides whether this device gets paid. Hourly settlement only allocates to nodes with a
+ * signature-linked wallet, so an unlinked node must say so loudly; a linked one shows its real position.
+ */
+function WalletStrip({ connected, jobs }: { connected: boolean; jobs: number }) {
+  const w = useWallet();
+  const linked = w.status === "connected" && w.verified ? w.address : null;
+  const [rw, setRw] = useState<RewardsSummary | null>(null);
+  useEffect(() => {
+    if (!linked) return setRw(null);
+    let stop = false;
+    const load = () =>
+      fetch(`/api/rewards/summary?address=${encodeURIComponent(linked)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => !stop && d?.current && setRw(d))
+        .catch(() => {});
+    void load();
+    const t = setInterval(load, 30_000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, [linked]);
+
+  if (linked) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-chalk/[0.08] px-6 py-3 text-[11px] uppercase tracking-[0.1em] md:px-10">
+        <span className="flex items-center gap-2 text-chalk/60">
+          <span className="inline-block size-[6px] bg-ok" /> Wallet {shortAddr(linked)} · linked
+        </span>
+        <span className="flex flex-wrap items-center gap-x-5 gap-y-1">
+          <span className="text-chalk/60">
+            This hour <span className="text-chalk">{rw ? `~${fmtSol(rw.current.projectedLamports)}` : "…"}</span> <Prov p="estimated" />
+          </span>
+          <span className="text-chalk/60">
+            Claimable <span className={rw && rw.claimableLamports > 0 ? "text-ok" : "text-chalk"}>{rw ? fmtSol(rw.claimableLamports) : "…"}</span> <Prov p="live" />
+          </span>
+          <Link href="/rewards" className="text-chalk/70 hover:text-chalk">
+            Rewards →
+          </Link>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className={cx("flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-t px-6 py-3.5 md:px-10", connected ? "border-warn/30 bg-warn/[0.08]" : "border-chalk/[0.08]")}>
+      <div className="text-[11px] uppercase tracking-[0.1em]">
+        <div className={connected ? "text-warn" : "text-chalk/60"}>{connected ? "No wallet linked · this node is earning nothing" : "No wallet linked"}</div>
+        <div className="mt-1 normal-case tracking-normal text-chalk/55">
+          {connected && jobs > 0 ? `${fmtInt(jobs)} verified ${jobs === 1 ? "job" : "jobs"} so far count for reputation only. ` : ""}
+          Rewards settle every hour to linked wallets by verified compute. One signature; moves no funds.
+          {w.status === "error" && w.error && <span className="text-signal"> {w.error}</span>}
+        </div>
+      </div>
+      <WalletButton dark className="h-10 px-5" />
     </div>
   );
 }
@@ -193,6 +255,8 @@ export function NodeScreen() {
           )}
         </div>
       </div>
+
+      <WalletStrip connected={connected} jobs={s.jobsCompleted} />
 
       {/* Footer stats */}
       <div className="grid grid-cols-3 gap-px border-t border-chalk/[0.08] bg-chalk/[0.06] text-[11px] uppercase tracking-[0.1em]">
