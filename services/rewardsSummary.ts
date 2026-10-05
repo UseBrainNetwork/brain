@@ -7,14 +7,15 @@ import { getStore } from "./store";
 export async function rewardsSummary(wallet: string): Promise<RewardsSummary> {
   const store = getStore();
   const payouts = payoutStatus();
-  const claims = await refreshClaims(wallet);
-  const [allocations, current, bal] = await Promise.all([store.allocationsForWallet(wallet), currentProgress(wallet), balanceOf(wallet)]);
+  // Everything independent runs concurrently; balanceOf already loads this wallet's allocations.
+  const [claims, current, bal] = await Promise.all([refreshClaims(wallet), currentProgress(wallet), balanceOf(wallet)]);
+  const allocations = bal.allocations;
 
+  const found = await Promise.all(allocations.map((a) => store.getEpoch(a.epochId)));
   let epochs: RewardsSummary["epochs"] = [];
-  for (const a of allocations) {
-    const e = await store.getEpoch(a.epochId);
-    if (e) epochs.push({ ...e, allocation: a });
-  }
+  found.forEach((e, i) => {
+    if (e) epochs.push({ ...e, allocation: allocations[i] });
+  });
   epochs.sort((a, b) => b.startsAt - a.startsAt);
 
   // A wallet with nothing settled sees DEMO history while payouts are off, so the page is explorable pre-launch.

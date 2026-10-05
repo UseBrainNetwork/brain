@@ -72,7 +72,7 @@ export async function balanceOf(wallet: string) {
   const earned = allocations.filter((a) => a.provenance === "live").reduce((s, a) => s + a.lamports, 0);
   const demo = allocations.filter((a) => a.provenance !== "live").reduce((s, a) => s + a.lamports, 0);
   const claimed = claims.filter((c) => c.status !== "failed").reduce((s, c) => s + c.lamports, 0);
-  return { earned, demo, claimed, claimable: Math.max(0, earned - claimed), claims };
+  return { earned, demo, claimed, claimable: Math.max(0, earned - claimed), claims, allocations };
 }
 
 const fmtSol = (lamports: number) => (lamports / LAMPORTS_PER_SOL).toFixed(9).replace(/0+$/, "").replace(/\.$/, "");

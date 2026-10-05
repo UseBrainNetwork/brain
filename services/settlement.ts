@@ -118,14 +118,14 @@ export async function measureWork(from: number, to: number) {
   // Aggregated in the store: one row per (node, status, verified). Never loads job rows, so an epoch
   // with a hundred thousand jobs costs one indexed range scan.
   const rows = await store.aggregateWork(from, to, bucketMs);
-  const nodes = new Map<string, StoredNode | null>();
+  // One batched query for every node that worked, not one round-trip per node.
+  const nodes: Map<string, StoredNode> = await store.getNodes([...new Set(rows.filter((r) => r.status !== "assigned").map((r) => r.nodeId))]);
   const byWallet = new Map<string, WalletWork>();
   let networkVerifiedCompute = 0;
 
   for (const r of rows) {
     if (r.verified) networkVerifiedCompute += r.computeUnits;
     if (r.status === "assigned") continue; // still in flight
-    if (!nodes.has(r.nodeId)) nodes.set(r.nodeId, await store.getNode(r.nodeId));
     const node = nodes.get(r.nodeId);
     if (!node?.walletVerified || !node.walletAddress) continue;
     let w = byWallet.get(node.walletAddress);

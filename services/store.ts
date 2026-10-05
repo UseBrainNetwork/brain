@@ -61,6 +61,8 @@ export interface StoredChallenge {
 export interface NetworkStore {
   saveNode(n: StoredNode): Promise<void>;
   getNode(id: string): Promise<StoredNode | null>;
+  /** Batched lookup; one query regardless of count. Missing ids are simply absent. */
+  getNodes(ids: string[]): Promise<Map<string, StoredNode>>;
   getNodeBySession(sessionHash: string): Promise<StoredNode | null>;
   listNodes(): Promise<StoredNode[]>;
   /** Distinct GPU identities that have ever registered. Cumulative; never pruned. */
@@ -172,6 +174,14 @@ export class MemoryStore implements NetworkStore {
   }
   async getNode(id: string) {
     return this.nodes.get(id) ?? null;
+  }
+  async getNodes(ids: string[]) {
+    const out = new Map<string, StoredNode>();
+    for (const id of ids) {
+      const n = this.nodes.get(id);
+      if (n) out.set(id, n);
+    }
+    return out;
   }
   async getNodeBySession(sessionHash: string) {
     for (const n of this.nodes.values()) if (n.sessionHash === sessionHash) return n;
@@ -320,7 +330,7 @@ export class MemoryStore implements NetworkStore {
 const g = globalThis as typeof globalThis & { __brainStore?: NetworkStore };
 
 /** Dev HMR keeps the globalThis singleton across module reloads; replace it if its shape is stale. */
-const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode", "countNodesJoined", "aggregateWork", "listOpenJobs"];
+const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode", "countNodesJoined", "aggregateWork", "listOpenJobs", "getNodes"];
 
 export function getStore(): NetworkStore {
   if (g.__brainStore && REQUIRED.some((k) => typeof g.__brainStore?.[k] !== "function")) g.__brainStore = undefined;

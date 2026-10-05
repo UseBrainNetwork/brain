@@ -122,6 +122,13 @@ export class PgStore implements NetworkStore {
     const r = await this.q(`SELECT data FROM brain_nodes WHERE id = $1`, [id]);
     return (r.rows[0]?.data as StoredNode) ?? null;
   }
+  async getNodes(ids: string[]) {
+    const out = new Map<string, StoredNode>();
+    if (ids.length === 0) return out;
+    const r = await this.q(`SELECT id, data FROM brain_nodes WHERE id = ANY($1::text[])`, [ids]);
+    for (const row of r.rows) out.set(row.id as string, row.data as StoredNode);
+    return out;
+  }
   async getNodeBySession(sessionHash: string) {
     const r = await this.q(`SELECT data FROM brain_nodes WHERE session_hash = $1`, [sessionHash]);
     return (r.rows[0]?.data as StoredNode) ?? null;
