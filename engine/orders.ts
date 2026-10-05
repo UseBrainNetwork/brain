@@ -1,7 +1,7 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
 import type { ComputeOrder, ExecutionPlan, ExecutionRequest, ExecutionResult, ExecutionStep, LegacyRoutingMode, Priority, PrivacyRequirement, RequestClassification, RouteDecision, RoutingMode, ScoredEstimate } from "@/domain/economy";
-import { normalizeMode } from "@/domain/economy";
+import { normalizeMode, ComputeReceipt } from "@/domain/economy";
 import { NodeError } from "@/services/nodes";
 import { eventBus } from "@/services/eventBus";
 import { getStore } from "@/services/store";
@@ -231,8 +231,12 @@ export async function placeStreamingOrder(input: PlaceOrderInput & { request: Ex
   let resolveStream!: (s: { stream: ReadableStream<Uint8Array> | null; decision: RouteDecision; provider: IntelligenceProvider }) => void;
   const firstByte = new Promise<{ stream: ReadableStream<Uint8Array> | null; decision: RouteDecision; provider: IntelligenceProvider }>((r) => (resolveStream = r));
   let handed = false;
+  // `done` resolves the moment the order reaches a terminal state in memory; `persisted` once the
+  // terminal state has been written. The stream answers off `done` and waits for `persisted` after.
+  let resolveDone!: (o: { order: ComputeOrder; receipt: ComputeReceipt | null }) => void;
+  const done = new Promise<{ order: ComputeOrder; receipt: ComputeReceipt | null }>((r) => (resolveDone = r));
 
-  const run = (async () => {
+  const persisted = (async () => {
     try {
       const { final, executions } = await executePlan(p, { customerId }, ps, (prov, decision) => {
         if (handed || !prov.executeStream) return undefined;
@@ -246,9 +250,10 @@ export async function placeStreamingOrder(input: PlaceOrderInput & { request: Ex
       });
       const ex = executions.get(final.stepId);
       finish(order, p, final, ex);
+      if (!handed) resolveStream({ stream: null, decision: ex!.decision, provider: ps.find((x) => x.id === ex?.result?.provider) ?? ps[0] });
+      resolveDone({ order, receipt: ex?.result?.receipt ?? null });
       await Promise.allSettled(pending);
       await Promise.all([savePlan(p), save(order)]);
-      if (!handed) resolveStream({ stream: null, decision: ex!.decision, provider: ps.find((x) => x.id === ex?.result?.provider) ?? ps[0] });
       return order;
     } catch (e) {
       // Never leave an order parked in ROUTING/EXECUTING because a store write or planner call threw.
@@ -256,14 +261,15 @@ export async function placeStreamingOrder(input: PlaceOrderInput & { request: Ex
       order.status = "FAILED";
       order.error = "internal";
       order.completedAt = Date.now();
+      if (!handed) resolveStream({ stream: null, decision: { decisionId: "", estimates: [], selected: null, reason: "internal error" } as unknown as RouteDecision, provider: ps[0] });
+      resolveDone({ order, receipt: null });
       await Promise.allSettled(pending);
       await save(order).catch(() => {});
-      if (!handed) resolveStream({ stream: null, decision: { decisionId: "", estimates: [], selected: null, reason: "internal error" } as unknown as RouteDecision, provider: ps[0] });
       return order;
     }
   })();
 
-  return { order, firstByte, done: run };
+  return { order, firstByte, done, persisted };
 }
 
 /**

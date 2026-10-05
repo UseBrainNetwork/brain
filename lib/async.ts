@@ -11,7 +11,21 @@ export function withTimeout<T, F>(p: Promise<T>, ms: number, fallback: F): Promi
   return Promise.race([p.finally(() => clearTimeout(t)), timer]);
 }
 
-/** Fire-and-forget with a logged failure, never an unhandled rejection. */
+const inflight = new Set<Promise<unknown>>();
+
+/**
+ * Fire-and-forget with a logged failure, never an unhandled rejection. Every background promise is
+ * tracked so a request handler can `await settleBackground()` inside `after()` and keep the
+ * serverless function alive until the writes it deferred have landed.
+ */
 export function background(label: string, p: Promise<unknown>): Promise<unknown> {
-  return p.catch((e) => console.error(`[bg:${label}]`, e instanceof Error ? `${e.name}: ${e.message}` : e));
+  const tracked = p.catch((e) => console.error(`[bg:${label}]`, e instanceof Error ? `${e.name}: ${e.message}` : e));
+  inflight.add(tracked);
+  void tracked.finally(() => inflight.delete(tracked));
+  return tracked;
+}
+
+/** Waits for all background work started so far (including work started while waiting). */
+export async function settleBackground(): Promise<void> {
+  while (inflight.size) await Promise.allSettled([...inflight]);
 }

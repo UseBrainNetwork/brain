@@ -125,14 +125,15 @@ describe("streaming orders", () => {
 
   it("hands the upstream stream to the caller and resolves the order with a receipt after it ends", async () => {
     const s = fake("s", "CLOUD_GPU", { estimatedCost: 0.01 }, async () => ok("s", "CLOUD_GPU"), async () => ({ upstream: sse("data: {}\n\n"), done: Promise.resolve(ok("s", "CLOUD_GPU", "streamed")) }));
-    const { firstByte, done } = await placeStreamingOrder({ request: chat }, "cust", [s]);
+    const { firstByte, done, persisted } = await placeStreamingOrder({ request: chat }, "cust", [s]);
     const fb = await firstByte;
     expect(fb.stream).not.toBeNull();
     expect(fb.provider.id).toBe("s");
-    const o = await done;
+    const { order: o } = await done;
     expect(o.status).toBe("COMPLETED");
     expect(o.receiptId).toBe("r-s");
     expect(o.output).toBe("streamed");
+    await persisted;
   });
 
   it("falls back to the next provider when the streaming provider fails before first byte", async () => {
@@ -143,7 +144,7 @@ describe("streaming orders", () => {
     const { firstByte, done } = await placeStreamingOrder({ request: chat, mode: "CHEAP" }, "cust", [bad, good]);
     const fb = await firstByte;
     expect(fb.stream).toBeNull(); // non-streaming fallback delivers content in one chunk
-    const o = await done;
+    const { order: o } = await done;
     expect(o.status).toBe("COMPLETED");
     expect(o.receiptId).toBe("r-good");
   });

@@ -214,6 +214,8 @@ export interface ExecutionResult {
   usage?: { inputUnits: number; outputUnits: number };
   /** USD the customer accrues for this step, from the receipt. null = UNKNOWN. */
   cost?: Money | null;
+  /** The receipt as issued, in memory, so a caller does not need to read it back from the store. */
+  receipt?: ComputeReceipt;
   error?: string;
 }
 

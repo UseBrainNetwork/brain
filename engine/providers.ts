@@ -1,4 +1,5 @@
 import "server-only";
+import { background, withTimeout } from "@/lib/async";
 import { chatChars, wantsTools, type ToolCall } from "@/domain/chat";
 import type { Capability, ComputeReceipt, ExecutionEstimate, ExecutionRequest, ExecutionResult, ExecutionTarget, Money, ProviderHealth, ProviderTrust, RoutingMode } from "@/domain/economy";
 import { networkConfig } from "@/lib/config";
@@ -74,7 +75,8 @@ export class BrowserNetworkExecutionProvider implements IntelligenceProvider {
   }
 
   async estimate(req: ExecutionRequest): Promise<ExecutionEstimate> {
-    const nodes = await liveNodes();
+    // Chat never runs on browser nodes, so a slow store must not delay routing: unknown reads as zero nodes.
+    const nodes = req.kind === "chat" ? await withTimeout(liveNodes().catch(() => []), 2_000, []) : await liveNodes();
     const notes: string[] = [];
     const base = { provider: this.id, target: this.type, availableCapacity: Math.min(1, nodes.length / 10), available: nodes.length > 0, qualityTier: null };
     if (nodes.length === 0) notes.push("no real nodes online");
@@ -264,7 +266,6 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
   private async issueReceipt(req: Extract<ExecutionRequest, { kind: "chat" }>, ctx: ExecutionContext, t0: number, jobId: string, content: string, usage: { prompt: number; completion: number; total: number; basis: "provider-reported" | "estimated-from-chars"; costUsd?: number | null }) {
     const ranModel = this.modelFor(ctx.mode) ?? req.model;
     const ms = Date.now() - t0;
-    await recordSample({ providerId: this.id, at: Date.now(), latencyMs: ms, ok: true, units: usage.total });
     const listPrice = priceForTokens(usage.total, tokenListPricePer1MUsd());
     // Prefer the upstream's own reported charge for this request (OpenRouter sends `usage.cost`); fall back to the configured rate.
     const upstreamCost = usage.costUsd != null && Number.isFinite(usage.costUsd) ? usage.costUsd : priceForTokens(usage.total, upstreamPricePer1MUsd(this.id));
@@ -300,10 +301,15 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
       tokens: { prompt: usage.prompt, completion: usage.completion, basis: usage.basis },
       status: "VERIFIED",
     };
-    await getStore().putDoc("receipt", receipt.receiptId, receipt, { at: receipt.completedAt, key: receipt.source });
+    // The receipt is the record; the store writes land concurrently and are tracked so the request's
+    // `after()` tail can wait for them. Nothing here holds the answer back from the customer.
     eventBus.publish({ type: "receipt.issued", at: receipt.completedAt, receipt });
-    await accrueReceipt(receipt, {}, { upstreamCost, usageBasis: usage.basis });
-    const result: ExecutionResult = { ok: true, provider: this.id, target: this.type, model: receipt.model, jobId, receiptId: receipt.receiptId, executionTimeMs: ms, content, usage: { inputUnits: usage.prompt, outputUnits: usage.completion }, cost: customerCost };
+    await Promise.all([
+      background("receipt.put", getStore().putDoc("receipt", receipt.receiptId, receipt, { at: receipt.completedAt, key: receipt.source })),
+      background("receipt.accrue", accrueReceipt(receipt, {}, { upstreamCost, usageBasis: usage.basis })),
+      background("provider.sample", recordSample({ providerId: this.id, at: Date.now(), latencyMs: ms, ok: true, units: usage.total })),
+    ].map((w) => withTimeout(w, 1_500, undefined)));
+    const result: ExecutionResult = { ok: true, provider: this.id, target: this.type, model: receipt.model, jobId, receiptId: receipt.receiptId, executionTimeMs: ms, content, usage: { inputUnits: usage.prompt, outputUnits: usage.completion }, cost: customerCost, receipt };
     return result;
   }
 

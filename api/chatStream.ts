@@ -1,6 +1,6 @@
 import "server-only";
 import { after } from "next/server";
-import { withTimeout } from "@/lib/async";
+import { settleBackground, withTimeout } from "@/lib/async";
 import type { ComputeOrder, ComputeReceipt, PrivacyRequirement, RoutingMode } from "@/domain/economy";
 import { placeStreamingOrder, type PlaceOrderInput } from "@/engine/orders";
 import { attachCompute, type AttachedComputeSummary } from "@/services/attachedCompute";
@@ -55,8 +55,8 @@ const RECEIPT_BUDGET_MS = 6_000;
 /** Store time we wait for the attached-compute dispatch while the stream is still open. */
 const ATTACH_BUDGET_MS = 4_000;
 
-export async function summarize(order: ComputeOrder, t0: number, mode: RoutingMode, privacy: PrivacyRequirement): Promise<{ receipt: ComputeReceipt | null; brain: BrainRunSummary }> {
-  const receipt = order.receiptId ? await withTimeout(getReceipt(order.receiptId).catch(() => null), RECEIPT_BUDGET_MS, null) : null;
+export async function summarize(order: ComputeOrder, t0: number, mode: RoutingMode, privacy: PrivacyRequirement, known: ComputeReceipt | null = null): Promise<{ receipt: ComputeReceipt | null; brain: BrainRunSummary }> {
+  const receipt = known ?? (order.receiptId ? await withTimeout(getReceipt(order.receiptId).catch(() => null), RECEIPT_BUDGET_MS, null) : null);
   return {
     receipt,
     brain: {
@@ -98,7 +98,7 @@ export interface StreamOptions {
  * `brain` object so the client can still show what was attempted.
  */
 export async function chatEventStream(o: StreamOptions): Promise<ReadableStream<Uint8Array>> {
-  const { firstByte, done } = await placeStreamingOrder(o.input, o.customerId);
+  const { firstByte, done, persisted } = await placeStreamingOrder(o.input, o.customerId);
   const { stream } = await firstByte;
   const enc = new TextEncoder();
   const created = Math.floor(o.t0 / 1000);
@@ -113,12 +113,12 @@ export async function chatEventStream(o: StreamOptions): Promise<ReadableStream<
             ctl.enqueue(value);
           }
         }
-        const order = await done;
+        const { order, receipt } = await done;
         if (!stream && order.status === "COMPLETED") {
           ctl.enqueue(enc.encode(`data: ${JSON.stringify({ id: o.chatId, object: "chat.completion.chunk", created, model: o.input.request.model, choices: [{ index: 0, delta: { role: "assistant", content: order.output ?? "" }, finish_reason: "stop" }] })}\n\n`));
         }
         // The run summary goes out as soon as the receipt is known; bookkeeping must not hold the stream.
-        const summary = await summarize(order, o.t0, o.mode, o.privacy);
+        const summary = await summarize(order, o.t0, o.mode, o.privacy, receipt);
         if (order.status !== "COMPLETED") {
           ctl.enqueue(enc.encode(`event: error\ndata: ${JSON.stringify({ error: { code: order.status === "REJECTED" ? "no_provider_available" : "upstream_failed", message: order.error ?? "execution failed" }, brain: summary.brain })}\n\n`));
         } else {
@@ -140,6 +140,8 @@ export async function chatEventStream(o: StreamOptions): Promise<ReadableStream<
           } catch (e) {
             console.error("chat onComplete", e);
           }
+          await persisted;
+          await settleBackground();
         };
         try {
           after(tail);
