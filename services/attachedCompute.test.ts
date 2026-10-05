@@ -3,7 +3,7 @@ import type { ComputeOrder } from "@/domain/economy";
 import { referenceResult } from "@/network/workloads";
 import type { AccountingEvent } from "@/domain/economy";
 import { attachCompute, nodesFor, sizeFor } from "./attachedCompute";
-import { activeJob, createJob, getJob } from "./distributed";
+import { activeJob, createJob, getJob, jobTtlMs } from "./distributed";
 import { nextJob, startWork, submitResult } from "./nodes";
 import { getReceipt } from "./receipts";
 import { MemoryStore, type StoredNode } from "./store";
@@ -57,6 +57,10 @@ describe("attached compute", () => {
     expect(a!.workUnits).toBe(2);
     const ja = (await getJob(a!.jobId))!;
     expect(ja.attachedTo?.orderId).toBe("ord-1");
+    // Nodes poll on a paced interval; attached units must outlive pickup latency, and the job outlives the demo TTL.
+    const unitJob = (await store().getJob(ja.units[0].id))!;
+    expect(unitJob.deadline - ja.createdAt).toBeGreaterThanOrEqual(90_000);
+    expect(jobTtlMs(ja)).toBeGreaterThanOrEqual(600_000);
     expect(ja.lifecycle[0].detail).toContain("attached to ord-1");
     // Attached jobs are not "the" active job, so the demo / routed path is still free.
     expect(await activeJob()).toBeNull();

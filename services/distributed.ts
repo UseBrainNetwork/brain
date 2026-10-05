@@ -56,6 +56,16 @@ function unitSpec(dims: { m: number; n: number; k: number }, seedB: number): Wor
 /** Confidence that spot-checking `rows` secret rows catches a node that skipped ≥25% of them. */
 const spotConfidence = (rows: number) => 1 - Math.pow(0.75, rows);
 
+/**
+ * Attached jobs have nobody waiting on them, and nodes poll for work on a paced interval (up to ~30 s
+ * between polls). Their units therefore get a deadline that covers pickup latency plus compute, and
+ * the job as a whole gets a longer life, instead of the interactive demo's tight numbers.
+ */
+const ATTACHED_UNIT_DEADLINE_MS = 90_000;
+const ATTACHED_JOB_TTL_MS = 10 * 60_000;
+export const unitDeadlineMs = (job: DistributedJob) => (job.attachedTo ? ATTACHED_UNIT_DEADLINE_MS : cfg.unitDeadlineMs);
+export const jobTtlMs = (job: DistributedJob) => (job.attachedTo ? ATTACHED_JOB_TTL_MS : cfg.jobTtlMs);
+
 function makeUnitJob(parent: DistributedJob, unit: WorkUnit, spec: WorkloadSpec, now: number): StoredJob {
   const rows = spec.kernel === "matmul_u32" ? spec.m : 0;
   return {
@@ -76,7 +86,7 @@ function makeUnitJob(parent: DistributedJob, unit: WorkUnit, spec: WorkloadSpec,
     spec,
     assignedTo: unit.nodeId,
     issuedAt: now,
-    deadline: now + cfg.unitDeadlineMs,
+    deadline: now + unitDeadlineMs(parent),
     canary: false,
     sampleIndices: sampleIndices(rows, cfg.sampledRows),
     parentId: parent.id,
@@ -113,7 +123,7 @@ export async function activeJob(): Promise<DistributedJob | null> {
   const now = Date.now();
   for (const j of await getStore().listDistributedJobs(20)) {
     if (j.attachedTo) continue;
-    if (j.status !== "completed" && j.status !== "failed" && now - j.createdAt < cfg.jobTtlMs) return j;
+    if (j.status !== "completed" && j.status !== "failed" && now - j.createdAt < jobTtlMs(j)) return j;
   }
   return null;
 }
@@ -388,7 +398,7 @@ export async function reapStale() {
     }
     await store.withLock(`djob:${job.id}`, async () => {
       const current = (await store.getDistributedJob(job.id))!;
-      if (current.status !== "completed" && current.status !== "failed" && now - current.createdAt > cfg.jobTtlMs) {
+      if (current.status !== "completed" && current.status !== "failed" && now - current.createdAt > jobTtlMs(current)) {
         current.completedAt = now;
         current.totals.latencyMs = now - current.createdAt;
         current.failReason = "timed out";
