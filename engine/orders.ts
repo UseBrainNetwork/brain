@@ -8,6 +8,7 @@ import { getStore } from "@/services/store";
 import { observeRoute } from "./learning";
 import { carriesPlaintext, classify, plan as makePlan, planTotalCost, topologicalOrder, withContext } from "./plan";
 import { logProviderError, safeProviderError } from "./errors";
+import { background } from "@/lib/async";
 import { executionProviders, type IntelligenceProvider } from "./providers";
 import { modeWeights, scoreEstimates } from "./router";
 
@@ -66,7 +67,8 @@ export async function decide(request: ExecutionRequest, mode: RoutingMode, c: De
     reason,
     source: "REAL",
   };
-  await getStore().putDoc("decision", decision.decisionId, decision, { at: decision.at, key: "REAL" });
+  // Persisted off the hot path: a slow store must not delay the first token.
+  void background("decision", getStore().putDoc("decision", decision.decisionId, decision, { at: decision.at, key: "REAL" }));
   return decision;
 }
 
@@ -193,16 +195,21 @@ function finish(order: ComputeOrder, p: ExecutionPlan, final: ExecutionStep, ex:
 /** Places and executes an order. Resolves when the order is terminal. */
 export async function placeOrder(input: PlaceOrderInput, customerId: string, ps: IntelligenceProvider[] = executionProviders()): Promise<ComputeOrder> {
   const order = newOrder(input, customerId);
-  await save(order);
   const p = makePlan({ orderId: order.orderId, request: order.request, mode: order.mode, maxCost: order.maxCost, maxLatency: order.maxLatency, privacy: order.privacy, newId: id });
   order.planId = p.planId;
-  await savePlan(p);
   order.status = "EXECUTING";
-  await save(order);
-  const { final, executions } = await executePlan(p, { customerId }, ps);
-  await savePlan(p);
-  finish(order, p, final, executions.get(final.stepId));
-  await save(order);
+  const pending = [background("order.create", save(order)), background("plan.create", savePlan(p))];
+  try {
+    const { final, executions } = await executePlan(p, { customerId }, ps);
+    finish(order, p, final, executions.get(final.stepId));
+  } catch (e) {
+    console.error("[orders] order failed", order.orderId, e instanceof Error ? `${e.name}: ${e.message}` : e);
+    order.status = "FAILED";
+    order.error = "internal";
+    order.completedAt = Date.now();
+  }
+  await Promise.allSettled(pending);
+  await Promise.all([savePlan(p), save(order)]);
   return order;
 }
 
@@ -214,12 +221,12 @@ export async function placeOrder(input: PlaceOrderInput, customerId: string, ps:
  */
 export async function placeStreamingOrder(input: PlaceOrderInput & { request: Extract<ExecutionRequest, { kind: "chat" }> }, customerId: string, ps: IntelligenceProvider[] = executionProviders()) {
   const order = newOrder(input, customerId);
-  await save(order);
   const p = makePlan({ orderId: order.orderId, request: order.request, mode: order.mode, maxCost: order.maxCost, maxLatency: order.maxLatency, privacy: order.privacy, newId: id });
   order.planId = p.planId;
-  await savePlan(p);
   order.status = "EXECUTING";
-  await save(order);
+  // Initial bookkeeping runs concurrently with routing and the upstream call. Terminal state is
+  // written after, in order, so a reader never sees a stale status outlive the run.
+  const pending: Promise<unknown>[] = [background("order.create", save(order)), background("plan.create", savePlan(p))];
 
   let resolveStream!: (s: { stream: ReadableStream<Uint8Array> | null; decision: RouteDecision; provider: IntelligenceProvider }) => void;
   const firstByte = new Promise<{ stream: ReadableStream<Uint8Array> | null; decision: RouteDecision; provider: IntelligenceProvider }>((r) => (resolveStream = r));
@@ -237,10 +244,10 @@ export async function placeStreamingOrder(input: PlaceOrderInput & { request: Ex
           return done;
         })();
       });
-      await savePlan(p);
       const ex = executions.get(final.stepId);
       finish(order, p, final, ex);
-      await save(order);
+      await Promise.allSettled(pending);
+      await Promise.all([savePlan(p), save(order)]);
       if (!handed) resolveStream({ stream: null, decision: ex!.decision, provider: ps.find((x) => x.id === ex?.result?.provider) ?? ps[0] });
       return order;
     } catch (e) {
@@ -249,6 +256,7 @@ export async function placeStreamingOrder(input: PlaceOrderInput & { request: Ex
       order.status = "FAILED";
       order.error = "internal";
       order.completedAt = Date.now();
+      await Promise.allSettled(pending);
       await save(order).catch(() => {});
       if (!handed) resolveStream({ stream: null, decision: { decisionId: "", estimates: [], selected: null, reason: "internal error" } as unknown as RouteDecision, provider: ps[0] });
       return order;
