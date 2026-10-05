@@ -18,15 +18,28 @@ interface Def {
   minScore: number;
   /** Sum of compute scores across compatible nodes. */
   minCapacity: number;
-  /** The workload class whose recent success rate is evidence. null = no evidence possible yet. */
-  evidenceSize: "small" | "medium" | "large" | null;
+  /** Whether recent distributed-job success is evidence for this capability. */
+  evidenceSize: "any" | null;
+  /** Size tiers unlocked by node count, shown as one row. */
+  tiers?: { label: string; minNodes: number }[];
   experimental?: boolean;
 }
 
 const DEFS: Def[] = [
-  { id: "matmul-small", label: "Parallel integer matmul · small", description: "512³ u32 work units, spot-check verified", minNodes: 1, minScore: 1_000, minCapacity: 1_000, evidenceSize: "small" },
-  { id: "matmul-medium", label: "Parallel integer matmul · medium", description: "1024×1024×512 u32 work units", minNodes: 2, minScore: 2_000, minCapacity: 8_000, evidenceSize: "medium" },
-  { id: "matmul-large", label: "Parallel integer matmul · large", description: "1024³ u32 work units", minNodes: 3, minScore: 4_000, minCapacity: 20_000, evidenceSize: "large" },
+  {
+    id: "tensor-matmul",
+    label: "Parallel tensor matmul",
+    description: "One request split into row-block work units across browser GPUs, spot-check verified by the server. u32 kernel today.",
+    minNodes: 1,
+    minScore: 1_000,
+    minCapacity: 1_000,
+    evidenceSize: "any",
+    tiers: [
+      { label: "small 512³", minNodes: 1 },
+      { label: "medium 1024×1024×512", minNodes: 2 },
+      { label: "large 1024³", minNodes: 3 },
+    ],
+  },
   { id: "redundant-verification", label: "Redundant execution (2× replicas)", description: "Every unit computed by two nodes and cross-checked", minNodes: 2, minScore: 1_000, minCapacity: 2_000, evidenceSize: null },
   { id: "embeddings", label: "Embeddings on browser nodes", description: "Requires a WebGPU embedding kernel and model weights distribution", minNodes: 4, minScore: 8_000, minCapacity: 60_000, evidenceSize: null, experimental: true },
   { id: "llm-inference", label: "Distributed LLM inference", description: "Layer-sharded transformer decoding across browser nodes", minNodes: 8, minScore: 15_000, minCapacity: 200_000, evidenceSize: null, experimental: true },
@@ -44,12 +57,14 @@ export async function assessCapabilities(): Promise<{ capabilities: NetworkCapab
   const capabilities: NetworkCapability[] = DEFS.map((d) => {
     const compatible = nodes.filter((n) => n.computeScore >= d.minScore);
     const cap = compatible.reduce((s, n) => s + n.computeScore, 0);
-    const ev = d.evidenceSize ? recent.filter((j) => j.size === d.evidenceSize) : [];
+    const ev = d.evidenceSize ? recent : [];
+    const unlocked = (d.tiers ?? []).filter((t) => compatible.length >= t.minNodes);
     const okRate = ev.length ? ev.filter((j) => j.status === "completed").length / ev.length : null;
     const requirements = [
       { label: "Compatible nodes online", required: `≥ ${d.minNodes}`, current: String(compatible.length), met: compatible.length >= d.minNodes },
       { label: "Per-node verified score", required: `≥ ${fmt(d.minScore)}`, current: compatible.length ? `${fmt(Math.min(...compatible.map((n) => n.computeScore)))} (min)` : "—", met: compatible.length > 0 },
       { label: "Aggregate capacity", required: `≥ ${fmt(d.minCapacity)}`, current: fmt(cap), met: cap >= d.minCapacity },
+      ...(d.tiers ? [{ label: "Sizes unlocked", required: d.tiers.map((t) => t.label.split(" ")[0]).join(" · "), current: unlocked.length ? unlocked.map((t) => t.label).join(" · ") : "none", met: unlocked.length > 0 }] : []),
       ...(d.evidenceSize ? [{ label: "Recent success rate (6h)", required: "≥ 90% over ≥ 1 job", current: okRate == null ? "no jobs yet" : `${(okRate * 100).toFixed(0)}% over ${ev.length}`, met: okRate != null && okRate >= 0.9 }] : []),
       ...(d.experimental ? [{ label: "Kernel implemented", required: "yes", current: "no", met: false }] : []),
     ];

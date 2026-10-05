@@ -34,6 +34,13 @@ const unitLabel = (unitId?: string, parentId?: string) => (unitId && parentId ? 
 function GpuActivity({ active }: { active: boolean }) {
   const cells = 24 * 5;
   const [tick, setTick] = useState(0);
+  // /node?autostart=1: detect → benchmark → join without a click (used to bring a machine online from a link).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("autostart") !== "1") return;
+    const t = setTimeout(() => void contributor.joinAsWorker(), 800);
+    return () => clearTimeout(t);
+  }, []);
   useEffect(() => {
     if (!active) return;
     const t = setInterval(() => setTick((x) => x + 1), 70);
