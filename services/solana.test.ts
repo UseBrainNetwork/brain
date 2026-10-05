@@ -9,6 +9,7 @@ describe("creatorVaults", () => {
     // Verified against mainnet: the bonding vault held the launch-day creator fees.
     expect(v.bonding).toBe("C3yRmkmh3gKpUKH8y7StKsMEWU3ipjSsY8Wnioh6qqfH");
     expect(v.amm).toBe("8qLR16BgQLHUEjJhobbxYP7ZMHmEbnbiHFPhLH4Nn9ce");
+    expect(v.ammWsol).toBe("49CLiczvAzzBXWrWwmmosm5R5nrUsTVQ635mdLG5ob9t");
   });
   it("uses the published pump.fun program ids", () => {
     expect(PUMP_PROGRAMS.bondingCurve).toBe("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");

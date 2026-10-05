@@ -1,6 +1,6 @@
 import { protocolWallet, token } from "@/lib/site";
 import { payoutStatus } from "./claims";
-import { creatorVaults, LAMPORTS, readTransfer, rpc, rpcUrl, type WalletTransfer } from "./solana";
+import { creatorVaults, LAMPORTS, readTransfer, rpc, rpcUrl, TOKEN_ACCOUNT_RENT, type WalletTransfer } from "./solana";
 
 export { creatorVaults, PUMP_PROGRAMS, readTransfer, type WalletTransfer } from "./solana";
 
@@ -77,16 +77,17 @@ export async function getProtocolWallet(limit = 8): Promise<ProtocolWalletView> 
   const ps = payoutStatus();
   const payout = ps.wallet ? { address: ps.wallet, balanceSol: null as number | null, enabled: ps.enabled, ...(ps.opensAt ? { opensAt: ps.opensAt } : {}) } : null;
   const vaults = creatorVaults(address);
-  const creatorVault: ProtocolWalletView["creatorVault"] = { bonding: { address: vaults.bonding, sol: null }, amm: { address: vaults.amm, sol: null }, totalSol: null };
+  const creatorVault: ProtocolWalletView["creatorVault"] = { bonding: { address: vaults.bonding, sol: null }, amm: { address: vaults.ammWsol, sol: null }, totalSol: null };
   const base: ProtocolWalletView = { address, cluster: protocolWallet.cluster, source: "REAL", balanceSol: null, recent: [], fetchedAt: Date.now(), rpc: "unavailable", token: tokenStatus, payout, creatorVault };
   try {
     // One call for every balance we show: protocol wallet, payout wallet, both creator vaults.
-    const keys = [address, vaults.bonding, vaults.amm, ...(payout ? [payout.address] : [])];
+    const keys = [address, vaults.bonding, vaults.ammWsol, ...(payout ? [payout.address] : [])];
     const multi = await rpc<{ value: ({ lamports: number } | null)[] }>(url, "getMultipleAccounts", [keys, { encoding: "base64", commitment: "confirmed" }]);
     const lam = (i: number) => (multi.value[i] ? multi.value[i]!.lamports : 0) / LAMPORTS;
     const bal = { value: (multi.value[0]?.lamports ?? 0) };
     creatorVault.bonding.sol = lam(1);
-    creatorVault.amm.sol = lam(2);
+    // PumpSwap fees are wrapped SOL: the account's lamports minus its rent is the claimable amount.
+    creatorVault.amm.sol = multi.value[2] ? Math.max(0, multi.value[2]!.lamports - TOKEN_ACCOUNT_RENT) / LAMPORTS : 0;
     creatorVault.totalSol = creatorVault.bonding.sol + creatorVault.amm.sol;
     if (payout) payout.balanceSol = lam(3);
     const sigs = await rpc<{ signature: string; blockTime: number | null; err: unknown }[]>(url, "getSignaturesForAddress", [address, { limit }]);

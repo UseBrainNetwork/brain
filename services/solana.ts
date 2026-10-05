@@ -16,12 +16,26 @@ export const PUMP_PROGRAMS = {
 } as const;
 export const PUMP_PROGRAM_IDS = new Set<string>(Object.values(PUMP_PROGRAMS));
 
-/** Creator-fee vault PDAs for our protocol wallet. Pure derivation; verified against chain (the bonding vault held fees at launch). */
+const WSOL = new PublicKey("So11111111111111111111111111111111111111112");
+const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const ATA_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+/** Rent-exempt minimum for a 165-byte SPL token account; a WSOL account's lamports = amount + this. */
+export const TOKEN_ACCOUNT_RENT = 2_039_280;
+
+export function wsolAta(owner: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), WSOL.toBuffer()], ATA_PROGRAM)[0];
+}
+
+/**
+ * Creator-fee vaults for our protocol wallet. Pure derivation, verified against chain.
+ *   bonding  pump.fun bonding-curve vault (plain SOL), fees before graduation
+ *   amm      PumpSwap creator_vault authority; its fees sit as wrapped SOL in `ammWsol`, the authority's WSOL ATA
+ */
 export function creatorVaults(creator: string = protocolWallet.address) {
   const c = new PublicKey(creator);
   const [bonding] = PublicKey.findProgramAddressSync([Buffer.from("creator-vault"), c.toBuffer()], new PublicKey(PUMP_PROGRAMS.bondingCurve));
   const [amm] = PublicKey.findProgramAddressSync([Buffer.from("creator_vault"), c.toBuffer()], new PublicKey(PUMP_PROGRAMS.amm));
-  return { bonding: bonding.toBase58(), amm: amm.toBase58() };
+  return { bonding: bonding.toBase58(), amm: amm.toBase58(), ammWsol: wsolAta(amm).toBase58(), creatorWsol: wsolAta(c).toBase58() };
 }
 
 export interface WalletTransfer {
@@ -78,15 +92,17 @@ export async function readTransfer(url: string, address: string, signature: stri
   for (const inner of tx.meta.innerInstructions ?? []) for (const ins of inner.instructions) if (ins.programId) programs.add(ins.programId);
   const pump = [...programs].some((p) => PUMP_PROGRAM_IDS.has(p)) || keys.some((k) => PUMP_PROGRAM_IDS.has(k));
   const deltaSol = (tx.meta.postBalances[i] - tx.meta.preBalances[i]) / LAMPORTS;
-  // A claim drains a vault PDA and credits the wallet in the same transaction. Count only what the vault lost,
-  // capped by what the wallet gained, so swaps or unrelated inbound transfers never register as creator fees.
+  // A claim drains a vault and credits the creator in the same transaction. Count only what the vaults lost,
+  // capped by what the creator gained (as SOL, or as wrapped SOL in its own WSOL account when the claim is not
+  // unwrapped), so swaps or unrelated inbound transfers never register as creator fees.
   const vaults = creatorVaults(address);
-  let vaultOut = 0;
-  for (const v of [vaults.bonding, vaults.amm]) {
-    const j = keys.indexOf(v);
-    if (j >= 0) vaultOut += Math.max(0, tx.meta.preBalances[j] - tx.meta.postBalances[j]);
-  }
-  const creatorFeeSol = pump && deltaSol > 0 && vaultOut > 0 ? Math.min(vaultOut / LAMPORTS, deltaSol) : 0;
+  const lamDelta = (k: string) => {
+    const j = keys.indexOf(k);
+    return j >= 0 ? tx.meta.postBalances[j] - tx.meta.preBalances[j] : 0;
+  };
+  const vaultOut = [vaults.bonding, vaults.amm, vaults.ammWsol].reduce((s, v) => s + Math.max(0, -lamDelta(v)), 0);
+  const gained = Math.max(0, lamDelta(address)) + Math.max(0, lamDelta(vaults.creatorWsol));
+  const creatorFeeSol = pump && vaultOut > 0 && gained > 0 ? Math.min(vaultOut, gained) / LAMPORTS : 0;
   return { signature, at: blockTime ? blockTime * 1000 : null, deltaSol, pump, creatorFeeSol };
 }
 
