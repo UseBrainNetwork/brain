@@ -291,6 +291,13 @@ function syntheticPaceMs(): number {
   return n >= 0 ? n : 3_000;
 }
 
+/** Milliseconds until this node's synthetic pacing window reopens (0 when it may take work now). */
+export function syntheticWaitMs(node: StoredNode, now = Date.now()): number {
+  const paceMs = syntheticPaceMs();
+  if (paceMs <= 0 || !node.lastSyntheticAt) return 0;
+  return Math.max(0, paceMs - (now - node.lastSyntheticAt));
+}
+
 export async function nextJob(node: StoredNode, opts: { distributedOnly?: boolean } = {}): Promise<StoredJob | null> {
   if (!isLive(node)) throw new NodeError("not_joined", 409);
   const store = getStore();

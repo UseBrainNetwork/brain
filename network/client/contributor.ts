@@ -270,15 +270,14 @@ class ContributorEngine {
     while (this.running && this.backend && this.session) {
       try {
         const worker = this.state.workerMode;
-        const { job } = await postJson<{ job: { id: string; kind: WorkloadKind; model: string; spec: WorkloadSpec; units: number; parentId?: string; unitId?: string } | null }>(
-          "/api/jobs/next",
-          { distributedOnly: worker },
-          this.session,
-        );
+        const { job, retryMs } = await postJson<{
+          job: { id: string; kind: WorkloadKind; model: string; spec: WorkloadSpec; units: number; parentId?: string; unitId?: string } | null;
+          retryMs?: number;
+        }>("/api/jobs/next", { distributedOnly: worker }, this.session);
         if (!job) {
-          // Nothing assigned: idle until the server announces work for us (or a slow re-poll).
+          // Nothing assigned: idle until the server announces work for us, or for as long as it told us to.
           if (this.state.current) this.set({ current: null });
-          await this.waitForWork(3500);
+          await this.waitForWork(Math.min(30_000, Math.max(3500, retryMs ?? 0)));
           continue;
         }
         const entry: JobLogEntry = { id: job.id, kind: job.kind, model: job.model, parentId: job.parentId, unitId: job.unitId, status: "received" };
