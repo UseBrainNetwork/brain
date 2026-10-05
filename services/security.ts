@@ -59,6 +59,14 @@ export function json(data: unknown, init?: number | ResponseInit) {
   return Response.json(data, { ...resInit, headers: { "Cache-Control": "no-store", ...(resInit?.headers ?? {}) } });
 }
 
+/**
+ * Public, identical-for-everyone read. Short CDN cache (s-maxage) so N viewers polling every few
+ * seconds cost one database read per edge region, not N. Browsers still revalidate (max-age=0).
+ */
+export function sharedJson(data: unknown, seconds = 3) {
+  return json(data, { headers: { "Cache-Control": `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=${seconds * 5}` } });
+}
+
 export function tooMany() {
   return json({ error: "rate_limited" }, 429);
 }

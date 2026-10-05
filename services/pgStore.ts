@@ -31,9 +31,11 @@ export class PgStore implements NetworkStore {
     const ssl = local ? undefined : { rejectUnauthorized: false };
     // Fail fast rather than hang: a serverless instance that cannot get a connection in 8s or finish
     // a statement in 15s should return an error, not hold the request open until the platform kills it.
-    const common = { connectionString: cs, ssl, connectionTimeoutMillis: 8_000, idleTimeoutMillis: 10_000, statement_timeout: 15_000, query_timeout: 15_000 };
-    this.pool = new Pool({ ...common, max: 5 });
-    this.lockPool = new Pool({ ...common, max: 3 });
+    // Behind Supabase/pgbouncer the whole project shares ~200 client slots, and every warm serverless
+    // instance holds its idle connections. Keep per-instance pools small and release idle sockets fast.
+    const common = { connectionString: cs, ssl, connectionTimeoutMillis: 8_000, idleTimeoutMillis: 2_000, allowExitOnIdle: true, statement_timeout: 15_000, query_timeout: 15_000 };
+    this.pool = new Pool({ ...common, max: 3 });
+    this.lockPool = new Pool({ ...common, max: 2 });
     this.ready = this.migrate();
   }
 

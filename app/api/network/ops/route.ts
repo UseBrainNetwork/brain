@@ -7,7 +7,7 @@ import { listJobs, realSummary } from "@/services/distributed";
 import { listProfiles } from "@/services/nodeProfile";
 import { liveNodes } from "@/services/nodes";
 import { listReceipts } from "@/services/receipts";
-import { json } from "@/services/security";
+import { json, sharedJson } from "@/services/security";
 import { getStore } from "@/services/store";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ export const GET = nodeRoute(async () => {
   };
   const store = getStore();
   const backend = "kind" in store && typeof (store as { kind?: () => string }).kind === "function" ? (store as { kind: () => string }).kind() : "memory";
-  return json({ source: "REAL", backend, nodes, summary, jobs, receipts, orders: orders.map(publicOrder), requests, profiles, economics: snap, observability, recentEvents: eventBus.history(Date.now() - 15 * 60_000).filter((e) => e.type !== "node.heartbeat").slice(-40).reverse().map(describe) });
+  return sharedJson({ source: "REAL", backend, nodes, summary, jobs, receipts, orders: orders.map(publicOrder), requests, profiles, economics: snap, observability, recentEvents: eventBus.history(Date.now() - 15 * 60_000).filter((e) => e.type !== "node.heartbeat").slice(-40).reverse().map(describe) });
 });
 
 function stage(j: { lifecycle: { stage: string; at: number }[] }, s: string) {
