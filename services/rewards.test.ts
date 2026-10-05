@@ -343,10 +343,10 @@ describe("end to end: verified work → linked wallet → auto-settle from creat
     await s.putDoc("treasury", "REAL", t, { at: Date.now(), key: "REAL" });
     await record({ type: "CREATOR_REWARD_RECEIVED", amount: 29.78, currency: "SOL", timestamp: Date.now(), source: "REAL", settlement: "settled", transactionReference: "4DLu9xqbYcSIG" });
 
-    // Hourly pacing over one day: each epoch gets 1/24 of the 70% contributor share.
+    // Hourly pacing over one day: each epoch gets 1/24 of the 50% contributor share.
     const hour = 60 * 60_000;
     const pool = await treasuryPoolLamports(hour);
-    expect(pool).toBe(Math.floor((29.78 * 0.7) / 24 * 1e9));
+    expect(pool).toBe(Math.floor((29.78 * 0.5) / 24 * 1e9));
 
     // Work in the last closed hour. Node A linked a wallet, node B did not.
     const w = wallet();

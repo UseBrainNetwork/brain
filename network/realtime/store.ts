@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from "react";
 import type { ComputeJob, ComputeNode, ModelPool, NetworkEvent, NetworkMetrics } from "@/domain/types";
 import { getBaselineMetrics, getModelPools } from "@/services/data";
+import { defaultRevenueSplit } from "@/rewards/config";
 import { getMode, onModeChange } from "./mode";
 import { createSources } from "./sources";
 
@@ -269,7 +270,7 @@ class NetworkStoreImpl {
         requestsPerSec: rps,
         inferencesToday: m.inferencesToday + rps,
         creatorRewardsTodayUsd: creator,
-        paidToProvidersTodayUsd: m.paidToProvidersTodayUsd + (creator - m.creatorRewardsTodayUsd) * 0.7,
+        paidToProvidersTodayUsd: m.paidToProvidersTodayUsd + (creator - m.creatorRewardsTodayUsd) * defaultRevenueSplit.creatorRewards.contributors,
       },
     });
   }

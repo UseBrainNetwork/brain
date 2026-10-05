@@ -62,7 +62,7 @@ export interface RevenueSplitConfig {
 }
 
 export const defaultRevenueSplit: RevenueSplitConfig = {
-  creatorRewards: { contributors: 0.7, buyback: 0, infrastructure: 0.2, treasury: 0.1 },
+  creatorRewards: { contributors: 0.5, buyback: 0, infrastructure: 0.2, treasury: 0.3 },
   inferenceRevenue: { contributors: 0.6, buyback: 0.3, infrastructure: 0.1, treasury: 0 },
 };
 

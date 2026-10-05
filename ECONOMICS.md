@@ -23,7 +23,7 @@ Both feed the same ledger (`services/accounting.ts`), keyed by `source`. `/econo
 | Pool | Compute providers | Buyback / protocol | Infrastructure | Treasury |
 | --- | --- | --- | --- | --- |
 | Inference / compute revenue | 60 % | 30 % | 10 % | 0 % |
-| Creator rewards | 70 % | 0 % | 20 % | 10 % |
+| Creator rewards | 50 % | 0 % | 20 % | 30 % |
 
 Provider shares of a priced receipt are divided across nodes **by verified compute units** in that job. Buyback is a protocol-revenue line in the ledger; no buyback is executed.
 
