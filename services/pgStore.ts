@@ -25,6 +25,7 @@ export class PgStore implements NetworkStore {
       u.searchParams.delete("sslmode");
       u.searchParams.delete("ssl");
       cs = u.toString();
+      this.portNum = u.port ? Number(u.port) : 5432;
     } catch {
       /* not a URL-shaped string; pass through */
     }
@@ -106,6 +107,57 @@ export class PgStore implements NetworkStore {
   }
 
   /** Which backend is serving, for operational views. */
+  /** Which port the connection string targets (5432 direct/session pooler, 6543 transaction pooler). Never the host or credentials. */
+  port(): number | null {
+    return this.portNum;
+  }
+  private portNum: number | null = null;
+
+  /**
+   * Aggregate health facts for operators and the public status page. Contains no row data, no
+   * credentials and no hostnames: table sizes, dead-row counts, connection counts, slow statements.
+   */
+  async diagnostics() {
+    const t0 = Date.now();
+    await this.q("SELECT 1");
+    const pingMs = Date.now() - t0;
+    const [tables, conns, slow, idx, settings] = await Promise.all([
+      this.q<{ relname: string; live: string; dead: string; bytes: string; last_autovacuum: string | null; last_autoanalyze: string | null }>(
+        `SELECT relname, n_live_tup::text AS live, n_dead_tup::text AS dead, pg_total_relation_size(relid)::text AS bytes,
+                last_autovacuum::text, last_autoanalyze::text
+           FROM pg_stat_user_tables WHERE relname LIKE 'brain_%' ORDER BY pg_total_relation_size(relid) DESC`,
+      ),
+      this.q<{ state: string | null; n: string }>(`SELECT coalesce(state, 'other') AS state, count(*)::text AS n FROM pg_stat_activity WHERE datname = current_database() GROUP BY 1`),
+      this.q<{ n: string; oldest_s: string | null }>(
+        `SELECT count(*)::text AS n, extract(epoch FROM max(now() - query_start))::int::text AS oldest_s
+           FROM pg_stat_activity WHERE datname = current_database() AND state = 'active' AND pid <> pg_backend_pid() AND now() - query_start > interval '2 seconds'`,
+      ),
+      this.q<{ tablename: string; indexname: string }>(`SELECT tablename, indexname FROM pg_indexes WHERE tablename LIKE 'brain_%' ORDER BY 1, 2`),
+      this.q<{ name: string; setting: string }>(`SELECT name, setting FROM pg_settings WHERE name IN ('max_connections', 'server_version', 'shared_buffers', 'work_mem')`),
+    ]);
+    let statements: { calls: number; meanMs: number; totalS: number; rows: number; query: string }[] | null = null;
+    try {
+      const r = await this.q<{ calls: string; mean_exec_time: string; total_exec_time: string; rows: string; query: string }>(
+        `SELECT calls::text, mean_exec_time::text, total_exec_time::text, rows::text, left(query, 140) AS query
+           FROM pg_stat_statements WHERE query LIKE '%brain_%' AND query NOT LIKE '%pg_stat%'
+          ORDER BY total_exec_time DESC LIMIT 10`,
+      );
+      statements = r.rows.map((x) => ({ calls: Number(x.calls), meanMs: Math.round(Number(x.mean_exec_time) * 10) / 10, totalS: Math.round(Number(x.total_exec_time) / 100) / 10, rows: Number(x.rows), query: x.query.replace(/\s+/g, " ") }));
+    } catch {
+      statements = null; // extension not enabled
+    }
+    return {
+      pingMs,
+      port: this.port(),
+      tables: tables.rows.map((x) => ({ table: x.relname, liveRows: Number(x.live), deadRows: Number(x.dead), mb: Math.round(Number(x.bytes) / 1048576), lastAutovacuum: x.last_autovacuum, lastAutoanalyze: x.last_autoanalyze })),
+      connections: Object.fromEntries(conns.rows.map((x) => [x.state ?? "other", Number(x.n)])),
+      slowActive: { count: Number(slow.rows[0]?.n ?? 0), oldestSeconds: slow.rows[0]?.oldest_s == null ? null : Number(slow.rows[0].oldest_s) },
+      indexes: idx.rows.map((x) => `${x.tablename}.${x.indexname}`),
+      settings: Object.fromEntries(settings.rows.map((x) => [x.name, x.setting])),
+      statements,
+    };
+  }
+
   kind() {
     return "postgres" as const;
   }
