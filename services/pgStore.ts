@@ -182,8 +182,9 @@ export class PgStore implements NetworkStore {
     );
     return r.rows.map<WorkAggregate>((x) => ({ nodeId: x.node_id, status: x.status, verified: Boolean(x.verified), jobs: Number(x.jobs), computeUnits: Number(x.units), buckets: x.buckets.map(Number) }));
   }
-  async listOpenJobs(limit: number) {
-    const r = await this.q(`SELECT data FROM brain_jobs WHERE status NOT IN ('completed', 'failed') ORDER BY submitted_at DESC LIMIT $1`, [limit]);
+  async listOpenJobs(limit: number, since: number) {
+    // Bounded by the recent-index range so this never walks the whole table looking for open rows.
+    const r = await this.q(`SELECT data FROM brain_jobs WHERE submitted_at > $2 AND status NOT IN ('completed', 'failed') ORDER BY submitted_at DESC LIMIT $1`, [limit, since]);
     return r.rows.map((x) => x.data as StoredJob);
   }
   async listJobsBetween(from: number, to: number) {

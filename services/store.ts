@@ -80,8 +80,8 @@ export interface NetworkStore {
    * (node, status, verified) with counts, verified compute units and the distinct availability buckets.
    */
   aggregateWork(from: number, to: number, bucketMs: number): Promise<WorkAggregate[]>;
-  /** Jobs still in flight (not completed/failed) among the most recent `limit`. */
-  listOpenJobs(limit: number): Promise<StoredJob[]>;
+  /** Jobs still in flight (not completed/failed) submitted after `since`, newest first. */
+  listOpenJobs(limit: number, since: number): Promise<StoredJob[]>;
   getEpoch(id: string): Promise<RewardEpoch | null>;
   /** Writes the epoch and its allocations atomically. Returns false if the epoch already exists. */
   saveSettlement(epoch: RewardEpoch, allocations: RewardAllocation[]): Promise<boolean>;
@@ -230,8 +230,8 @@ export class MemoryStore implements NetworkStore {
     }
     return [...m.values()].map(({ b, ...a }) => ({ ...a, buckets: [...b] }));
   }
-  async listOpenJobs(limit: number) {
-    return (await this.listRecentJobs(limit)).filter((j) => j.status !== "completed" && j.status !== "failed");
+  async listOpenJobs(limit: number, since: number) {
+    return (await this.listRecentJobs(limit)).filter((j) => j.status !== "completed" && j.status !== "failed" && j.submittedAt > since);
   }
   async getEpoch(id: string) {
     return this.epochs.get(id) ?? null;

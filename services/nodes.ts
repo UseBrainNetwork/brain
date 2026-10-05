@@ -197,7 +197,7 @@ export async function sweepOffline() {
       await nodeLost(n.id);
     }
   }
-  for (const j of await store.listOpenJobs(200)) {
+  for (const j of await store.listOpenJobs(200, now - 10 * 60_000)) {
     if (now > j.deadline) {
       await store.saveJob({ ...j, status: "failed", failReason: "deadline", lifecycle: [...j.lifecycle, { stage: "failed", at: now, detail: "deadline exceeded" }] });
       if (j.parentId) await unitLost(j, "deadline");

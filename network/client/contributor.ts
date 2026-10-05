@@ -283,7 +283,7 @@ class ContributorEngine {
         }
         const entry: JobLogEntry = { id: job.id, kind: job.kind, model: job.model, parentId: job.parentId, unitId: job.unitId, status: "received" };
         this.set({ current: entry });
-        if (!worker) await sleep(first ? 1100 : 180);
+        if (!worker) await sleep(first ? 1100 : 1500);
         if (job.parentId) await postJson("/api/jobs/start", { jobId: job.id }, this.session).catch(() => {});
 
         this.set({ current: { ...entry, status: "computing" } });
