@@ -139,6 +139,8 @@ weight_i = verifiedCompute_i × min(1 + α·ln(1 + normalizedHoldings_i), M) × 
 share_i  = weight_i / Σ weight, water-filled under a per-account cap
 ```
 
+Protocol wallet (creator fees land here, read on-chain at `/economics` and `/rewards`): `HZLev74M3ATV5jQJsoN8FcJAKx3RUefAobhcXr3egxwa`. The server never holds its key.
+
 Tested properties: zero verified compute earns zero regardless of holdings; the holding multiplier is capped (1.35×) and concave, so splitting compute across sybil nodes gains nothing; no account exceeds the pool cap; allocations never exceed the pool. No emissions, no staking yield, no projected returns. Prices, splits and how list prices were derived: [ECONOMICS.md](ECONOMICS.md).
 
 <img src=".github/assets/divider.svg" width="100%" alt="">
@@ -218,7 +220,7 @@ heartbeat 5 s    ─────────────────────
 | `BRAIN_PRICE_USD_PER_1M_TOKENS` / `BRAIN_FALLBACK_PRICE_USD_PER_1M` / `BRAIN_EXTERNAL_PRICE_USD_PER_1M` | Chat list price and each upstream's cost. Unset = `UNKNOWN`, never estimated |
 | `BRAIN_EXTERNAL_EMBED_MODEL` | Enables `/v1/embeddings` passthrough |
 | `BRAIN_CREDIT_USD`, `BRAIN_PLAN_FREE_CREDITS`, `BRAIN_PLAN_PRO_USD` / `_CREDITS`, `BRAIN_PLAN_MAX_USD` / `_CREDITS` | Credit value and plan allowances |
-| `SOLANA_RPC_URL` + `BRAIN_TOKEN_MINT` | Real SPL holdings lookup |
+| `SOLANA_RPC_URL` + `BRAIN_TOKEN_MINT` | Real SPL holdings lookup. The protocol-wallet read falls back to the public RPC when unset |
 | `BRAIN_SERVER_SECRET` | HMAC key for sessions and claims. Required in production |
 | `BRAIN_ADMIN_TOKEN` · `BRAIN_DEMO_TOKEN` | Operator routes · optional gate on console job/order creation |
 | `BRAIN_PAYOUTS_ENABLED` + `BRAIN_PAYOUT_SECRET_KEY` | SOL claim payouts. Off by default |

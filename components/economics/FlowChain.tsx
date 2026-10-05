@@ -30,8 +30,8 @@ export function FlowChain() {
   if (!sim)
     return (
       <SimFallback
-        title="No real money has moved through this chain yet."
-        body="Creator fees need a live token and inference sales need API billing. Until both are connected, every dollar value in this chain is modelled. The split percentages (contributors, buyback, infrastructure, treasury) are the published config and are real."
+        title="No creator fees or inference sales recorded yet."
+        body="Creator fees land in the protocol wallet above once the token is live; inference sales need API billing. Until a transaction is recorded in the ledger, every dollar value in this chain is modelled. The split percentages (contributors, buyback, infrastructure, treasury) are the published config and are real."
       />
     );
   const dur = 7;

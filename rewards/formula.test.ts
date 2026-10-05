@@ -70,13 +70,17 @@ describe("weights", () => {
     }
   });
 
-  it("an average proportional holder earns sqrt(1/λ)×", () => {
-    expect(tokenMultiplier(1, 1, cfg)).toBeCloseTo(Math.sqrt(1 / cfg.nonHolderBaseline));
+  // Curve-shape properties, measured below the cap (the production cap of 1.35 binds first).
+  const uncapped = { ...cfg, maxMultiplier: Infinity };
+
+  it("an average proportional holder earns sqrt(1/λ)× before the cap", () => {
+    expect(tokenMultiplier(1, 1, uncapped)).toBeCloseTo(Math.sqrt(1 / cfg.nonHolderBaseline));
+    expect(tokenMultiplier(1, 1, cfg)).toBeLessThanOrEqual(cfg.maxMultiplier);
   });
 
   it("token weighting has diminishing returns (doubling tokens < doubling reward)", () => {
-    const m1 = tokenMultiplier(1, 1, cfg);
-    const m2 = tokenMultiplier(1, 2, cfg);
+    const m1 = tokenMultiplier(1, 1, uncapped);
+    const m2 = tokenMultiplier(1, 2, uncapped);
     expect(m2).toBeGreaterThan(m1);
     expect(m2 / m1).toBeLessThan(2);
     expect(m2 / m1).toBeCloseTo(Math.SQRT2);

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { EarningsCalculator } from "@/components/economics/EarningsCalculator";
 import { FlowChain } from "@/components/economics/FlowChain";
+import { ProtocolWalletCard } from "@/components/economics/ProtocolWallet";
 import { Flywheel } from "@/components/economics/Flywheel";
 import { HolderAccess } from "@/components/economics/HolderAccess";
 import { MoneyFlow } from "@/components/economics/MoneyFlow";
@@ -86,9 +87,10 @@ export default function RewardsPage() {
           <div className="mb-14 flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <h2 className="display-md text-[36px] md:text-[56px]">Where rewards come from</h2>
             <p className="max-w-[440px] text-[14.5px] leading-relaxed text-chalk/55">
-              The contributor pool is funded by creator fees and inference sales, split by published percentages each epoch. No real money has flowed yet; the protocol wallet and API billing are not connected. Modelled values are available under “Show simulated data” in the footer, labelled SIM.
+              The contributor pool is funded by creator fees and inference sales, split by published percentages each epoch. The protocol wallet is published below and read from chain; API billing is not connected yet. Modelled values are available under “Show simulated data” in the footer, labelled SIM.
             </p>
           </div>
+          <ProtocolWalletCard className="mb-10" />
           <MoneyFlow className="mb-20 hidden md:block" />
           <FlowChain />
         </Container>

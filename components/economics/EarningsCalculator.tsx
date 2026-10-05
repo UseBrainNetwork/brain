@@ -164,7 +164,7 @@ export function EarningsCalculator({ compact = false }: { compact?: boolean }) {
     return (
       <SimFallback
         title="No reward estimate yet."
-        body={`The contributor pool is funded by creator fees and inference sales. Neither is connected, so the real pool today is $0 and any dollar figure here would be made up.${measured != null ? ` Your measured score of ${fmtInt(measured)} is real and recorded.` : " Measuring your GPU on /earn is real and takes about a minute."} The estimator can run against a modelled network, clearly labelled SIM.`}
+        body={`The contributor pool is funded by creator fees paid to the protocol wallet and by inference sales. Nothing has been recorded yet, so the real pool today is $0 and any dollar figure here would be made up.${measured != null ? ` Your measured score of ${fmtInt(measured)} is real and recorded.` : " Measuring your GPU on /earn is real and takes about a minute."} The estimator can run against a modelled network, clearly labelled SIM.`}
       />
     );
 

@@ -15,7 +15,11 @@ export interface RewardConfig {
    * 1 = Sybil-neutral. <1 adds diminishing returns but slightly rewards splitting wallets.
    */
   tokenExponent: number;
-  /** Hard ceiling on the token multiplier. Bounds every node's reward by its own compute. */
+  /**
+   * Hard ceiling on the token multiplier. Bounds every node's reward by its own compute.
+   * Kept equal to rewards/engine.ts maxHoldingMultiplier (1.35) so the calculator never promises
+   * more than settlement pays.
+   */
   maxMultiplier: number;
   /** Exponents on quality factors (0 disables a factor). */
   qualityWeights: { reliability: number; completion: number; availability: number };
@@ -32,7 +36,7 @@ export const defaultRewardConfig: RewardConfig = {
   nonHolderBaseline: 0.5,
   tokenShareCap: 0.01,
   tokenExponent: 1,
-  maxMultiplier: 3,
+  maxMultiplier: 1.35,
   qualityWeights: { reliability: 1, completion: 1, availability: 0.5 },
   minVerificationPassRate: 0.9,
   minVerifiedCompute: 0,
