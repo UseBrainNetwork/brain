@@ -242,7 +242,11 @@ export async function settleEpoch(opts: SettleOptions): Promise<{ epoch: RewardE
  * What a wallet has accrued so far in the open epoch, against the reference pool pro-rated
  * to elapsed time. Uses holdings snapshotted at wallet link time. ESTIMATE, never claimable.
  */
-export async function currentProgress(wallet: string, now = Date.now()): Promise<CurrentEpochProgress> {
+/** Network-wide open-epoch picture; identical for every wallet, so shared per instance for a few seconds. */
+const PROGRESS_TTL_MS = 15_000;
+let progressCache: { at: number; value: Promise<{ e: ReturnType<typeof epochAt>; now: number; inputs: ReturnType<typeof toInput>[]; networkVerifiedCompute: number; result: ReturnType<typeof computeEpoch> }> } | null = null;
+
+async function networkProgress(now: number) {
   const e = epochAt(now);
   const { wallets, networkVerifiedCompute } = await measureWork(e.startsAt, now);
   const elapsedBuckets = Math.max(1, Math.ceil((now - e.startsAt) / networkConfig.rewards.availabilityBucketMs));
@@ -250,6 +254,18 @@ export async function currentProgress(wallet: string, now = Date.now()): Promise
   const lastLive = (await getStore().listEpochs(30)).find((x) => x.provenance === "live");
   const refPool = lastLive?.poolLamports ?? configuredPoolLamports() ?? demoPoolLamports(e.endsAt - e.startsAt);
   const result = computeEpoch(inputs, refPool * ((now - e.startsAt) / (e.endsAt - e.startsAt)), defaultRewardConfig);
+  return { e, now, inputs, networkVerifiedCompute, result };
+}
+
+export async function currentProgress(wallet: string, now = Date.now()): Promise<CurrentEpochProgress> {
+  if (!progressCache || now - progressCache.at > PROGRESS_TTL_MS || epochAt(now).id !== epochAt(progressCache.at).id) {
+    const value = networkProgress(now);
+    progressCache = { at: now, value };
+    value.catch(() => {
+      if (progressCache?.value === value) progressCache = null;
+    });
+  }
+  const { e, inputs, networkVerifiedCompute, result } = await progressCache.value;
   const i = inputs.findIndex((x) => x.id === wallet);
   const r = i >= 0 ? result.rewards[i] : null;
   return {
