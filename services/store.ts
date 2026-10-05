@@ -25,6 +25,8 @@ export interface WorkAggregate {
   nodeId: string;
   status: string;
   verified: boolean;
+  /** Why a failed row failed: "deadline" / "node lost" are server- or network-side; anything else is a verification outcome. */
+  failReason: string | null;
   jobs: number;
   computeUnits: number;
   buckets: number[];
@@ -232,9 +234,10 @@ export class MemoryStore implements NetworkStore {
   async aggregateWork(from: number, to: number, bucketMs: number) {
     const m = new Map<string, WorkAggregate & { b: Set<number> }>();
     for (const j of await this.listJobsBetween(from, to)) {
-      const k = `${j.assignedTo}|${j.status}|${Boolean(j.verified)}`;
+      const reason = j.failReason ?? null;
+      const k = `${j.assignedTo}|${j.status}|${Boolean(j.verified)}|${reason ?? ""}`;
       let a = m.get(k);
-      if (!a) m.set(k, (a = { nodeId: j.assignedTo, status: j.status, verified: Boolean(j.verified), jobs: 0, computeUnits: 0, buckets: [], b: new Set() }));
+      if (!a) m.set(k, (a = { nodeId: j.assignedTo, status: j.status, verified: Boolean(j.verified), failReason: reason, jobs: 0, computeUnits: 0, buckets: [], b: new Set() }));
       a.jobs++;
       a.computeUnits += j.computeUnits;
       a.b.add(Math.floor(j.submittedAt / bucketMs));

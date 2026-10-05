@@ -49,3 +49,22 @@ export function fmtSol(lamports: number, unit = true): string {
   const digits = sol === 0 ? 2 : Math.abs(sol) >= 100 ? 2 : Math.abs(sol) >= 1 ? 3 : Math.abs(sol) >= 0.01 ? 4 : 6;
   return `${sol.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}${unit ? " SOL" : ""}`;
 }
+
+/**
+ * Plain-words reason a wallet is not being paid in the open epoch, for the node card. Mirrors
+ * rewards/formula.ts eligibility(); never invents a reason the engine did not give.
+ */
+export function ineligibleCopy(reason: string | undefined, passRate: number | null): string | null {
+  switch (reason) {
+    case undefined:
+      return null;
+    case "no-verified-compute":
+      return "Not eligible yet this hour: no verified units recorded. Keep the tab open; units count once the server verifies them.";
+    case "verification-below-threshold":
+      return `Not eligible this hour: verification pass rate ${passRate == null ? "below" : `${Math.round(passRate * 100)}% is below`} the 90% minimum. Only results you returned count; expired units do not.`;
+    case "banned":
+      return "This node is banned from rewards.";
+    default:
+      return `Not eligible this hour: ${reason}.`;
+  }
+}

@@ -6,7 +6,7 @@ import { balanceOf, claim, issueClaim, payoutStatus, setPayoutSender } from "./c
 import type { PayoutSender } from "./payouts";
 import { keyFromSecret, signedTransfer, transferMessage } from "./payouts";
 import { rewardsSummary } from "./rewardsSummary";
-import { epochAt, epochLengthMs, settleEpoch } from "./settlement";
+import { epochAt, epochLengthMs, measureWork, settleEpoch } from "./settlement";
 import { MemoryStore, type StoredJob, type StoredNode } from "./store";
 import { base58Encode } from "./wallet";
 
@@ -150,6 +150,37 @@ describe("payout transaction", () => {
 describe("settlement", () => {
   const len = () => epochLengthMs();
   const start = () => epochAt(Date.now() - 2 * len()).startsAt;
+
+  it("expired or reassigned units lower the completion factor but do not disqualify; wrong results still do", async () => {
+    const [w1, w2, w3] = [wallet(), wallet(), wallet()];
+    const s = store();
+    await s.saveNode(node("B001", w1.address));
+    await s.saveNode(node("B002", w2.address));
+    await s.saveNode(node("B003", w3.address));
+    const t0 = start();
+    for (let i = 0; i < 10; i++) {
+      await s.saveJob(job("B001", t0 + i * 60_000, 10));
+      await s.saveJob(job("B002", t0 + i * 60_000, 10));
+      await s.saveJob(job("B003", t0 + i * 60_000, 10));
+    }
+    // B001: 10 verified + 10 units the server expired while it was slow (the incident pattern).
+    for (let i = 0; i < 10; i++) await s.saveJob({ ...job("B001", t0 + 30_000 + i * 60_000, 10, false), failReason: "deadline" });
+    // B002: 10 verified + 3 results that failed verification -> pass rate 77% < 90%.
+    for (let i = 0; i < 3; i++) await s.saveJob({ ...job("B002", t0 + 30_000 + i * 60_000, 10, false), failReason: "sample mismatch" });
+
+    const { wallets } = await measureWork(t0, t0 + len());
+    const by = Object.fromEntries(wallets.map((w) => [w.wallet, w]));
+    expect(by[w1.address].passed / by[w1.address].checked).toBe(1); // deadlines not counted as checks
+    expect(by[w1.address].jobsCompleted / by[w1.address].jobsAssigned).toBe(0.5); // but completion reflects them
+    expect(by[w2.address].passed / by[w2.address].checked).toBeLessThan(0.9);
+
+    await settleEpoch({ epochStart: t0, poolLamports: 1_000_000_000 });
+    const [a1, a2, a3] = await Promise.all([w1, w2, w3].map((w) => s.allocationsForWallet(w.address)));
+    expect(a1).toHaveLength(1);
+    expect(a1[0].lamports).toBeGreaterThan(0);
+    expect(a3).toHaveLength(1);
+    expect(a2).toHaveLength(0); // wrong results still disqualify
+  });
 
   it("pays only verified compute from wallet-linked, non-banned nodes", async () => {
     const [w1, w2, w3] = [wallet(), wallet(), wallet()];

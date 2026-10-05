@@ -14,7 +14,7 @@ import { WalletModal } from "@/components/wallet/WalletButton";
 import { contributor, useContributor, type ContributorState } from "@/network/client/contributor";
 import { useWallet, walletStore } from "@/lib/wallet/store";
 import { deviceLabel } from "@/services/mock/mockData";
-import { cx, fmtDuration, fmtInt, fmtPct, fmtSol, fmtUsd, shortAddr } from "@/lib/format";
+import { cx, fmtDuration, fmtInt, fmtPct, fmtSol, fmtUsd, shortAddr, ineligibleCopy } from "@/lib/format";
 import type { NodeEconomics } from "@/services/nodeProfile";
 import type { RewardsSummary } from "@/domain/types";
 import { BenchResult, BenchViz, DeviceReport, JobRow, MomentTicker, StepShell } from "./parts";
@@ -297,6 +297,7 @@ function NodeDashboard({ s, onWallet }: { s: ContributorState; onWallet: () => v
                 ? `${fmtInt(rw.current.verifiedCompute)} of ${fmtInt(rw.current.networkVerifiedCompute)} network units · epoch ${rw.current.epochId.slice(2)} · settles on the hour`
                 : "Loading your share of the open epoch…"
               : "Projected share of the open epoch. Needs a linked wallet."}
+            {linked && rw && !rw.current.eligible && <span className="mt-1 block text-warn/80">{ineligibleCopy(rw.current.ineligibleReason, rw.current.verificationPassRate)}</span>}
           </div>
         </div>
         <div className="bg-ink-2 px-5 py-4 md:px-6">

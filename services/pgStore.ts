@@ -264,15 +264,15 @@ export class PgStore implements NetworkStore {
     return (r.rows[0]?.data as StoredChallenge) ?? null;
   }
   async aggregateWork(from: number, to: number, bucketMs: number) {
-    const r = await this.q<{ node_id: string; status: string; verified: boolean | null; jobs: number; units: string; buckets: number[] }>(
-      `SELECT assigned_to AS node_id, status, (data->>'verified')::boolean AS verified, count(*)::int AS jobs,
+    const r = await this.q<{ node_id: string; status: string; verified: boolean | null; fail_reason: string | null; jobs: number; units: string; buckets: number[] }>(
+      `SELECT assigned_to AS node_id, status, (data->>'verified')::boolean AS verified, data->>'failReason' AS fail_reason, count(*)::int AS jobs,
               coalesce(sum((data->>'computeUnits')::numeric), 0)::text AS units,
               array_agg(DISTINCT floor(submitted_at / $3)::bigint) AS buckets
          FROM brain_jobs WHERE submitted_at >= $1 AND submitted_at < $2
-        GROUP BY 1, 2, 3`,
+        GROUP BY 1, 2, 3, 4`,
       [from, to, bucketMs],
     );
-    return r.rows.map<WorkAggregate>((x) => ({ nodeId: x.node_id, status: x.status, verified: Boolean(x.verified), jobs: Number(x.jobs), computeUnits: Number(x.units), buckets: x.buckets.map(Number) }));
+    return r.rows.map<WorkAggregate>((x) => ({ nodeId: x.node_id, status: x.status, verified: Boolean(x.verified), failReason: x.fail_reason ?? null, jobs: Number(x.jobs), computeUnits: Number(x.units), buckets: x.buckets.map(Number) }));
   }
   async listOpenJobs(limit: number, since: number) {
     // Bounded by the recent-index range so this never walks the whole table looking for open rows.

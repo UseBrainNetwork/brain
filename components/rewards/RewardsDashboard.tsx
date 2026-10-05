@@ -8,7 +8,7 @@ import { Button, Prov } from "@/components/ui";
 import { WalletButton } from "@/components/wallet/WalletButton";
 import { useWallet, walletStore } from "@/lib/wallet/store";
 import { useSim } from "@/network/realtime/mode";
-import { cx, fmtCompact, fmtDuration, fmtSol, shortAddr } from "@/lib/format";
+import { cx, fmtCompact, fmtDuration, fmtSol, shortAddr, ineligibleCopy } from "@/lib/format";
 
 type ClaimState = { step: "idle" } | { step: "preparing" | "signing" | "sending" } | { step: "done"; claim: RewardClaim } | { step: "error"; message: string };
 
@@ -190,6 +190,7 @@ export function RewardsDashboard() {
               <div className="h-full rounded-full bg-signal transition-[width] duration-1000" style={{ width: `${elapsed * 100}%` }} />
             </div>
           </div>
+          {!cur.eligible && cur.verifiedCompute > 0 && <p className="mt-5 font-mono text-[12px] leading-relaxed text-warn/80">{ineligibleCopy(cur.ineligibleReason, cur.verificationPassRate)}</p>}
           <dl className="mt-7 grid grid-cols-2 gap-x-6 gap-y-5">
             <Stat k="Verified units" v={fmtCompact(cur.verifiedCompute, 1)} />
             <Stat k="Network share" v={cur.networkVerifiedCompute > 0 ? `${((cur.verifiedCompute / cur.networkVerifiedCompute) * 100).toFixed(2)}%` : "—"} />

@@ -201,6 +201,11 @@ export interface CurrentEpochProgress {
   multiplier: number;
   /** Projection against the reference pool; never claimable until the epoch settles. */
   projectedLamports: number;
+  /** Whether this wallet would be paid if the epoch closed now, and why not if not. */
+  eligible: boolean;
+  ineligibleReason?: string;
+  /** verified ÷ (verified + failed verification) for results the node returned this epoch. null without data. */
+  verificationPassRate: number | null;
   provenance: "estimated";
 }
 

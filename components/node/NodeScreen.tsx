@@ -7,7 +7,7 @@ import { Prov } from "@/components/ui";
 import { PayoutEmail } from "@/components/wallet/PayoutEmail";
 import { WalletButton } from "@/components/wallet/WalletButton";
 import type { RewardsSummary } from "@/domain/types";
-import { cx, fmtInt, fmtSol, shortAddr } from "@/lib/format";
+import { cx, fmtInt, fmtSol, shortAddr, ineligibleCopy } from "@/lib/format";
 import { useKeepAwake } from "@/lib/keepAwake";
 import { useWallet } from "@/lib/wallet/store";
 import { contributor, useContributor } from "@/network/client/contributor";
@@ -96,8 +96,9 @@ function WalletStrip({ connected, jobs }: { connected: boolean; jobs: number }) 
           <PayoutEmail dark className="normal-case tracking-normal" />
         </span>
         <span className="flex flex-wrap items-center gap-x-5 gap-y-1">
-          <span className="text-chalk/60">
+          <span className="text-chalk/60" title={rw && !rw.current.eligible ? (ineligibleCopy(rw.current.ineligibleReason, rw.current.verificationPassRate) ?? undefined) : undefined}>
             This hour <span className="text-chalk">{rw ? `~${fmtSol(rw.current.projectedLamports)}` : "…"}</span> <Prov p="estimated" />
+            {rw && !rw.current.eligible && <span className="ml-1 text-warn/80">· not eligible</span>}
           </span>
           <span className="text-chalk/60">
             Claimable <span className={rw && rw.claimableLamports > 0 ? "text-ok" : "text-chalk"}>{rw ? fmtSol(rw.claimableLamports) : "…"}</span> <Prov p="live" />

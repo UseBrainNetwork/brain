@@ -113,6 +113,8 @@ interface WalletWork {
  * Per-wallet work in [from, to), measured only from server-verified job records.
  * Nodes without a signature-verified wallet do not accrue rewards.
  */
+export const isLostUnit = (failReason: string | null | undefined) => failReason === "deadline" || failReason === "node lost";
+
 export async function measureWork(from: number, to: number) {
   const store = getStore();
   const bucketMs = networkConfig.rewards.availabilityBucketMs;
@@ -137,7 +139,11 @@ export async function measureWork(from: number, to: number) {
     if (!w.nodes.includes(node)) w.nodes.push(node);
     if (node.status === "banned") w.banned = true;
     w.jobsAssigned += r.jobs;
-    w.checked += r.jobs;
+    // The verification pass rate judges results the node actually returned. A unit that expired
+    // ("deadline") or was reassigned ("node lost") is a lost unit, not a failed check: it lowers the
+    // completion factor but must not disqualify the wallet. When the server itself was too slow to
+    // record results, every honest node's deadline count spiked and the old rule zeroed them all.
+    if (r.verified || !isLostUnit(r.failReason)) w.checked += r.jobs;
     for (const b of r.buckets) w.buckets.add(b);
     if (r.verified) {
       w.jobsCompleted += r.jobs;
@@ -414,6 +420,9 @@ export async function currentProgress(wallet: string, now = Date.now()): Promise
   const r = i >= 0 ? result.rewards[i] : null;
   return {
     epochId: e.id,
+    eligible: r ? r.eligible : false,
+    ineligibleReason: r?.reason ?? (i < 0 ? "no-verified-compute" : undefined),
+    verificationPassRate: i >= 0 ? inputs[i].verificationPassRate : null,
     startsAt: e.startsAt,
     endsAt: e.endsAt,
     verifiedCompute: i >= 0 ? inputs[i].verifiedCompute : 0,
