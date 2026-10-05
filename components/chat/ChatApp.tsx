@@ -267,7 +267,7 @@ export function ChatApp() {
               <span className="text-chalk/70">BRAIN</span>
               <span className="hidden sm:inline">·</span>
               <span className="hidden sm:inline">
-                BRAIN AUTO <span className="text-chalk/70">{mode}</span>
+Route <span className="text-chalk/70">{mode}</span>
               </span>
             </div>
             <StatusLine busy={busy} />
@@ -283,34 +283,34 @@ export function ChatApp() {
           <div className="shrink-0 border-t border-chalk/10 bg-ink/80 backdrop-blur">
             <div className="mx-auto w-full max-w-[760px] px-4 pb-4 pt-3 md:px-6">
               <div className="mb-2 flex flex-wrap items-center gap-1.5 font-mono text-[10.5px] tracking-[0.08em]">
-                {MODES.map((m) => (
+                <span className="mr-1 text-chalk/35">ROUTE</span>
+                {MODES.filter((m) => modeAllowed(m.id)).map((m) => (
                   <button
                     key={m.id}
                     type="button"
-                    title={modeAllowed(m.id) ? m.hint : `${m.label} is not in the ${planName ?? "current"} plan`}
-                    disabled={!modeAllowed(m.id)}
+                    title={m.hint}
                     onClick={() => setMode(m.id)}
-                    className={cx("rounded-full px-2.5 py-1 transition-colors", mode === m.id ? "bg-chalk text-ink" : "text-chalk/55 ring-1 ring-inset ring-chalk/15 hover:text-chalk", !modeAllowed(m.id) && "opacity-35")}
+                    className={cx("rounded-full px-2.5 py-1 transition-colors", mode === m.id ? "bg-chalk text-ink" : "text-chalk/55 ring-1 ring-inset ring-chalk/15 hover:text-chalk")}
                   >
                     {m.label}
                   </button>
                 ))}
-                <span className="mx-1 h-4 w-px bg-chalk/15" />
-                {(["PUBLIC", "STANDARD", "PRIVATE"] as const).map((p) => {
-                  const ok = p !== "PRIVATE" || privateAllowed;
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      disabled={!ok}
-                      title={p === "PUBLIC" ? "Any target may see the content" : p === "STANDARD" ? "Plaintext never goes to untrusted distributed nodes" : ok ? "Operator infrastructure only" : "PRIVATE routing requires the Max plan"}
-                      onClick={() => setPrivacy(p)}
-                      className={cx("rounded-full px-2.5 py-1 transition-colors", privacy === p ? "bg-signal text-white" : "text-chalk/55 ring-1 ring-inset ring-chalk/15 hover:text-chalk", !ok && "opacity-35")}
-                    >
-                      {p}
-                    </button>
-                  );
-                })}
+                {privateAllowed && (
+                  <>
+                    <span className="mx-1 h-4 w-px bg-chalk/15" />
+                    {(["STANDARD", "PRIVATE"] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        title={p === "STANDARD" ? "Plaintext never goes to untrusted distributed nodes" : "Operator infrastructure only"}
+                        onClick={() => setPrivacy(p)}
+                        className={cx("rounded-full px-2.5 py-1 transition-colors", privacy === p ? "bg-signal text-white" : "text-chalk/55 ring-1 ring-inset ring-chalk/15 hover:text-chalk")}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </>
+                )}
                 <span className="ml-auto hidden text-chalk/35 sm:inline">{credits == null ? "" : `${Math.max(0, Math.floor(credits)).toLocaleString("en-US")} credits`}</span>
               </div>
               <form
@@ -366,7 +366,7 @@ function StatusLine({ busy }: { busy: null | "routing" | "streaming" }) {
   return (
     <span className="flex items-center gap-2 text-signal">
       <span className="inline-block size-[6px] animate-pulse-dot bg-signal" />
-      {busy === "routing" ? "BRAIN AUTO · ROUTING" : "STREAMING"}
+      {busy === "routing" ? "ROUTING" : "STREAMING"}
     </span>
   );
 }

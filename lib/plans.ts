@@ -74,6 +74,9 @@ export function plans(): Plan[] {
   ];
 }
 
+/** Plans a visitor can actually choose today. Placeholder plans stay in config but off every public surface until billing exists. */
+export const visiblePlans = () => plans().filter((p) => !p.placeholder || paymentsConnected());
+
 export const planById = (id: PlanId) => plans().find((p) => p.id === id) ?? plans()[0];
 
 /** Whether real payments can be taken. False until a processor is wired; the UI reads this. */

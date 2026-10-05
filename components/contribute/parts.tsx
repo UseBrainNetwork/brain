@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Prov } from "@/components/ui";
 import type { ContributorState } from "@/network/client/contributor";
-import { cx, fmtBytes, fmtInt, fmtUsdSmall } from "@/lib/format";
+import { cx, fmtBytes, fmtInt } from "@/lib/format";
 import type { DetectedField, DeviceDetection, FieldSource } from "@/webgpu/detect";
 
 export function StepShell({
@@ -221,7 +221,7 @@ export function JobRow({ j }: { j: ContributorState["log"][number] }) {
         <div className="mt-1 text-[11px] text-chalk/45">
           {j.gpuMs != null && `${Math.round(j.gpuMs)}ms gpu`}
           {j.units ? ` · +${j.units} units` : ""}
-          {j.rewardUsd ? <span className="text-signal"> · +{fmtUsdSmall(j.rewardUsd)}</span> : null}
+          {ok ? <span className={j.parentId ? "text-ok" : "text-chalk/35"}> · {j.parentId ? "customer job" : "subsidized"}</span> : null}
         </div>
       </div>
     </motion.div>
@@ -239,7 +239,7 @@ export function MomentTicker({ s }: { s: ContributorState }) {
     else if (cur.status === "computing") line = { k: `c${cur.id}`, text: "COMPUTING…", tone: "text-signal", sub: `on your GPU · ${cur.model}` };
     else if (cur.status === "verifying") line = { k: `v${cur.id}`, text: "VERIFYING…", tone: "text-chalk", sub: "server recomputing secret samples" };
     else if (cur.status === "verified")
-      line = { k: `d${cur.id}`, text: "VERIFIED.", tone: "text-ok", sub: cur.rewardUsd ? `+${fmtUsdSmall(cur.rewardUsd)} est. · +${cur.units} units` : `+${cur.units} units` };
+      line = { k: `d${cur.id}`, text: "VERIFIED.", tone: "text-ok", sub: `+${cur.units} units` };
     else if (cur.status === "failed") line = { k: `f${cur.id}`, text: "REJECTED.", tone: "text-signal", sub: cur.reason };
   }
   return (

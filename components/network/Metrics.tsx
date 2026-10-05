@@ -17,7 +17,7 @@ interface MetricDef {
 export function useMetricDefs(): MetricDef[] {
   const m = useNetwork((s) => s.metrics);
   return [
-    { label: "GPUs online", value: m.gpusOnline, format: fmtInt, prov: m.liveNodes > 0 ? "live" : "simulated", accent: true },
+    { label: "GPUs online", value: m.gpusOnline, format: fmtInt, prov: "simulated", accent: true },
     { label: "Available memory", value: m.availableMemoryTb, format: (n) => `${n.toFixed(1)} TB`, prov: "simulated" },
     { label: "Inferences today", value: m.inferencesToday, format: (n) => fmtCompact(n, 2), prov: "simulated" },
     { label: "Creator rewards today", value: m.creatorRewardsTodayUsd, format: (n) => fmtUsd(n), prov: "simulated" },
@@ -60,6 +60,12 @@ export function MetricsStrip({ className, tone = "dark" }: { className?: string;
       ))}
     </div>
   );
+}
+
+/** Count of real nodes this server has online. The only node count that may carry LIVE. */
+export function LiveNodeCount({ className }: { className?: string }) {
+  const n = useNetwork((s) => s.metrics.liveNodes);
+  return <Counter value={n} format={fmtInt} className={className} />;
 }
 
 export function GpuCounter({ className }: { className?: string }) {

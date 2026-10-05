@@ -5,7 +5,7 @@ import type { ComputeJob, DeviceClass, NetworkEvent } from "@/domain/types";
 import { contributor } from "@/network/client/contributor";
 import { networkStore } from "@/network/realtime/store";
 import { getDeviceClasses } from "@/services/data";
-import { cx, fmtInt, fmtUsdSmall } from "@/lib/format";
+import { cx, fmtInt } from "@/lib/format";
 
 /**
  * Live compute topology.
@@ -407,7 +407,6 @@ export function TopologyCanvas({ className, labels = true, dense = false }: { cl
           },
         });
         floats.push({ x: me.x, y: me.y - 16, text: ok ? `VERIFIED +${cur.units}u` : "REJECTED", t0: performance.now(), color: ok ? C.ok : C.signal, dur: 1800 });
-        if (ok && cur.rewardUsd) floats.push({ x: me.x, y: me.y - 30, text: `+${fmtUsdSmall(cur.rewardUsd)} EST`, t0: performance.now() + 250, color: C.signal, dur: 1900 });
       }
     };
 

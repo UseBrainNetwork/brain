@@ -4,9 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { WalletButton } from "@/components/wallet/WalletButton";
-import { Prov } from "@/components/ui";
 import { cx } from "@/lib/format";
-import { getToken } from "@/services/data";
 import { Logo } from "./Logo";
 import { SocialLinks } from "./SocialLinks";
 
@@ -64,7 +62,6 @@ export function Nav() {
   const dark = useSurfaceTheme();
   const [open, setOpen] = useState(false);
   const [more, setMore] = useState(false);
-  const token = getToken();
   useEffect(() => {
     setOpen(false);
     setMore(false);
@@ -146,17 +143,6 @@ export function Nav() {
         </nav>
 
         <div className="pointer-events-auto flex items-center gap-2">
-          <div
-            className={cx(
-              "hidden h-9 items-center gap-2 rounded-full px-3 font-mono text-[12px] transition-colors duration-300 md:flex lg:hidden xl:flex",
-              dark ? "text-chalk/80" : "text-ink/80",
-            )}
-            title="Demo price — not market data"
-          >
-            <span>{token.symbol}</span>
-            <span className="num">${token.priceUsd.toFixed(6)}</span>
-            <Prov p="simulated" />
-          </div>
           <SocialLinks dark={dark} className="hidden md:flex" />
           <WalletButton dark={dark} />
           <button
@@ -191,10 +177,7 @@ export function Nav() {
               </Link>
             ))}
           </div>
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="flex items-center gap-2 font-mono text-[12px] text-fog">
-              {token.symbol} ${token.priceUsd.toFixed(6)} <Prov p="simulated" />
-            </span>
+          <div className="flex items-center justify-end px-4 py-3">
             <SocialLinks dark size="md" />
           </div>
         </div>

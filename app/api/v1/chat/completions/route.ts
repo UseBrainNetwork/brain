@@ -6,7 +6,10 @@ import type { ComputeOrder, PrivacyRequirement } from "@/domain/economy";
 import { normalizeMode } from "@/domain/economy";
 import { placeOrder } from "@/engine/orders";
 import { networkConfig } from "@/lib/config";
+import { getAccount } from "@/services/accounts";
+import { balance, consumeForReceipt, ensureMonthlyGrant, mayConsume } from "@/services/credits";
 import { authenticate, customerRateLimit, openAccess, recordRequest } from "@/services/customers";
+import { planById } from "@/lib/plans";
 import { bearer, json, tooMany } from "@/services/security";
 
 export const dynamic = "force-dynamic";
@@ -30,17 +33,29 @@ export const POST = nodeRoute(async (req) => {
   const customer = auth?.customer ?? { customerId: "anonymous", label: "open access", createdAt: 0, rateLimit: networkConfig.rateLimit.inferenceRequests, source: "REAL" as const };
   if (!customerRateLimit(customer).ok) return tooMany();
 
+  // Keys issued from /account map to `acct:<id>` and share that account's plan and credit ledger.
+  const account = customer.customerId.startsWith("acct:") ? await getAccount(customer.customerId.slice(5)) : null;
+
   const raw = await body<Record<string, unknown>>(req, 128 * 1024);
   const chat = validateChat(raw);
   const mode = normalizeMode(String(raw.mode ?? raw.priority ?? "auto"));
   const privacyRaw = String(raw.privacy ?? "standard").toUpperCase() as PrivacyRequirement;
   const privacy = PRIVACY.has(privacyRaw) ? privacyRaw : "STANDARD";
+  if (account) {
+    const plan = planById(account.plan);
+    if (!plan.modes.includes(mode)) return json({ error: { code: "mode_not_in_plan", message: `${mode} routing is not included in the ${plan.name} plan.` } }, 403);
+    if (privacy === "PRIVATE" && !plan.privateRouting) return json({ error: { code: "privacy_not_in_plan", message: `PRIVATE routing is not included in the ${plan.name} plan.` } }, 403);
+    await ensureMonthlyGrant(account);
+    const bal = await balance(account.accountId);
+    if (!mayConsume(bal)) return json({ error: { code: "out_of_credits", message: "This account has used its included credits for the month." } }, 402);
+  }
   const t0 = Date.now();
   const chatId = `chatcmpl-${randomBytes(10).toString("hex")}`;
   const request = { kind: "chat" as const, model: chat.model, messages: chat.messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy };
 
-  const record = (order: ComputeOrder, s: Awaited<ReturnType<typeof summarize>>) =>
-    recordRequest({
+  const record = async (order: ComputeOrder, s: Awaited<ReturnType<typeof summarize>>) => {
+    if (account && s.receipt) await consumeForReceipt(account, s.receipt, { orderId: order.orderId, inputUnits: s.brain.usage?.inputUnits, outputUnits: s.brain.usage?.outputUnits });
+    await recordRequest({
       customerId: customer.customerId,
       at: t0,
       model: chat.model,
@@ -54,7 +69,8 @@ export const POST = nodeRoute(async (req) => {
       receiptId: order.receiptId ?? null,
       ok: order.status === "COMPLETED",
       source: "REAL",
-    }).then(() => undefined);
+    });
+  };
 
   if (chat.stream) {
     const stream = await chatEventStream({ input: { request, mode, privacy }, customerId: customer.customerId, chatId, t0, mode, privacy, onComplete: record });

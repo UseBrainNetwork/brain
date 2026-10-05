@@ -40,7 +40,7 @@ export function AccountDashboard() {
     <div className="mt-10 space-y-5">
       <div className="grid gap-5 lg:grid-cols-4">
         <Panel title="Your plan" right={<SourceBadge source="REAL" />}>
-          <Metric k="Plan" v={s.plan.name} sub={s.plan.priceUsd === 0 ? "free" : s.plan.placeholder ? `$${s.plan.priceUsd}/mo · placeholder` : `$${s.plan.priceUsd}/mo`} />
+          <Metric k="Plan" v={s.plan.name} sub={s.plan.priceUsd === 0 ? "free" : `$${s.plan.priceUsd}/mo`} />
           <div className="mt-5 font-mono text-[11px] text-chalk/50">
             {s.plan.includedCredits.toLocaleString("en-US")} credits / month · {s.plan.rateLimit} req/min
             <br />
@@ -51,7 +51,7 @@ export function AccountDashboard() {
           </Link>
         </Panel>
         <Panel title="Subscription" right={<SourceBadge source="REAL" />}>
-          <Metric k="Paid this month" v={s.paymentsConnected ? usd(0) : "$0"} sub={s.paymentsConnected ? "settled payments" : "payments not connected; nothing has been charged"} />
+          <Metric k="Paid this month" v={s.paymentsConnected ? usd(0) : "$0"} sub={s.paymentsConnected ? "settled payments" : "nothing has been charged"} />
           <div className="mt-5 grid grid-cols-2 gap-4">
             <Metric k="Credits left" v={Math.max(0, Math.floor(c.balance)).toLocaleString("en-US")} sub={`of ${Math.floor(c.granted).toLocaleString("en-US")} granted`} />
             <Metric k="Used" v={usageUsd == null ? (s.usage.requests ? "UNKNOWN" : "$0") : usd(usageUsd)} sub={`${s.usage.requests} request${s.usage.requests === 1 ? "" : "s"}${c.unknownCostRequests ? ` · ${c.unknownCostRequests} unpriced` : ""}`} />
@@ -101,12 +101,117 @@ export function AccountDashboard() {
         )}
       </Panel>
 
-      <Panel title="API keys" right={<SourceBadge source="REAL" />}>
-        <p className="text-[13px] leading-relaxed text-chalk/60">
-          Programmatic access uses the OpenAI-compatible API with a key. Keys and usage are managed under <Link href="/developers" className="text-chalk underline decoration-chalk/25 underline-offset-4">Developers</Link>; linking keys to this account lands with billing.
-        </p>
-      </Panel>
+      <ApiKeys />
     </div>
+  );
+}
+
+type KeyRow = { keyId: string; prefix: string; createdAt: number; lastUsedAt: number | null; revokedAt: number | null };
+
+/** Self-serve keys. Requests made with them draw from this account's credits, exactly like /chat. */
+function ApiKeys() {
+  const [keys, setKeys] = useState<KeyRow[] | null>(null);
+  const [fresh, setFresh] = useState<{ keyId: string; secret: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const load = useCallback(() => {
+    fetch("/api/account/keys", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => setKeys(j.keys ?? []))
+      .catch(() => setKeys([]));
+  }, []);
+  useEffect(load, [load]);
+
+  const create = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch("/api/account/keys", { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error?.message ?? "could not create key");
+      setFresh({ keyId: j.key.keyId, secret: j.secret });
+      load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "could not create key");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (keyId: string) => {
+    await fetch("/api/account/keys", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ keyId }) });
+    if (fresh?.keyId === keyId) setFresh(null);
+    load();
+  };
+  const copy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {}
+  };
+
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const active = (keys ?? []).filter((k) => !k.revokedAt);
+  const curl = `curl ${origin}/v1/chat/completions \\
+  -H "Authorization: Bearer ${fresh?.secret ?? "brain_sk_…"}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"brain/auto","messages":[{"role":"user","content":"hello"}]}'`;
+
+  return (
+    <Panel
+      title="API keys"
+      right={
+        <button type="button" onClick={create} disabled={busy || active.length >= 5} className="rounded-full bg-chalk px-3 py-1 font-mono text-[10.5px] font-semibold text-ink hover:bg-white disabled:opacity-40">
+          {busy ? "Creating…" : "Create key"}
+        </button>
+      }
+    >
+      <p className="text-[13px] leading-relaxed text-chalk/60">
+        Call the OpenAI-compatible endpoint <span className="font-mono text-chalk/80">POST /v1/chat/completions</span> with a key. Requests draw from the same credits as chat and come back with the same receipt. Up to 5 active keys.{" "}
+        <Link href="/developers" className="text-chalk underline decoration-chalk/25 underline-offset-4">
+          API reference →
+        </Link>
+      </p>
+      {err && <div className="mt-3 font-mono text-[12px] text-signal">{err}</div>}
+      {fresh && (
+        <div className="mt-4 rounded-[10px] border border-ok/30 bg-ok/[0.07] p-4">
+          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-ok">New key · shown once, store it now</div>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <code className="break-all font-mono text-[12.5px] text-chalk">{fresh.secret}</code>
+            <button type="button" onClick={() => copy(fresh.secret)} className="rounded-full px-2.5 py-1 font-mono text-[10.5px] text-chalk/70 ring-1 ring-inset ring-chalk/20 hover:text-chalk">
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <pre className="mt-3 overflow-x-auto rounded-[8px] bg-ink/60 p-3 font-mono text-[11px] leading-relaxed text-chalk/75">{curl}</pre>
+        </div>
+      )}
+      <div className="mt-5 font-mono text-[11.5px]">
+        {keys == null ? (
+          <div className="text-chalk/40">Loading keys…</div>
+        ) : keys.length === 0 ? (
+          <div className="text-chalk/40">No keys yet.</div>
+        ) : (
+          keys.slice(0, 20).map((k) => (
+            <div key={k.keyId} className="flex flex-wrap items-center justify-between gap-3 border-b border-chalk/[0.06] py-2 text-chalk/75">
+              <span className={cx(k.revokedAt ? "line-through opacity-50" : null)}>{k.prefix}…</span>
+              <span className="text-chalk/45">
+                created {when(k.createdAt)}
+                {k.lastUsedAt ? ` · last used ${when(k.lastUsedAt)}` : " · never used"}
+              </span>
+              {k.revokedAt ? (
+                <span className="text-chalk/35">revoked</span>
+              ) : (
+                <button type="button" onClick={() => revoke(k.keyId)} className="text-chalk/50 underline decoration-chalk/20 underline-offset-4 hover:text-signal">
+                  revoke
+                </button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </Panel>
   );
 }
 

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import { Architecture } from "@/components/developers/Architecture";
 import { CodeBlock, CodeTabs } from "@/components/developers/CodeBlock";
@@ -76,7 +77,9 @@ const RESPONSE = `{
 
 const ERRORS = [
   ["400", "invalid_request", "Malformed body, bad roles or empty messages."],
-  ["401", "invalid_api_key", "Missing or unknown API key (when BRAIN_API_KEYS is set)."],
+  ["401", "invalid_api_key", "Missing, unknown or revoked API key."],
+  ["402", "out_of_credits", "The account behind the key has used its included credits for the month."],
+  ["403", "mode_not_in_plan", "The requested mode or PRIVATE routing is not in the account's plan."],
   ["404", "model_not_found", "Model id is not one of the brain/* models."],
   ["413", "too_large", "Prompt exceeds the V1 size limit."],
   ["429", "rate_limited", "Per-IP fixed window exceeded."],
@@ -132,6 +135,13 @@ export default function DevelopersPage() {
               <h1 className="display text-[60px] md:text-[120px]">Build on the crowd.</h1>
               <p className="mt-7 max-w-[480px] text-[17px] leading-relaxed text-chalk/65">
                 Brain speaks the OpenAI Chat Completions format. Change the base URL, set <span className="font-mono text-[15px] text-chalk">model: &quot;brain/auto&quot;</span>, and the router does the rest.
+              </p>
+              <p className="mt-4 max-w-[480px] text-[14.5px] leading-relaxed text-chalk/55">
+                Create a key under{" "}
+                <Link href="/account" className="text-chalk underline decoration-chalk/25 underline-offset-4">
+                  Account → API keys
+                </Link>
+                . Requests made with it draw from the same credits as chat and return the same receipt.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Button href="/chat" tone="dark" arrow>
