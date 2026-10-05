@@ -2,7 +2,8 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { notify, requestNotifyPermission } from "@/lib/notify";
 import { EventFeed } from "@/components/network/EventFeed";
 import { GpuCounter, LiveNodeCount } from "@/components/network/Metrics";
 import { ComputeDie } from "@/components/network/ComputeDie";
@@ -25,6 +26,16 @@ export function ContributeFlow() {
   }, [s.phase]);
 
   const joined = s.phase === "joining" || s.phase === "running";
+
+  // Native notification the moment the node is accepted. Fires once per join.
+  const notifiedRef = useRef(false);
+  useEffect(() => {
+    if (s.phase === "running" && !notifiedRef.current) {
+      notifiedRef.current = true;
+      notify("Your node is live", "Receiving verified jobs from the network.", "brain-node");
+    }
+    if (s.phase !== "running" && s.phase !== "joining") notifiedRef.current = false;
+  }, [s.phase]);
   const ready = s.detection?.webgpu === "ready";
   const benchStarted = s.phase === "benchmarking" || Boolean(s.benchmark);
   const benchDone = Boolean(s.benchmark) && s.phase !== "stopped";
@@ -82,7 +93,15 @@ export function ContributeFlow() {
                     <p className="text-[14px] leading-relaxed text-ink/65">
                       Your node becomes visible to the network and starts receiving jobs the server verifies. Keep this tab open. Stop whenever you want.
                     </p>
-                    <Button variant="signal" className="mt-5 h-14 w-full text-[16px]" onClick={() => contributor.join()} arrow>
+                    <Button
+                      variant="signal"
+                      className="mt-5 h-14 w-full text-[16px]"
+                      onClick={() => {
+                        void requestNotifyPermission();
+                        void contributor.join();
+                      }}
+                      arrow
+                    >
                       Join network
                     </Button>
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-2 font-mono text-[11.5px] text-ink/50">
