@@ -8,7 +8,7 @@ import { placeOrder } from "@/engine/orders";
 import { networkConfig } from "@/lib/config";
 import { getAccount } from "@/services/accounts";
 import { balance, consumeForReceipt, ensureMonthlyGrant, mayConsume } from "@/services/credits";
-import { authenticate, customerRateLimit, openAccess, recordRequest } from "@/services/customers";
+import { MISSING_KEY, authenticate, customerRateLimit, openAccess, recordRequest } from "@/services/customers";
 import { planById } from "@/lib/plans";
 import { bearer, json, tooMany } from "@/services/security";
 
@@ -29,7 +29,7 @@ const PRIVACY = new Set<PrivacyRequirement>(["PUBLIC", "STANDARD", "PRIVATE"]);
  */
 export const POST = nodeRoute(async (req) => {
   const auth = await authenticate(bearer(req));
-  if (!auth && !(await openAccess())) return json({ error: { code: "invalid_api_key", message: "Invalid or missing API key." } }, 401);
+  if (!auth && !(await openAccess())) return json({ error: MISSING_KEY }, 401);
   const customer = auth?.customer ?? { customerId: "anonymous", label: "open access", createdAt: 0, rateLimit: networkConfig.rateLimit.inferenceRequests, source: "REAL" as const };
   if (!customerRateLimit(customer).ok) return tooMany();
 

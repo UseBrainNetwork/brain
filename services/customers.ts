@@ -51,12 +51,15 @@ export async function authenticate(secret: string | null): Promise<{ customer: C
   return null;
 }
 
-/** Anonymous access is allowed only when no keys exist at all (open demo). */
+/**
+ * Anonymous /v1 access is closed. Every request must carry a key from /account (Free plan included),
+ * so usage is always bound to a plan and a credit ledger. Set BRAIN_OPEN_V1=1 for a local open demo.
+ */
 export async function openAccess(): Promise<boolean> {
-  if ((process.env.BRAIN_API_KEYS ?? "").trim()) return false;
-  const any = await getStore().listDocs<ApiKey>("apikey", { limit: 1 });
-  return any.length === 0;
+  return process.env.BRAIN_OPEN_V1 === "1";
 }
+
+export const MISSING_KEY = { code: "invalid_api_key", message: "Missing or invalid API key. Create one under Account → API keys at https://brainnetwork.app/account (free plan included) and send it as Authorization: Bearer <key>." };
 
 export function customerRateLimit(c: Customer) {
   return rateLimit(`customer:${c.customerId}`, c.rateLimit);

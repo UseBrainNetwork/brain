@@ -162,7 +162,7 @@ export default function DevelopersPage() {
                 <Link href="/account" className="text-chalk underline decoration-chalk/25 underline-offset-4">
                   Account → API keys
                 </Link>
-                . Requests made with it draw from the same credits as chat and return the same receipt.
+                . Every request needs one; requests draw from the same credits as chat and return the same receipt.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Button href="/chat" tone="dark" arrow>

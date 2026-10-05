@@ -1,6 +1,6 @@
 import { body, nodeRoute } from "@/api/http";
 import { networkConfig } from "@/lib/config";
-import { authenticate, customerRateLimit, openAccess, recordRequest } from "@/services/customers";
+import { MISSING_KEY, authenticate, customerRateLimit, openAccess, recordRequest } from "@/services/customers";
 import { bearer, json, tooMany } from "@/services/security";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  */
 export const POST = nodeRoute(async (req) => {
   const auth = await authenticate(bearer(req));
-  if (!auth && !(await openAccess())) return json({ error: { code: "invalid_api_key", message: "Invalid or missing API key." } }, 401);
+  if (!auth && !(await openAccess())) return json({ error: MISSING_KEY }, 401);
   const customer = auth?.customer ?? { customerId: "anonymous", label: "open access", createdAt: 0, rateLimit: networkConfig.rateLimit.inferenceRequests, source: "REAL" as const };
   if (!customerRateLimit(customer).ok) return tooMany();
 
