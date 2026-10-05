@@ -3,19 +3,35 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { cx } from "@/lib/format";
+import { useSim } from "@/network/realtime/mode";
 
-const frames = [
+interface Frame {
+  k: string;
+  top: string;
+  main: string;
+  sub: string;
+  tone: "chalk" | "signal" | "ok";
+}
+
+/** The join sequence as it really runs. Nothing here is a network figure or a dollar amount. */
+const realFrames: Frame[] = [
   { k: "detect", top: "DEVICE DETECTED", main: "WebGPU · READY", sub: "adapter: apple · metal-3", tone: "chalk" },
   { k: "bench", top: "BENCHMARKING", main: "▮▮▮▮▮▮▮▯▯▯", sub: "server challenge · mix_u32", tone: "chalk" },
-  { k: "join", top: "NODE 9F81 JOINED", main: "+18,482 COMPUTE", sub: "12,842 → 12,843 GPUs", tone: "signal" },
+  { k: "join", top: "NODE 9F81 JOINED", main: "+18,482 COMPUTE", sub: "standby → online", tone: "signal" },
   { k: "recv", top: "FIRST JOB RECEIVED…", main: "#5000001", sub: "tensor/matmul-u32 256³", tone: "chalk" },
   { k: "comp", top: "COMPUTING…", main: "16.7M MACs", sub: "WGSL · 1024 workgroups", tone: "signal" },
-  { k: "ok", top: "VERIFIED.", main: "+$0.0032", sub: "6/6 secret rows match · est.", tone: "ok" },
-] as const;
+  { k: "ok", top: "VERIFIED.", main: "6/6 ROWS MATCH", sub: "secret rows recomputed on server", tone: "ok" },
+];
+
+/** Demo mode: same sequence with simulated network totals and an illustrative reward. */
+const simFrames: Frame[] = realFrames.map((f) =>
+  f.k === "join" ? { ...f, sub: "12,842 → 12,843 GPUs · SIM" } : f.k === "ok" ? { ...f, main: "+$0.0032", sub: "6/6 secret rows match · est. SIM" } : f,
+);
 
 /** Physical-feeling node: a plate with a status display that plays the join sequence. */
 export function NodePlate({ className }: { className?: string }) {
   const [i, setI] = useState(0);
+  const frames = useSim() ? simFrames : realFrames;
   useEffect(() => {
     const t = setTimeout(() => setI((x) => (x + 1) % frames.length), i === frames.length - 1 ? 3200 : 1700);
     return () => clearTimeout(t);

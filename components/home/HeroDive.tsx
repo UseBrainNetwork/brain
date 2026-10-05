@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { Ticker } from "@/components/home/Ticker";
 import { ComputeDie } from "@/components/network/ComputeDie";
 import { Button } from "@/components/ui";
+import { SimOnly } from "@/components/layout/SimOnly";
 
 /**
  * Pinned hero. Scrolling scrubs one camera move: the copy falls away, the die turns top-down,
@@ -78,7 +79,7 @@ export function HeroDive() {
             <span className="flex items-center gap-1.5">
               <span className="size-2 bg-ok" /> verified / real node
             </span>
-            <span>1 cell = 1 node</span>
+            <span><SimOnly fallback="device-class map">1 cell = 1 node</SimOnly></span>
           </span>
           <span>Scroll to trace one request through the network</span>
         </motion.div>
@@ -87,7 +88,9 @@ export function HeroDive() {
           <div className="flex items-center gap-3 rounded-full bg-ink/90 px-4 py-2 font-mono text-[11.5px] text-chalk backdrop-blur">
             <span className="size-1.5 animate-pulse rounded-full bg-signal" />
             <span>JOB #918282 assigned</span>
-            <span className="hidden text-chalk/40 sm:inline">→ one of 12,842 nodes</span>
+            <SimOnly>
+              <span className="hidden text-chalk/40 sm:inline">→ one of 12,842 nodes</span>
+            </SimOnly>
             <span className="rounded-sm px-1 text-[9.5px] text-chalk/45 ring-1 ring-chalk/20">EXAMPLE</span>
           </div>
         </motion.div>
