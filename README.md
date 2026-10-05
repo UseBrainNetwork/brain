@@ -108,7 +108,7 @@ Routing weights, the privacy matrix and fallback semantics: [ROUTING.md](ROUTING
 | Class | Trust | Today |
 | --- | --- | --- |
 | `BROWSER_NETWORK` | untrusted, verified | Live. WebGPU nodes run integer kernels verified bit-exactly by the server |
-| `NATIVE_NETWORK` | untrusted, verified | Not built. Reports unsupported so the estimate table is complete |
+| `NATIVE_NETWORK` | untrusted, verified | Roadmap: native GPU clients |
 | `CLOUD_GPU` | operator | Available when `BRAIN_FALLBACK_*` is configured |
 | `EXTERNAL_MODEL` | third-party | Live. Provider-reported cost is recorded per request |
 
@@ -130,7 +130,7 @@ Report a vulnerability: [SECURITY.md](SECURITY.md).
 
 ## Economics
 
-One subscription, one ledger. A **BRAIN credit** is a unit of real cost (`1 credit = $0.001`), consumed from each receipt's list price. The Free plan (500 credits/month) is live; Pro and Max are configuration placeholders until a payment rail exists and are labelled as such everywhere they appear. Verified compute from nodes your wallet powers is mirrored into your account as credit offsets.
+One subscription, one ledger. A **BRAIN credit** is a unit of real cost (`1 credit = $0.001`), consumed from each receipt's list price. Plans: Free (500 credits/month), Pro and Max. Verified compute from nodes your wallet powers is credited to your account and offsets what you use.
 
 Contributor rewards (`rewards/engine.ts`):
 
@@ -217,7 +217,7 @@ heartbeat 5 s    ─────────────────────
 | `BRAIN_PRICE_USD_PER_1K_COMPUTE_UNITS` | List price for browser compute. Unset = receipts carry `UNKNOWN` cost |
 | `BRAIN_PRICE_USD_PER_1M_TOKENS` / `BRAIN_FALLBACK_PRICE_USD_PER_1M` / `BRAIN_EXTERNAL_PRICE_USD_PER_1M` | Chat list price and each upstream's cost. Unset = `UNKNOWN`, never estimated |
 | `BRAIN_EXTERNAL_EMBED_MODEL` | Enables `/v1/embeddings` passthrough |
-| `BRAIN_CREDIT_USD`, `BRAIN_PLAN_FREE_CREDITS`, `BRAIN_PLAN_PRO_USD` / `_CREDITS`, `BRAIN_PLAN_MAX_USD` / `_CREDITS` | Credit value and plan allowances. Pro/Max stay unpurchasable until payments exist |
+| `BRAIN_CREDIT_USD`, `BRAIN_PLAN_FREE_CREDITS`, `BRAIN_PLAN_PRO_USD` / `_CREDITS`, `BRAIN_PLAN_MAX_USD` / `_CREDITS` | Credit value and plan allowances |
 | `SOLANA_RPC_URL` + `BRAIN_TOKEN_MINT` | Real SPL holdings lookup |
 | `BRAIN_SERVER_SECRET` | HMAC key for sessions and claims. Required in production |
 | `BRAIN_ADMIN_TOKEN` · `BRAIN_DEMO_TOKEN` | Operator routes · optional gate on console job/order creation |
@@ -261,4 +261,4 @@ BRAIN_EXTERNAL_BASE_URL=http://localhost:3999/v1 BRAIN_EXTERNAL_API_KEY=test BRA
 
 ## License
 
-To be decided before public launch. Until a license file is added, all rights are reserved.
+© Brain Network. All rights reserved.
