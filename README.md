@@ -227,6 +227,8 @@ heartbeat 5 s    ─────────────────────
 | `BRAIN_ADMIN_TOKEN` · `BRAIN_DEMO_TOKEN` | Operator routes · optional gate on console job/order creation |
 | `BRAIN_PAYOUTS_ENABLED` + `BRAIN_PAYOUT_SECRET_KEY` | SOL claim payouts. Off by default |
 | `BRAIN_PAYOUTS_OPEN_AT` | Optional opening time (ISO-8601 or epoch ms); claims refused before it, open automatically after |
+| `BRAIN_EPOCH_MINUTES` | Epoch length (default 1440). Closed epochs with work settle automatically on the next dashboard read or cron run |
+| `BRAIN_POOL_PACE_DAYS` | Spread the contributors' share of the treasury over this many days per epoch (default 1) |
 | `NEXT_PUBLIC_BRAIN_WS_URL` | External WebSocket event bus (default: built-in SSE) |
 
 Exercise the inference path without a real provider:

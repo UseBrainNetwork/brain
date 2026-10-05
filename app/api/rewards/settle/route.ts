@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { body, nodeRoute } from "@/api/http";
 import { NodeError } from "@/services/nodes";
 import { bearer, json } from "@/services/security";
-import { epochAt, epochLengthMs, LAMPORTS_PER_SOL, settleEpoch } from "@/services/settlement";
+import { epochAt, epochLengthMs, LAMPORTS_PER_SOL, settleDueEpochs, settleEpoch } from "@/services/settlement";
 
 export const dynamic = "force-dynamic";
 
@@ -31,8 +31,9 @@ export const POST = nodeRoute(async (req) => {
   return run(start, b.poolSol != null ? Number(b.poolSol) : undefined);
 }, 10);
 
-/** Vercel Cron entry point (Authorization: Bearer $CRON_SECRET). Settles the last closed epoch. */
+/** Vercel Cron entry point (Authorization: Bearer $CRON_SECRET). Settles every closed epoch that has work. */
 export const GET = nodeRoute(async (req) => {
   if (!authorized(req)) throw new NodeError("unauthorized", 401);
-  return run(epochAt(Date.now() - epochLengthMs()).startsAt);
+  const settled = await settleDueEpochs(Date.now() - 31_000);
+  return json({ settled: settled.map((e) => ({ id: e.id, poolLamports: e.poolLamports, distributedLamports: e.distributedLamports, participants: e.participants, provenance: e.provenance })) });
 }, 10);

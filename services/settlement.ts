@@ -39,9 +39,49 @@ export function configuredPoolLamports(): number | null {
  * treasury balance that has been received and not yet allocated. Zero until an operator records
  * a creator-fee receipt by transaction signature. Never includes anything simulated.
  */
-export async function treasuryPoolLamports(): Promise<number> {
+export async function treasuryPoolLamports(lengthMs = epochLengthMs()): Promise<number> {
   const t = await syncedTreasury();
-  return Math.max(0, Math.floor(t.balance * defaultRevenueSplit.creatorRewards.contributors * LAMPORTS_PER_SOL));
+  const contributors = t.balance * defaultRevenueSplit.creatorRewards.contributors;
+  // Pace the pool: an epoch gets the slice of the contributors' share proportional to its length over
+  // BRAIN_POOL_PACE_DAYS (default 1 day). Daily epochs take the whole share; hourly epochs take 1/24.
+  const pace = Math.max(lengthMs, paceDays() * DAY_MS);
+  return Math.max(0, Math.floor(contributors * (lengthMs / pace) * LAMPORTS_PER_SOL));
+}
+
+function paceDays(): number {
+  const d = Number(process.env.BRAIN_POOL_PACE_DAYS);
+  return d > 0 ? d : 1;
+}
+
+/**
+ * Settles every closed, unsettled epoch in the recent window (bounded). Idempotent and cheap when
+ * nothing is due, so callers can run it opportunistically (dashboard reads) as well as from cron.
+ * Throttled per process so a busy dashboard does not hammer the database.
+ */
+export async function settleDueEpochs(now = Date.now(), maxEpochs = 24): Promise<RewardEpoch[]> {
+  const g = globalThis as typeof globalThis & { __brainSettleAt?: number };
+  if (now - (g.__brainSettleAt ?? 0) < 30_000) return [];
+  g.__brainSettleAt = now;
+  const store = getStore();
+  const len = epochLengthMs();
+  const last = epochAt(now - len);
+  const settled: RewardEpoch[] = [];
+  // Never auto-write simulated epochs: only settle when there is a real pool to distribute.
+  if ((await treasuryPoolLamports(len)) <= 0 && configuredPoolLamports() == null) return [];
+  // Only epochs after the first verified job need settling; before that there is nothing to pay.
+  for (let i = 0, start = last.startsAt; i < maxEpochs && start >= 0; i++, start -= len) {
+    if (await store.getEpoch(epochAt(start).id)) break; // everything older is settled already
+    const jobs = await store.listJobsBetween(start, start + len);
+    if (jobs.length === 0) continue;
+    try {
+      const r = await settleEpoch({ epochStart: start, now });
+      if (r.created) settled.push(r.epoch);
+    } catch (e) {
+      console.error("[settlement] auto-settle failed", epochAt(start).id, e instanceof Error ? e.message : e);
+      break;
+    }
+  }
+  return settled;
 }
 
 interface WalletWork {
@@ -127,7 +167,7 @@ export async function settleEpoch(opts: SettleOptions): Promise<{ epoch: RewardE
   if (existing) return { epoch: existing, created: false };
 
   // Pool precedence: explicit > creator-fee treasury (real) + configured subsidy > simulated demo.
-  const treasuryPool = opts.poolLamports == null ? await treasuryPoolLamports() : 0;
+  const treasuryPool = opts.poolLamports == null ? await treasuryPoolLamports(e.endsAt - e.startsAt) : 0;
   const configured = configuredPoolLamports();
   const operatorPool = opts.poolLamports ?? (treasuryPool > 0 || configured != null ? treasuryPool + (configured ?? 0) : null);
   const pool = Math.floor(operatorPool ?? demoPoolLamports(e.endsAt - e.startsAt));
@@ -135,8 +175,12 @@ export async function settleEpoch(opts: SettleOptions): Promise<{ epoch: RewardE
 
   const { wallets, totalBuckets } = await measureWork(e.startsAt, e.endsAt);
   const holdings = await Promise.all(wallets.map((w) => getHoldings(w.wallet)));
-  const holdingsOnChain = Boolean(process.env.SOLANA_RPC_URL && process.env.BRAIN_TOKEN_MINT) && holdings.every((h) => h.provenance === "live");
-  const provenance: Provenance = operatorPool != null && holdingsOnChain ? "live" : "simulated";
+  const chainConfigured = Boolean(process.env.SOLANA_RPC_URL && process.env.BRAIN_TOKEN_MINT);
+  const holdingsLive = holdings.every((h) => h.provenance === "live");
+  // Real money with a transient RPC failure must not be written as a SIMULATED epoch (epochs are written
+  // once, and simulated allocations are never claimable). Refuse now; the caller retries later.
+  if (operatorPool != null && chainConfigured && !holdingsLive) throw new NodeError("holdings_unavailable", 503);
+  const provenance: Provenance = operatorPool != null && chainConfigured && holdingsLive ? "live" : "simulated";
 
   const inputs = wallets.map((w, i) => toInput(w, holdings[i].amount, totalBuckets));
   const result = computeEpoch(inputs, pool, defaultRewardConfig);

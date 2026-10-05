@@ -321,3 +321,87 @@ describe("wallet link token", () => {
     expect(verifyLinkToken("garbage")).toBeNull();
   });
 });
+
+describe("end to end: verified work → linked wallet → auto-settle from creator fees → claim", () => {
+  it("pays from the treasury, paced per epoch, only to linked wallets, and never writes simulated epochs for real money", async () => {
+    const { settleDueEpochs, treasuryPoolLamports } = await import("./settlement");
+    const { getTreasury } = await import("./treasury");
+    const { record } = await import("./accounting");
+    Object.assign(process.env, LIVE_ENV);
+    process.env.BRAIN_EPOCH_MINUTES = "60";
+    process.env.BRAIN_POOL_PACE_DAYS = "1";
+    process.env.BRAIN_TOKEN_MINT = "FiJ4gnd4dhqNeBKfS4E8wnERMEpjMPdUfJhu8foipump";
+    delete process.env.BRAIN_EPOCH_POOL_SOL;
+    const sender = fakeSender();
+    setPayoutSender(sender);
+    const s = store();
+
+    // 29.78 SOL of creator fees recorded in the REAL ledger (as the on-chain adapter would).
+    const t = await getTreasury("REAL");
+    t.received = t.balance = 29.78;
+    t.references.push("4DLu9xqbYcSIG");
+    await s.putDoc("treasury", "REAL", t, { at: Date.now(), key: "REAL" });
+    await record({ type: "CREATOR_REWARD_RECEIVED", amount: 29.78, currency: "SOL", timestamp: Date.now(), source: "REAL", settlement: "settled", transactionReference: "4DLu9xqbYcSIG" });
+
+    // Hourly pacing over one day: each epoch gets 1/24 of the 70% contributor share.
+    const hour = 60 * 60_000;
+    const pool = await treasuryPoolLamports(hour);
+    expect(pool).toBe(Math.floor((29.78 * 0.7) / 24 * 1e9));
+
+    // Work in the last closed hour. Node A linked a wallet, node B did not.
+    const w = wallet();
+    await s.saveNode(node("A001", w.address));
+    await s.saveNode(node("A002"));
+    const last = epochAt(Date.now() - hour);
+    for (let i = 0; i < 12; i++) {
+      await s.saveJob(job("A001", last.startsAt + i * 5 * 60_000 + 1, 100));
+      await s.saveJob(job("A002", last.startsAt + i * 5 * 60_000 + 1, 100));
+    }
+
+    // Holdings come from chain in LIVE_ENV; stub the RPC so holdings resolve as live with zero tokens.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_u: unknown, init?: RequestInit) => {
+      const { method } = JSON.parse(String(init?.body)) as { method: string };
+      const result = method === "getTokenAccountsByOwner" ? { value: [] } : method === "getTokenSupply" ? { value: { amount: "1000000000000000", decimals: 6, uiAmount: 1e9 } } : null;
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    try {
+      const settled = await settleDueEpochs(Date.now());
+      expect(settled).toHaveLength(1);
+      const e = settled[0];
+      expect(e.provenance).toBe("live");
+      expect(e.poolLamports).toBe(pool);
+      expect(e.participants).toBe(1);
+      // One participant hits the 2% anti-whale cap; the rest of the pool stays in the treasury.
+      expect(e.distributedLamports).toBe(Math.floor(pool * 0.02));
+      const after = await getTreasury("REAL");
+      expect(after.allocated).toBeCloseTo(e.distributedLamports / 1e9, 9);
+      expect(after.balance).toBeCloseTo(29.78 - e.distributedLamports / 1e9, 9);
+      // Idempotent and throttled.
+      expect(await settleDueEpochs(Date.now())).toHaveLength(0);
+
+      // Claim: linked wallet gets exactly its allocation; the unlinked node gets nothing.
+      const bal = await balanceOf(w.address);
+      expect(bal.claimable).toBe(e.distributedLamports);
+      const { message } = await issueClaim(w.address);
+      const c = await claim(w.address, message, w.sign(message));
+      expect(c.status).toBe("sent");
+      expect(sender.sent).toEqual([{ to: w.address, lamports: e.distributedLamports }]);
+
+      // RPC down while settling real money: holdings read as zero (multiplier 1) and the epoch still
+      // settles LIVE and claimable. It is never written as simulated.
+      globalThis.fetch = (async () => new Response("down", { status: 500 })) as typeof fetch;
+      const prev = epochAt(Date.now() - 2 * hour);
+      await s.saveJob(job("A001", prev.startsAt + 1, 100));
+      const r = await settleEpoch({ epochStart: prev.startsAt });
+      expect(r.created).toBe(true);
+      expect(r.epoch.provenance).toBe("live");
+      expect((await s.allocationsForWallet(w.address)).every((a) => a.multiplier === 1)).toBe(true);
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.BRAIN_EPOCH_MINUTES;
+      delete process.env.BRAIN_POOL_PACE_DAYS;
+      delete process.env.BRAIN_TOKEN_MINT;
+    }
+  });
+});
