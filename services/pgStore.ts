@@ -141,7 +141,7 @@ export class PgStore implements NetworkStore {
     const t0 = Date.now();
     await this.q("SELECT 1");
     const pingMs = Date.now() - t0;
-    const [tables, conns, slow, idx, settings, dbStats] = await Promise.all([
+    const [tables, conns, slow, idx, settings, active, dbStats] = await Promise.all([
       this.q<{ relname: string; live: string; dead: string; bytes: string; last_autovacuum: string | null; last_autoanalyze: string | null }>(
         `SELECT relname, n_live_tup::text AS live, n_dead_tup::text AS dead, pg_total_relation_size(relid)::text AS bytes,
                 last_autovacuum::text, last_autoanalyze::text
@@ -154,6 +154,12 @@ export class PgStore implements NetworkStore {
       ),
       this.q<{ tablename: string; indexname: string }>(`SELECT tablename, indexname FROM pg_indexes WHERE tablename LIKE 'brain_%' ORDER BY 1, 2`),
       this.q<{ name: string; setting: string }>(`SELECT name, setting FROM pg_settings WHERE name IN ('max_connections', 'server_version', 'shared_buffers', 'work_mem')`),
+      this.q<{ state: string | null; wait: string | null; secs: string; xact_secs: string | null; query: string }>(
+        `SELECT state, wait_event_type || ':' || wait_event AS wait, extract(epoch FROM now() - query_start)::numeric(10,1)::text AS secs,
+                extract(epoch FROM now() - xact_start)::numeric(10,1)::text AS xact_secs, left(regexp_replace(query, '\s+', ' ', 'g'), 110) AS query
+           FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND state IS NOT NULL AND state <> 'idle'
+          ORDER BY query_start LIMIT 25`,
+      ),
       this.q<{ xact: string; hit: string; read: string; reset: string | null }>(
         `SELECT xact_commit::text AS xact, blks_hit::text AS hit, blks_read::text AS read, stats_reset::text AS reset FROM pg_stat_database WHERE datname = current_database()`,
       ),
@@ -178,6 +184,8 @@ export class PgStore implements NetworkStore {
       slowActive: { count: Number(slow.rows[0]?.n ?? 0), oldestSeconds: slow.rows[0]?.oldest_s == null ? null : Number(slow.rows[0].oldest_s) },
       indexes: idx.rows.map((x) => `${x.tablename}.${x.indexname}`),
       settings: Object.fromEntries(settings.rows.map((x) => [x.name, x.setting])),
+      // In-flight sessions: what is holding pooler server connections right now (parameterized SQL only; no row data).
+      active: active.rows.map((x) => ({ state: x.state, wait: x.wait, seconds: Number(x.secs), txSeconds: x.xact_secs == null ? null : Number(x.xact_secs), query: x.query })),
       database: db ? { transactions: Number(db.xact), cacheHitRatio: Number(db.hit) + Number(db.read) > 0 ? Math.round((Number(db.hit) / (Number(db.hit) + Number(db.read))) * 1000) / 1000 : null, statsSince: db.reset } : null,
       statements,
     };
