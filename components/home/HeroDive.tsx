@@ -54,7 +54,7 @@ export function HeroDive() {
               from everywhere.
             </h1>
             <p className="mt-7 max-w-[460px] text-[16px] leading-[1.5] text-ink/75 md:mt-8 md:text-[19px]">
-              BRAIN routes every request to the cheapest path that can run it, browser compute, cloud GPUs or external models, and attaches a receipt. Your computer can power it.
+              BRAIN routes every request to the cheapest path that can run it, browser compute, cloud GPUs or external models, and attaches a receipt. Your computer can power it and earn credits, USDC or SOL.
             </p>
             <div className="pointer-events-auto mt-7 flex flex-wrap gap-2.5 md:mt-8">
               <Button href="/chat" variant="primary" arrow>

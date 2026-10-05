@@ -1,3 +1,4 @@
+import { earn } from "@/lib/site";
 import Link from "next/link";
 import { EconomicsBrief } from "@/components/home/EconomicsBrief";
 import { JobPipeline } from "@/components/home/JobPipeline";
@@ -58,7 +59,7 @@ export default function Home() {
             </h2>
             <p className="mt-6 max-w-[520px] text-[17px] leading-relaxed text-ink/70">
               No install, no driver, no CLI. Open a tab, let it measure your GPU, and join. The server issues a challenge only a real GPU can answer in time, then starts
-              sending verifiable work.
+              sending verifiable work. {earn.line}
             </p>
             <ol className="mt-10 max-w-[560px] border-t border-ink/15">
               {[

@@ -21,7 +21,7 @@ export function Footer() {
           <h2 className="display-md max-w-[560px] text-[28px] leading-[1.02] md:text-[40px]">
             Use BRAIN.
             <br />
-            <span className="text-chalk/40">Or power it.</span>
+            <span className="text-chalk/40">Or power it and earn credits, USDC or SOL.</span>
           </h2>
           <div className="flex flex-wrap gap-3">
             <Button href="/chat" tone="dark" arrow>

@@ -20,7 +20,7 @@ export default function OpengraphImage() {
             <span>Compute</span>
             <span style={{ color: "rgba(230,233,238,0.45)" }}>from everywhere.</span>
           </div>
-          <div style={{ display: "flex", fontSize: 26, color: "rgba(230,233,238,0.6)" }}>Contribute WebGPU compute. Earn from verified work.</div>
+          <div style={{ display: "flex", fontSize: 26, color: "rgba(230,233,238,0.6)" }}>Contribute WebGPU compute. Earn credits, USDC or SOL.</div>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", width: 22 * 18, alignContent: "center", marginLeft: "auto", gap: 4 }}>
           {cells.map((i) => (

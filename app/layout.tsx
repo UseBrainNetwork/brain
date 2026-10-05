@@ -7,7 +7,7 @@ import { siteUrl, social } from "@/lib/site";
 import "./globals.css";
 
 const description =
-  "Your browser becomes part of an AI supercomputer. Contribute verified WebGPU compute and earn from creator fees and inference revenue.";
+  "Your browser becomes part of an AI supercomputer. Contribute verified WebGPU compute. Earn credits, USDC or SOL.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),

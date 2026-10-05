@@ -91,7 +91,7 @@ export function ContributeFlow() {
                 {canJoin && (
                   <div>
                     <p className="text-[14px] leading-relaxed text-ink/65">
-                      Your node becomes visible to the network and starts receiving jobs the server verifies. Keep this tab open. Stop whenever you want.
+                      Your node becomes visible to the network and starts receiving jobs the server verifies. Verified work earns credits, USDC or SOL. Keep this tab open. Stop whenever you want.
                     </p>
                     <Button
                       variant="signal"
@@ -114,7 +114,7 @@ export function ContributeFlow() {
                             <button onClick={() => setWalletOpen(true)} className="text-ink/75 underline-offset-2 hover:underline">
                               connect a wallet
                             </button>{" "}
-                            so accrued earnings follow you. You can do it after joining.
+                            so earnings follow you and USDC or SOL can settle to it. You can do it after joining.
                           </>
                         )}
                       </span>
@@ -253,7 +253,7 @@ function NodeDashboard({ s, onWallet }: { s: ContributorState; onWallet: () => v
           </div>
           <div className={cx("num mt-1.5 text-[24px]", accrued != null ? "text-ok" : "text-chalk/60")}>{accrued != null ? fmtUsd(accrued) : "$0"}</div>
           <div className="mt-1 font-mono text-[11px] leading-relaxed text-chalk/40">
-            {accrued != null ? "Owed at list price for customer-funded verified work. Not paid out yet." : "No customer-funded jobs yet. Subsidized jobs build reputation, not money."}
+            {accrued != null ? "Owed at list price for customer-funded verified work. Usable as credits now; USDC or SOL when payouts open." : "No customer-funded jobs yet. Subsidized jobs build reputation, not money."}
           </div>
         </div>
         <div className="bg-ink-2 px-5 py-4 md:px-6">

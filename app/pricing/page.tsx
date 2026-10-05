@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Button, Container, Section } from "@/components/ui";
 import { creditUsd, paymentsConnected, visiblePlans } from "@/lib/plans";
+import { earn } from "@/lib/site";
 import { snapshot } from "@/services/accounting";
 import { computeUnitListPriceUsd, tokenListPricePer1MUsd } from "@/lib/pricing";
 import { cx } from "@/lib/format";
@@ -76,12 +77,12 @@ export default async function PricingPage() {
                 <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-chalk/70">Paid plans</span>
                 <h3 className="display-md mt-6 text-[30px] leading-[1.05] md:text-[36px]">More credits, every routing mode, private routing.</h3>
                 <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/60">
-                  Paid plans open when billing does. Until then the Free plan is the whole product, and verified compute from your own machines offsets what you use on it.
+                  Paid plans open when billing does. Until then the Free plan is the whole product, and your own machines can pay for it: verified compute earns credits now, and USDC or SOL when payouts open.
                 </p>
               </div>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Button href="/earn" tone="dark" variant="secondary" arrow>
-                  Earn credits with compute
+                  {earn.line}
                 </Button>
               </div>
             </div>
@@ -101,9 +102,9 @@ export default async function PricingPage() {
             </div>
           </div>
           <div>
-            <h2 className="display-md text-[32px] md:text-[44px]">Pay with compute.</h2>
+            <h2 className="display-md text-[32px] md:text-[44px]">{earn.line}</h2>
             <p className="mt-4 max-w-[520px] text-[15px] leading-relaxed text-ink/65">
-              Attach the wallet you contribute with and every dollar your machines earn (REAL accounting lines, accrued at list price) is mirrored into your credit balance. That offset is a ledger entry, not a payout: no money moves until payouts are live.
+              Attach the Solana wallet you contribute with. Every dollar your machines earn (REAL accounting lines, accrued at list price) is mirrored into your credit balance today, and settles to that wallet in USDC or SOL when payouts open. Until then the offset is a ledger entry, not a payout.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Button href="/earn" variant="secondary" arrow>

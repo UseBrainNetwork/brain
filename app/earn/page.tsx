@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { earn } from "@/lib/site";
 import { ContributeFlow } from "@/components/contribute/ContributeFlow";
 import { Container, Section } from "@/components/ui";
 import { computeUnitListPriceUsd } from "@/lib/pricing";
@@ -27,8 +28,8 @@ export default function EarnPage() {
             <p className="text-[16px] leading-relaxed text-ink/65">Everything below runs in this tab: real WebGPU detection, a real benchmark, real jobs verified by the server. Nothing is installed.</p>
             <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-ink/15 pt-4 font-mono text-[12px]">
               <div>
-                <dt className="text-fog">You earn from</dt>
-                <dd className="mt-0.5 font-semibold">verified work only</dd>
+                <dt className="text-fog">You earn</dt>
+                <dd className="mt-0.5 font-semibold">{earn.short}</dd>
               </div>
               <div>
                 <dt className="text-fog">Provider share</dt>
@@ -47,7 +48,7 @@ export default function EarnPage() {
                 </dd>
               </div>
             </dl>
-            <p className="mt-3 text-[11.5px] leading-relaxed text-fog">Earnings accrue at list price as REAL ledger lines. Payouts are not enabled; no return is promised or implied.</p>
+            <p className="mt-3 text-[11.5px] leading-relaxed text-fog">{earn.how} Earnings accrue at list price as REAL ledger lines; payouts are not enabled yet and no return is promised.</p>
           </div>
         </div>
         <ContributeFlow />

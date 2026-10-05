@@ -67,7 +67,7 @@ If nothing can run the request, you get `503 no_provider_available` with every t
 
 ### Power it
 
-Open [brainnetwork.app/earn](https://brainnetwork.app/earn) in Chrome, Edge, Safari 26+ or Firefox 141+ (Windows) and press **Join network**. Nothing is installed. Your GPU is benchmarked by the server, joins the pool, and receives verified work. [/node](https://brainnetwork.app/node) is the full-screen worker; [/demo](https://brainnetwork.app/demo) runs a job across every device in the room.
+Open [brainnetwork.app/earn](https://brainnetwork.app/earn) in Chrome, Edge, Safari 26+ or Firefox 141+ (Windows) and press **Join network**. Nothing is installed. Your GPU is benchmarked by the server, joins the pool, and receives verified work. Verified work earns credits you can spend on BRAIN today, and USDC or SOL to your Solana wallet when payouts are enabled. [/node](https://brainnetwork.app/node) is the full-screen worker; [/demo](https://brainnetwork.app/demo) runs a job across every device in the room.
 
 ### Run it
 
