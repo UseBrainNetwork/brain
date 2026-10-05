@@ -141,7 +141,7 @@ share_i  = weight_i / Σ weight, water-filled under a per-account cap
 
 Token contract (Solana, pump.fun): `FiJ4gnd4dhqNeBKfS4E8wnERMEpjMPdUfJhu8foipump`. The site reads the mint's on-chain status and shows NOT LIVE until it exists; no price or market data is displayed from any source we don't verify.
 
-Protocol wallet (creator fees land here, read on-chain at `/economics` and `/rewards`): `HZLev74M3ATV5jQJsoN8FcJAKx3RUefAobhcXr3egxwa`. The server never holds its key.
+Protocol wallet (creator fees land here, read on-chain at `/economics` and `/rewards`): `HZLev74M3ATV5jQJsoN8FcJAKx3RUefAobhcXr3egxwa`. The server never holds its key. Creator-fee claims are read from chain by signature and enter the treasury ledger automatically; the daily settle cron turns the contributors' share into claimable SOL.
 
 Tested properties: zero verified compute earns zero regardless of holdings; the holding multiplier is capped (1.35×) and concave, so splitting compute across sybil nodes gains nothing; no account exceeds the pool cap; allocations never exceed the pool. No emissions, no staking yield, no projected returns. Prices, splits and how list prices were derived: [ECONOMICS.md](ECONOMICS.md).
 

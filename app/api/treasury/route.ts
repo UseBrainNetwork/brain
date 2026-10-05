@@ -1,10 +1,10 @@
 import { body, nodeRoute } from "@/api/http";
 import { json } from "@/services/security";
-import { adapterStatuses, getTreasury, manualAdapter, syncTreasury } from "@/services/treasury";
+import { adapterStatuses, manualAdapter, syncedTreasury, syncTreasury } from "@/services/treasury";
 
 export const dynamic = "force-dynamic";
 
-export const GET = nodeRoute(async () => json({ treasury: await getTreasury("REAL"), adapters: adapterStatuses() }));
+export const GET = nodeRoute(async () => json({ treasury: await syncedTreasury(), adapters: adapterStatuses() }));
 
 /** Operator-only: record a real creator-reward receipt by transaction signature. */
 export const POST = nodeRoute(async (req) => {

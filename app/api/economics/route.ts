@@ -5,7 +5,7 @@ import { realSummary } from "@/services/distributed";
 import { listEpochsV2 } from "@/services/epochs";
 import { listReceipts } from "@/services/receipts";
 import { json } from "@/services/security";
-import { adapterStatuses, getTreasury } from "@/services/treasury";
+import { adapterStatuses, syncedTreasury } from "@/services/treasury";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export const GET = nodeRoute(async (req) => {
   const from = Number(new URL(req.url).searchParams.get("from")) || 0;
   const receipts = await listReceipts(500);
-  const [snap, events, treasury, epochs, network] = await Promise.all([snapshot("REAL", from, undefined, receipts), listEvents("REAL", 50), getTreasury("REAL"), listEpochsV2(10), realSummary()]);
+  const [snap, events, treasury, epochs, network] = await Promise.all([snapshot("REAL", from, undefined, receipts), listEvents("REAL", 50), syncedTreasury(), listEpochsV2(10), realSummary()]);
   return json({
     source: "REAL",
     snapshot: snap,

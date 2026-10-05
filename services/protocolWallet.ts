@@ -1,5 +1,9 @@
 import { protocolWallet, token } from "@/lib/site";
 import { payoutStatus } from "./claims";
+import { creatorVaults, LAMPORTS, readTransfer, rpc, rpcUrl, type WalletTransfer } from "./solana";
+
+export { creatorVaults, PUMP_PROGRAMS, readTransfer, type WalletTransfer } from "./solana";
+
 
 /**
  * Read-only view of the protocol wallet, straight from a Solana RPC. Everything here is REAL
@@ -7,12 +11,6 @@ import { payoutStatus } from "./claims";
  * ledger: an inbound transfer is just an inbound transfer until an operator confirms its
  * signature as a creator-fee claim via POST /api/treasury. Nothing is inferred.
  */
-export interface WalletTransfer {
-  signature: string;
-  at: number | null;
-  /** Net SOL change for the protocol wallet in this transaction (positive = inbound). */
-  deltaSol: number;
-}
 
 export interface TokenStatus {
   symbol: string;
@@ -36,35 +34,12 @@ export interface ProtocolWalletView {
   token: TokenStatus;
   /** Hot wallet claims are paid from. null when payouts are not configured. */
   payout: { address: string; balanceSol: number | null; enabled: boolean } | null;
+  /** Unclaimed creator fees sitting in pump.fun's vault PDAs for our wallet. On-chain; null = unreadable. */
+  creatorVault: { bonding: { address: string; sol: number | null }; amm: { address: string; sol: number | null }; totalSol: number | null };
 }
 
-const LAMPORTS = 1e9;
 const TTL_MS = 60_000;
-const PUBLIC_RPC: Record<string, string> = {
-  "mainnet-beta": "https://api.mainnet-beta.solana.com",
-  devnet: "https://api.devnet.solana.com",
-  testnet: "https://api.testnet.solana.com",
-};
 
-function rpcUrl(): { url: string; kind: "configured" | "public" } {
-  const u = process.env.SOLANA_RPC_URL;
-  if (u) return { url: u, kind: "configured" };
-  return { url: PUBLIC_RPC[protocolWallet.cluster] ?? PUBLIC_RPC["mainnet-beta"], kind: "public" };
-}
-
-async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T> {
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    signal: AbortSignal.timeout(6000),
-    cache: "no-store",
-  });
-  if (!r.ok) throw new Error(`rpc ${method} ${r.status}`);
-  const j = (await r.json()) as { result?: T; error?: { message: string } };
-  if (j.error) throw new Error(j.error.message);
-  return j.result as T;
-}
 
 const g = globalThis as typeof globalThis & { __brainProtocolWallet?: { at: number; view: ProtocolWalletView }; __brainTokenStatus?: { at: number; status: TokenStatus } };
 
@@ -101,36 +76,31 @@ export async function getProtocolWallet(limit = 8): Promise<ProtocolWalletView> 
   const tokenStatus = await getTokenStatus();
   const ps = payoutStatus();
   const payout = ps.wallet ? { address: ps.wallet, balanceSol: null as number | null, enabled: ps.enabled } : null;
-  const base: ProtocolWalletView = { address, cluster: protocolWallet.cluster, source: "REAL", balanceSol: null, recent: [], fetchedAt: Date.now(), rpc: "unavailable", token: tokenStatus, payout };
+  const vaults = creatorVaults(address);
+  const creatorVault: ProtocolWalletView["creatorVault"] = { bonding: { address: vaults.bonding, sol: null }, amm: { address: vaults.amm, sol: null }, totalSol: null };
+  const base: ProtocolWalletView = { address, cluster: protocolWallet.cluster, source: "REAL", balanceSol: null, recent: [], fetchedAt: Date.now(), rpc: "unavailable", token: tokenStatus, payout, creatorVault };
   try {
-    const bal = await rpc<{ value: number }>(url, "getBalance", [address, { commitment: "confirmed" }]);
+    // One call for every balance we show: protocol wallet, payout wallet, both creator vaults.
+    const keys = [address, vaults.bonding, vaults.amm, ...(payout ? [payout.address] : [])];
+    const multi = await rpc<{ value: ({ lamports: number } | null)[] }>(url, "getMultipleAccounts", [keys, { encoding: "base64", commitment: "confirmed" }]);
+    const lam = (i: number) => (multi.value[i] ? multi.value[i]!.lamports : 0) / LAMPORTS;
+    const bal = { value: (multi.value[0]?.lamports ?? 0) };
+    creatorVault.bonding.sol = lam(1);
+    creatorVault.amm.sol = lam(2);
+    creatorVault.totalSol = creatorVault.bonding.sol + creatorVault.amm.sol;
+    if (payout) payout.balanceSol = lam(3);
     const sigs = await rpc<{ signature: string; blockTime: number | null; err: unknown }[]>(url, "getSignaturesForAddress", [address, { limit }]);
     const recent: WalletTransfer[] = [];
     for (const s of sigs) {
       if (s.err) continue;
       try {
-        const tx = await rpc<{ transaction: { message: { accountKeys: ({ pubkey: string } | string)[] } }; meta: { preBalances: number[]; postBalances: number[] } } | null>(url, "getTransaction", [
-          s.signature,
-          { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" },
-        ]);
-        if (!tx) continue;
-        const keys = tx.transaction.message.accountKeys.map((k) => (typeof k === "string" ? k : k.pubkey));
-        const i = keys.indexOf(address);
-        if (i < 0) continue;
-        recent.push({ signature: s.signature, at: s.blockTime ? s.blockTime * 1000 : null, deltaSol: (tx.meta.postBalances[i] - tx.meta.preBalances[i]) / LAMPORTS });
+        const t = await readTransfer(url, address, s.signature, s.blockTime);
+        if (t) recent.push(t);
       } catch {
         /* skip a single unreadable tx; the balance above is still authoritative */
       }
     }
-    if (payout) {
-      try {
-        const pb = await rpc<{ value: number }>(url, "getBalance", [payout.address, { commitment: "confirmed" }]);
-        payout.balanceSol = pb.value / LAMPORTS;
-      } catch {
-        /* leave null → UNKNOWN */
-      }
-    }
-    const view: ProtocolWalletView = { ...base, balanceSol: bal.value / LAMPORTS, recent, rpc: kind, payout };
+    const view: ProtocolWalletView = { ...base, balanceSol: bal.value / LAMPORTS, recent, rpc: kind, payout, creatorVault };
     g.__brainProtocolWallet = { at: Date.now(), view };
     return view;
   } catch {

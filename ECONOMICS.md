@@ -12,7 +12,7 @@ Anyone can provide compute. Anyone can buy intelligence. BRAIN finds the cheapes
 | --- | --- | --- |
 | Customer payments for executed work | `AccountingEvent CUSTOMER_PAYMENT` | **Accrued only.** Created when a receipt is priced (operator list price). No payment rail exists yet, so `settled` is always empty. |
 | Subscriptions | `AccountingEvent SUBSCRIPTION_PAYMENT` | **Type exists, never written.** Pro and Max are placeholders until payments are connected. `/economics` shows "no payment processor connected". |
-| Pump.fun creator rewards | `CreatorRewardTreasury` receipts via adapters | **Manual only.** The `manual` adapter records a receipt an operator posts with a transaction reference. The `pumpfun` adapter is not implemented and says so. The `mock` adapter is SIMULATED and cannot touch REAL totals. |
+| Pump.fun creator rewards | `CreatorRewardTreasury` receipts via adapters | **On-chain.** The `pumpfun` adapter scans the protocol wallet's transactions and records a receipt for every claim: SOL leaving one of our pump.fun creator-fee vault PDAs into the wallet in the same transaction, keyed by signature. Unclaimed fees still in the vault are displayed but are not revenue. The `manual` adapter remains for receipts an operator posts with a transaction reference. The `mock` adapter is SIMULATED and cannot touch REAL totals. |
 
 And one real outflow: when the external model provider reports what it charged for a request, that amount is recorded as `INFRASTRUCTURE_COST` with basis `provider-reported` (OpenRouter returns `usage.cost`). When it does not, the configured `BRAIN_EXTERNAL_PRICE_USD_PER_1M` is used with basis `list-price`; when neither exists, the cost is UNKNOWN.
 
@@ -112,7 +112,7 @@ BRAIN AUTO scores resource classes on cost, latency, reliability and configured 
 ## Dashboard reading guide
 
 - **Accrued**: owed at list price for verified work. Nothing moved.
-- **Settled**: backed by a transaction reference. Currently only manual treasury receipts can be settled.
+- **Settled**: backed by a transaction reference. Treasury receipts (on-chain creator-fee claims and manual records) are settled.
 - **NOT ENOUGH DATA**: no REAL events in the window.
 - **UNKNOWN**: a price that is not configured.
 - **AWAITING DATA**: a flywheel stage whose real metric does not exist yet.

@@ -6,7 +6,7 @@ import { contributorPoolToday } from "@/rewards/simulate";
 import { demoSolPriceUsd } from "@/services/mock/mockData";
 import { NodeError } from "./nodes";
 import { getStore, type StoredNode } from "./store";
-import { allocateFromTreasury, getTreasury } from "./treasury";
+import { allocateFromTreasury, syncedTreasury } from "./treasury";
 import { getHoldings } from "./wallet";
 
 export const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -40,7 +40,7 @@ export function configuredPoolLamports(): number | null {
  * a creator-fee receipt by transaction signature. Never includes anything simulated.
  */
 export async function treasuryPoolLamports(): Promise<number> {
-  const t = await getTreasury("REAL");
+  const t = await syncedTreasury();
   return Math.max(0, Math.floor(t.balance * defaultRevenueSplit.creatorRewards.contributors * LAMPORTS_PER_SOL));
 }
 

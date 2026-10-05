@@ -10,7 +10,7 @@ import { listEvents, snapshot } from "@/services/accounting";
 import { realSummary } from "@/services/distributed";
 import { listEpochsV2 } from "@/services/epochs";
 import { listReceipts } from "@/services/receipts";
-import { adapterStatuses, getTreasury } from "@/services/treasury";
+import { adapterStatuses, syncedTreasury } from "@/services/treasury";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Live economics", description: "Where the money comes from and where it goes, from real accounting events only." };
@@ -29,14 +29,14 @@ function Cell({ c, currency = "USD" }: { c: SumCell; currency?: "USD" | "SOL" })
 
 export default async function EconomicsPage() {
   const receipts = await listReceipts(500);
-  const [snap, events, treasury, epochs, network] = await Promise.all([snapshot("REAL", 0, undefined, receipts), listEvents("REAL", 30), getTreasury("REAL"), listEpochsV2(10), realSummary()]);
+  const [snap, events, treasury, epochs, network] = await Promise.all([snapshot("REAL", 0, undefined, receipts), listEvents("REAL", 30), syncedTreasury(), listEpochsV2(10), realSummary()]);
   const adapters = adapterStatuses();
   const priceCU = computeUnitListPriceUsd();
   const priceTok = tokenListPricePer1MUsd();
   const paidAny = snap.customersPaid.count > 0;
 
   const flywheel = [
-    { k: "Trading", v: adapters.find((a) => a.name === "pumpfun")?.ok ? "connected" : "AWAITING DATA", sub: "Pump.fun creator fees · adapter not wired" },
+    { k: "Trading", v: adapters.find((a) => a.name === "pumpfun")?.ok ? "connected" : "AWAITING DATA", sub: "Pump.fun creator fees · claims read on-chain" },
     { k: "Creator rewards", v: snap.creatorRewards.count ? <Cell c={snap.creatorRewards} currency="SOL" /> : "AWAITING DATA", sub: `${treasury.received.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL received · ${treasury.balance.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL balance` },
     { k: "Compute subsidy", v: epochs.length ? sol(epochs.reduce((s, e) => s + e.distributedLamports, 0)) : "AWAITING DATA", sub: `${epochs.length} finalized epoch${epochs.length === 1 ? "" : "s"}` },
     { k: "More capacity", v: `${network.realNodes} real nodes`, sub: `${fmtInt(network.capacityScore)} capacity score` },
@@ -115,7 +115,7 @@ export default async function EconomicsPage() {
                 <span className="text-chalk/70">
                   {a.name} <span className="text-chalk/35">· {a.source}</span>
                 </span>
-                <span className={a.ok ? "text-ok" : "text-chalk/40"}>{a.ok ? "ready" : "not implemented"}</span>
+                <span className={a.ok ? "text-ok" : "text-chalk/40"}>{a.ok ? "ready" : "off"}</span>
               </li>
             ))}
           </ul>

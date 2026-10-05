@@ -11,7 +11,9 @@ const sol = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits:
 /**
  * The protocol wallet, read from chain. Creator fees from the token land here and fund the
  * contributor pool. Balance and transfers are LIVE; if the RPC is unreachable the figure says
- * UNKNOWN. Transfers are not labelled as creator fees until an operator confirms the signature.
+ * UNKNOWN. A transfer is labelled a creator fee only when the chain shows SOL leaving one of our
+ * pump.fun creator-fee vaults into this wallet in the same transaction; unclaimed fees still in
+ * the vault are shown separately and are not revenue yet.
  */
 export function ProtocolWalletCard({ className, tone = "dark" }: { className?: string; tone?: "dark" | "light" }) {
   const [v, setV] = useState<ProtocolWalletView | null>(null);
@@ -50,8 +52,8 @@ export function ProtocolWalletCard({ className, tone = "dark" }: { className?: s
             </a>
           </div>
           <p className={cx("mt-3 max-w-[560px] text-[13.5px] leading-relaxed", muted)}>
-            Creator fees from the token are claimed to this address. The server never holds its key. Each recorded fee receipt funds the contributor pool at the published split, and claims are paid from a separate
-            payout wallet. Transfers below are raw on-chain activity; a transfer only counts as creator revenue once its signature is recorded in the ledger.
+            Creator fees from the token accrue in pump.fun&apos;s vault and are claimed to this address. The server never holds its key. Each claim is read from chain by signature and funds the contributor pool at
+            the published split; claims are paid from a separate payout wallet. Other inbound transfers are shown but do not count as creator revenue.
           </p>
         </div>
         <div className="text-right">
@@ -62,8 +64,20 @@ export function ProtocolWalletCard({ className, tone = "dark" }: { className?: s
           <div className={cx("mt-1.5 font-mono text-[10.5px]", muted)}>{v?.balanceSol == null ? (v ? "RPC unreachable" : "") : `on-chain · ${v.cluster}`}</div>
         </div>
       </div>
-      {v?.payout && (
+      {v && (
         <div className={cx("mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-4 font-mono text-[12px]", dark ? "border-chalk/10" : "border-ink/10")}>
+          <span className="flex flex-wrap items-center gap-2">
+            <span className={muted}>Unclaimed creator fees</span>
+            <a href={accountUrl(v.creatorVault.bonding.address, v.cluster)} target="_blank" rel="noreferrer" className={cx("hover:underline", muted)} title={v.creatorVault.bonding.address}>
+              vault ↗
+            </a>
+            <span className={cx("rounded-sm px-1 text-[9.5px] uppercase tracking-[0.08em] ring-1", muted, dark ? "ring-chalk/20" : "ring-ink/20")}>not revenue until claimed</span>
+          </span>
+          <span>{v.creatorVault.totalSol == null ? <span className={muted}>UNKNOWN</span> : sol(v.creatorVault.totalSol)}</span>
+        </div>
+      )}
+      {v?.payout && (
+        <div className={cx("mt-3 flex flex-wrap items-center justify-between gap-3 border-t pt-4 font-mono text-[12px]", dark ? "border-chalk/10" : "border-ink/10")}>
           <span className="flex flex-wrap items-center gap-2">
             <span className={muted}>Payout wallet</span>
             <a href={accountUrl(v.payout.address, v.cluster)} target="_blank" rel="noreferrer" className="hover:underline" title={v.payout.address}>
@@ -86,8 +100,11 @@ export function ProtocolWalletCard({ className, tone = "dark" }: { className?: s
                   <a href={txUrl(t.signature, v.cluster)} target="_blank" rel="noreferrer" className={cx("truncate hover:underline", muted)}>
                     {t.signature.slice(0, 10)}…{t.signature.slice(-6)}
                   </a>
+                  <span className={cx("rounded-sm px-1 text-[9.5px] uppercase tracking-[0.08em] ring-1", t.creatorFeeSol > 0 ? "text-ok ring-ok/40" : cx(muted, dark ? "ring-chalk/20" : "ring-ink/20"))}>
+                    {t.creatorFeeSol > 0 ? "creator fee" : "transfer"}
+                  </span>
                   <span className={muted}>{t.at ? new Date(t.at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""}</span>
-                  <span className="text-ok">+{sol(t.deltaSol)}</span>
+                  <span className={t.creatorFeeSol > 0 ? "text-ok" : ""}>+{sol(t.deltaSol)}</span>
                 </li>
               ))}
             </ul>
