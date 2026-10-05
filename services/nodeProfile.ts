@@ -37,6 +37,15 @@ export async function nodeProfile(nodeId: string, now = Date.now()): Promise<Nod
     if (j.status === "completed" && j.verified && j.latencyMs != null) latencies.push(j.latencyMs);
     if (j.failReason === "node lost" || j.failReason === "deadline") lostOrDeadline++;
   }
+  return profileOf(n, now, { medianLatencyMs: median(latencies), reassignmentRate: assigned > 0 ? lostOrDeadline / assigned : null });
+}
+
+/**
+ * Reputation from the node record alone: no per-node job scan. The two fields that need the scan
+ * (median latency, reassignment rate) are reported as unknown rather than guessed. Used where many
+ * profiles are listed at once and the store is the bottleneck.
+ */
+export function profileOf(n: StoredNode, now = Date.now(), scan: { medianLatencyMs: number | null; reassignmentRate: number | null } = { medianLatencyMs: null, reassignmentRate: null }): NodeReputation {
   const checked = n.verifiedJobs + n.failedJobs;
   return {
     nodeId: n.id,
@@ -50,16 +59,21 @@ export async function nodeProfile(nodeId: string, now = Date.now()): Promise<Nod
     jobsVerified: n.verifiedJobs,
     verificationRate: checked > 0 ? n.verifiedJobs / checked : null,
     uptime: uptimeOf(n, now),
-    medianLatencyMs: median(latencies),
+    medianLatencyMs: scan.medianLatencyMs,
     computeUnits: n.verifiedComputeUnits,
-    reassignmentRate: assigned > 0 ? lostOrDeadline / assigned : null,
+    reassignmentRate: scan.reassignmentRate,
     reputationScore: n.reputation,
     source: "REAL",
   };
 }
 
-export async function listProfiles(limit = 50): Promise<NodeReputation[]> {
-  const nodes = (await getStore().listNodes()).sort((a, b) => b.verifiedComputeUnits - a.verifiedComputeUnits).slice(0, limit);
+/** Top nodes by verified compute. `light` skips the per-node job scan (one store read instead of 1 + 2n). */
+export async function listProfiles(limit = 50, opts: { light?: boolean; nodes?: StoredNode[] } = {}): Promise<NodeReputation[]> {
+  const nodes = (opts.nodes ?? (await getStore().listNodes())).slice().sort((a, b) => b.verifiedComputeUnits - a.verifiedComputeUnits).slice(0, limit);
+  if (opts.light) {
+    const now = Date.now();
+    return nodes.map((n) => profileOf(n, now));
+  }
   const out: NodeReputation[] = [];
   for (const n of nodes) {
     const p = await nodeProfile(n.id);

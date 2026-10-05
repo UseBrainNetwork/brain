@@ -420,9 +420,9 @@ export async function getJob(id: string) {
 }
 
 /** Real-only network summary for /demo. Nothing simulated contributes. */
-export async function realSummary() {
+export async function realSummary(knownNodes?: StoredNode[]) {
   const store = getStore();
-  const nodes = (await store.listNodes()).filter(live);
+  const nodes = (knownNodes ?? (await store.listNodes())).filter(live);
   const jobs = await store.listDistributedJobs(100);
   const done = jobs.filter((j) => j.status === "completed");
   const unitsAll = jobs.flatMap((j) => j.units).filter((u) => u.status === "verified" || u.status === "mismatch" || u.status === "failed");
