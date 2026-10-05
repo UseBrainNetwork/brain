@@ -75,6 +75,27 @@ const RESPONSE = `{
   }
 }`;
 
+const TOOLS = `from openai import OpenAI
+client = OpenAI(base_url="https://brainnetwork.app/v1", api_key="brain_sk_...")
+
+tools = [{"type": "function", "function": {
+    "name": "get_weather",
+    "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},
+}}]
+
+r = client.chat.completions.create(model="brain/auto", tools=tools, tool_choice="auto",
+    messages=[{"role": "user", "content": "Weather in Oslo?"}])
+call = r.choices[0].message.tool_calls[0]        # finish_reason == "tool_calls"
+result = get_weather(**json.loads(call.function.arguments))
+
+r2 = client.chat.completions.create(model="brain/auto", tools=tools, messages=[
+    {"role": "user", "content": "Weather in Oslo?"},
+    r.choices[0].message,
+    {"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)},
+])
+print(r2.choices[0].message.content)
+# Every response still carries r.brain: target, model, latency, cost.`;
+
 const ERRORS = [
   ["400", "invalid_request", "Malformed body, bad roles or empty messages."],
   ["401", "invalid_api_key", "Missing, unknown or revoked API key."],
@@ -222,6 +243,27 @@ export default function DevelopersPage() {
               </div>
             </div>
             <CodeBlock lang="json" title="200 · application/json" code={RESPONSE} />
+          </div>
+
+          <div id="tools" className="mt-24 grid gap-10 lg:grid-cols-2">
+            <div>
+              <h2 className="display-md text-[32px] md:text-[48px]">Tools and structured output</h2>
+              <p className="mt-4 max-w-[460px] text-[15px] leading-relaxed text-ink/65">
+                Agents work unchanged. <span className="font-mono text-[14px]">tools</span>, <span className="font-mono text-[14px]">tool_choice</span>, <span className="font-mono text-[14px]">response_format</span> (<span className="font-mono text-[14px]">json_object</span> or <span className="font-mono text-[14px]">json_schema</span>) and <span className="font-mono text-[14px]">stop</span> are validated and forwarded; <span className="font-mono text-[14px]">tool_calls</span> come back in the message and in stream deltas, with <span className="font-mono text-[14px]">finish_reason: &quot;tool_calls&quot;</span>. Assistant messages with <span className="font-mono text-[14px]">tool_calls</span> and <span className="font-mono text-[14px]">tool</span> role messages are accepted for the round trip.
+              </p>
+              <div className="mt-8 space-y-3 text-[14px] leading-relaxed text-ink/65">
+                <p>
+                  <span className="font-semibold text-ink">Routing.</span> A request that needs tools is classified with the <span className="font-mono text-[13px]">tools</span> capability and only targets that support it are eligible. Browser nodes never are; if no capable target is configured you get <span className="font-mono text-[13px]">503 no_provider_available</span>, not a text answer pretending to be a tool call.
+                </p>
+                <p>
+                  <span className="font-semibold text-ink">Honesty note.</span> How well a schema is followed depends on the model that ran, which the receipt names. Set <span className="font-mono text-[13px]">strict: true</span> and validate the JSON on your side; BRAIN does not repair model output.
+                </p>
+                <p>
+                  <span className="font-semibold text-ink">Limits.</span> Up to 64 tools and 64k characters of schema per request; text content parts are accepted, image parts are rejected rather than dropped.
+                </p>
+              </div>
+            </div>
+            <CodeBlock lang="python" title="tool round trip · openai sdk" code={TOOLS} />
           </div>
         </Container>
       </Section>

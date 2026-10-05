@@ -1,3 +1,4 @@
+import type { ChatMessage, ChatOptions, ToolCall } from "./chat";
 /**
  * Economic layer domain model: proof of compute, routing, orders, accounting, reputation.
  *
@@ -120,7 +121,7 @@ export interface RequestConstraints {
 
 export type ExecutionRequest =
   | { kind: "compute"; workload: "matmul_u32"; size: "small" | "medium" | "large"; unitsPerNode?: number; redundancy?: 1 | 2; privacy?: PrivacyRequirement }
-  | { kind: "chat"; model: string; messages: { role: "system" | "user" | "assistant"; content: string }[]; maxTokens?: number; temperature?: number; privacy?: PrivacyRequirement; tools?: boolean };
+  | ({ kind: "chat"; model: string; messages: ChatMessage[]; maxTokens?: number; temperature?: number; privacy?: PrivacyRequirement } & ChatOptions);
 
 /** What BRAIN AUTO decided the request needs, before looking at any provider. */
 export interface RequestClassification {
@@ -201,6 +202,8 @@ export interface ExecutionResult {
   executionTimeMs: number;
   /** Chat only. */
   content?: string;
+  toolCalls?: ToolCall[];
+  finishReason?: string;
   usage?: { inputUnits: number; outputUnits: number };
   /** USD the customer accrues for this step, from the receipt. null = UNKNOWN. */
   cost?: Money | null;
@@ -289,6 +292,9 @@ export interface ComputeOrder {
   error?: string;
   /** Chat only: the returned text. */
   output?: string;
+  /** Chat only: tool calls the model made instead of (or alongside) text. */
+  toolCalls?: ToolCall[];
+  finishReason?: string;
   source: Source;
 }
 

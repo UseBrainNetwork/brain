@@ -29,7 +29,7 @@ describe("validateChat", () => {
   it("rejects unknown models and bad messages", () => {
     expect(() => validateChat({ model: "gpt-9", messages: [{ role: "user", content: "hi" }] })).toThrow(GatewayError);
     expect(() => validateChat({ messages: [] })).toThrow(/messages/);
-    expect(() => validateChat({ messages: [{ role: "tool", content: "x" }] })).toThrow(/role/);
+    expect(() => validateChat({ messages: [{ role: "robot", content: "x" }] })).toThrow(/role/);
   });
 });
 
@@ -51,5 +51,56 @@ describe("reframeStream", () => {
   it("passes non-JSON lines through", async () => {
     const text = await read(reframeStream(sse([": keepalive"]), "id", "brain/auto", 1));
     expect(text).toContain(": keepalive");
+  });
+});
+
+describe("validateChat · tools and structured output", () => {
+  const weather = { type: "function", function: { name: "get_weather", description: "Weather", parameters: { type: "object", properties: { city: { type: "string" } } } } };
+
+  it("accepts tools, tool_choice, response_format and stop, and forwards them", () => {
+    const r = validateChat({
+      messages: [{ role: "user", content: "Weather in Oslo?" }],
+      tools: [weather],
+      tool_choice: "auto",
+      response_format: { type: "json_object" },
+      stop: ["END"],
+    });
+    expect(r.tools?.[0].function.name).toBe("get_weather");
+    expect(r.tool_choice).toBe("auto");
+    expect(r.response_format).toEqual({ type: "json_object" });
+    expect(r.stop).toEqual(["END"]);
+  });
+
+  it("accepts a full tool round-trip: assistant tool_calls with null content, then a tool message", () => {
+    const r = validateChat({
+      messages: [
+        { role: "user", content: "Weather in Oslo?" },
+        { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "get_weather", arguments: '{"city":"Oslo"}' } }] },
+        { role: "tool", tool_call_id: "call_1", content: '{"temp_c":4}' },
+      ],
+      tools: [weather],
+    });
+    expect(r.messages[1].content).toBeNull();
+    expect(r.messages[1].tool_calls?.[0].function.arguments).toBe('{"city":"Oslo"}');
+    expect(r.messages[2].tool_call_id).toBe("call_1");
+  });
+
+  it("joins text content parts", () => {
+    const r = validateChat({ messages: [{ role: "user", content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] }] });
+    expect(r.messages[0].content).toBe("a\nb");
+  });
+
+  it("rejects null content without tool_calls, bad tool shapes, unknown tool_choice targets and bad formats", () => {
+    expect(() => validateChat({ messages: [{ role: "assistant", content: null }] })).toThrow(GatewayError);
+    expect(() => validateChat({ messages: [{ role: "tool", content: "x" }] })).toThrow(/tool_call_id/);
+    expect(() => validateChat({ messages: [{ role: "user", content: "x" }], tools: [{ type: "function", function: { name: "bad name!" } }] })).toThrow(GatewayError);
+    expect(() => validateChat({ messages: [{ role: "user", content: "x" }], tools: [weather], tool_choice: { type: "function", function: { name: "nope" } } })).toThrow(/unknown tool/);
+    expect(() => validateChat({ messages: [{ role: "user", content: "x" }], tool_choice: "auto" })).toThrow(/requires tools/);
+    expect(() => validateChat({ messages: [{ role: "user", content: "x" }], response_format: { type: "xml" } })).toThrow(GatewayError);
+    expect(() => validateChat({ messages: [{ role: "user", content: "x" }], response_format: { type: "json_schema", json_schema: {} } })).toThrow(/name/);
+  });
+
+  it("rejects image parts (text only) rather than silently dropping them", () => {
+    expect(() => validateChat({ messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "x" } }] }] })).toThrow(GatewayError);
   });
 });

@@ -84,3 +84,16 @@ describe("privacy constraint", () => {
     expect(scoreEstimates([cloud, cheapExternal], "CHEAP", { privacy: "PRIVATE" }).selected?.provider).toBe("cloud-fallback");
   });
 });
+
+describe("tool calling capability", async () => {
+  const { classify } = await import("./plan");
+  const { wantsTools } = await import("@/domain/chat");
+  const tool = { type: "function" as const, function: { name: "f" } };
+  it("classifies a request with tools as needing the tools capability, unless tool_choice is none", () => {
+    const base = { kind: "chat" as const, model: "brain/auto", messages: [{ role: "user" as const, content: "hi" }] };
+    expect(classify({ ...base, tools: [tool] }).capability).toBe("tools");
+    expect(classify({ ...base, tools: [tool], tool_choice: "none" }).capability).toBe("chat");
+    expect(classify({ ...base }).capability).toBe("chat");
+    expect(wantsTools([], "auto")).toBe(false);
+  });
+});

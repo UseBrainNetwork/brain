@@ -177,6 +177,8 @@ function finish(order: ComputeOrder, p: ExecutionPlan, final: ExecutionStep, ex:
     order.jobId = ex.result.jobId;
     order.receiptId = ex.result.receiptId;
     order.output = ex.result.content;
+    order.toolCalls = ex.result.toolCalls;
+    order.finishReason = ex.result.finishReason;
   } else if (ex && !ex.decision.selected) {
     order.status = "REJECTED";
     order.error = ex.decision.reason;

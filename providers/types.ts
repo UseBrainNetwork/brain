@@ -1,10 +1,9 @@
 /** Shared OpenAI-compatible request/response shapes used by the gateway and upstream client. */
-export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
+import type { ChatMessage, ChatOptions, ToolCall } from "@/domain/chat";
 
-export interface ChatRequest {
+export type { ChatMessage, ToolCall } from "@/domain/chat";
+
+export interface ChatRequest extends ChatOptions {
   model: string;
   messages: ChatMessage[];
   max_tokens?: number;
@@ -14,6 +13,7 @@ export interface ChatRequest {
 
 export interface ChatResult {
   content: string;
+  toolCalls?: ToolCall[];
   finishReason: string;
   usage: {
     prompt_tokens: number;

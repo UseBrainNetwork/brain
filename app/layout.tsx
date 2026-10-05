@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Stupified } from "@/components/layout/Stupified";
 import { Chrome } from "@/components/layout/Chrome";
 import { Footer } from "@/components/layout/Footer";
 import { Nav } from "@/components/layout/Nav";
@@ -39,6 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </Chrome>
         <div aria-hidden className="grain" />
         <RevealObserver />
+        <Stupified />
       </body>
     </html>
   );

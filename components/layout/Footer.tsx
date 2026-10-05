@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Button, Container } from "@/components/ui";
 import { FooterStatus } from "@/components/layout/FooterStatus";
+import { StupifiedLink } from "@/components/layout/Stupified";
 import { SocialLinks } from "@/components/layout/SocialLinks";
 import { social } from "@/lib/site";
 
@@ -60,6 +61,11 @@ export function Footer() {
                       </li>
                     );
                   })}
+                  {c.h === "Product" && (
+                    <li>
+                      <StupifiedLink className="group inline-flex items-center gap-1.5 text-[15px] text-chalk/75 transition-colors hover:text-chalk" />
+                    </li>
+                  )}
                 </ul>
               </div>
             ))}

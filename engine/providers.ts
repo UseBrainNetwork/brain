@@ -1,4 +1,5 @@
 import "server-only";
+import { chatChars, wantsTools, type ToolCall } from "@/domain/chat";
 import type { Capability, ComputeReceipt, ExecutionEstimate, ExecutionRequest, ExecutionResult, ExecutionTarget, Money, ProviderHealth, ProviderTrust } from "@/domain/economy";
 import { networkConfig } from "@/lib/config";
 import { priceForComputeUnits, priceForTokens, tokenListPricePer1MUsd, upstreamPricePer1MUsd } from "@/lib/pricing";
@@ -175,13 +176,22 @@ interface UpstreamEnv {
   apiKey?: string;
   model?: string;
   qualityTier?: string;
+  /** "0" disables tool calling / structured output for this upstream. Default on: every OpenAI-compatible host we target supports it. */
+  tools?: string;
 }
+
+/** Options forwarded to the upstream unchanged. */
+const chatOptions = (req: Extract<ExecutionRequest, { kind: "chat" }>) => ({ tools: req.tools, tool_choice: req.tool_choice, response_format: req.response_format, stop: req.stop });
+
+/** What the receipt hashes: text, plus any tool calls so a tool-only turn still has a verifiable body. */
+const receiptText = (content: string, toolCalls?: ToolCall[]) => (toolCalls?.length ? `${content}\n${JSON.stringify(toolCalls)}` : content);
 
 export class UpstreamExecutionProvider implements IntelligenceProvider {
   readonly id: "cloud-fallback" | "external";
   readonly type: ExecutionTarget;
-  readonly capabilities = ["chat"] as const;
+  readonly capabilities: readonly Capability[];
   readonly trust: ProviderTrust;
+  readonly supportsTools: boolean;
   private inner: OpenAICompatibleProvider;
   private configured: boolean;
   private model: string | null;
@@ -194,12 +204,13 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
     this.configured = Boolean(env.baseUrl && env.apiKey && env.model);
     this.model = env.model ?? null;
     this.tier = qualityTier(env.qualityTier);
+    this.supportsTools = env.tools !== "0" && env.tools?.toLowerCase() !== "false";
+    this.capabilities = this.supportsTools ? ["chat", "tools"] : ["chat"];
     this.inner = new OpenAICompatibleProvider({ id, baseUrl: env.baseUrl, apiKey: env.apiKey, model: env.model });
   }
 
   private tokensFor(req: Extract<ExecutionRequest, { kind: "chat" }>) {
-    const promptChars = req.messages.reduce((s, m) => s + m.content.length, 0);
-    return Math.ceil(promptChars / 4) + (req.maxTokens ?? 512);
+    return Math.ceil(chatChars(req.messages, req.tools) / 4) + (req.maxTokens ?? 512);
   }
 
   async estimate(req: ExecutionRequest): Promise<ExecutionEstimate> {
@@ -211,6 +222,10 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
     if (req.kind !== "chat") {
       notes.push("upstream providers execute chat models only");
       return { ...base, model: null, supported: false, estimatedCost: null, costBasis: null, estimatedLatency: null, latencyBasis: null, confidence: 0, estimatedReliability: st.reliability ?? 0, notes };
+    }
+    if (wantsTools(req.tools, req.tool_choice) && !this.supportsTools) {
+      notes.push("request needs tool calling; disabled for this upstream");
+      return { ...base, model: this.model, supported: false, estimatedCost: null, costBasis: null, estimatedLatency: null, latencyBasis: null, confidence: 0, estimatedReliability: st.reliability ?? 0, notes };
     }
     const per1M = upstreamPricePer1MUsd(this.id);
     const cost = priceForTokens(this.tokensFor(req), per1M);
@@ -287,8 +302,9 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
     const t0 = Date.now();
     const jobId = `c-${t0.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     try {
-      const out = await this.inner.complete({ model: req.model, messages: req.messages, max_tokens: req.maxTokens, temperature: req.temperature });
-      return await this.issueReceipt(req, ctx, t0, jobId, out.content, { prompt: out.usage.prompt_tokens, completion: out.usage.completion_tokens, total: out.usage.total_tokens, basis: "provider-reported", costUsd: out.usage.cost ?? null });
+      const out = await this.inner.complete({ model: req.model, messages: req.messages, max_tokens: req.maxTokens, temperature: req.temperature, ...chatOptions(req) });
+      const res = await this.issueReceipt(req, ctx, t0, jobId, receiptText(out.content, out.toolCalls), { prompt: out.usage.prompt_tokens, completion: out.usage.completion_tokens, total: out.usage.total_tokens, basis: "provider-reported", costUsd: out.usage.cost ?? null });
+      return { ...res, content: out.content, toolCalls: out.toolCalls, finishReason: out.finishReason };
     } catch (e) {
       return this.failure(t0, jobId, e);
     }
@@ -303,14 +319,14 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
   async executeStream(req: Extract<ExecutionRequest, { kind: "chat" }>, ctx: ExecutionContext) {
     const t0 = Date.now();
     const jobId = `c-${t0.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    const upstream = await this.inner.stream({ model: req.model, messages: req.messages, max_tokens: req.maxTokens, temperature: req.temperature, stream: true });
+    const upstream = await this.inner.stream({ model: req.model, messages: req.messages, max_tokens: req.maxTokens, temperature: req.temperature, ...chatOptions(req), stream: true });
     let resolveDone!: (r: ExecutionResult) => void;
     const done = new Promise<ExecutionResult>((r) => (resolveDone = r));
     const dec = new TextDecoder();
     let buf = "";
     let content = "";
     let usage: { prompt: number; completion: number; total: number; costUsd?: number | null } | null = null;
-    const promptChars = req.messages.reduce((s, m) => s + m.content.length, 0);
+    const promptChars = chatChars(req.messages, req.tools);
     const finish = async () => {
       const u = usage ?? { prompt: Math.ceil(promptChars / 4), completion: Math.ceil(content.length / 4), total: Math.ceil(promptChars / 4) + Math.ceil(content.length / 4) };
       try {
@@ -332,8 +348,10 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
             if (payload === "[DONE]") continue;
             try {
               const j = JSON.parse(payload);
-              const delta = j.choices?.[0]?.delta?.content;
-              if (typeof delta === "string") content += delta;
+              const delta = j.choices?.[0]?.delta;
+              if (typeof delta?.content === "string") content += delta.content;
+              // Tool-call argument fragments count as output for the receipt hash and size estimate.
+              if (Array.isArray(delta?.tool_calls)) for (const t of delta.tool_calls) content += `${t?.function?.name ?? ""}${t?.function?.arguments ?? ""}`;
               if (j.usage && typeof j.usage.total_tokens === "number") usage = { prompt: j.usage.prompt_tokens ?? 0, completion: j.usage.completion_tokens ?? 0, total: j.usage.total_tokens, costUsd: typeof j.usage.cost === "number" ? j.usage.cost : null };
             } catch {
               /* partial json line; ignore */
@@ -358,7 +376,7 @@ export function executionProviders(): IntelligenceProvider[] {
   return [
     new BrowserNetworkExecutionProvider(),
     new NativeNetworkExecutionProvider(),
-    new UpstreamExecutionProvider("cloud-fallback", "CLOUD_GPU", { baseUrl: env.BRAIN_FALLBACK_BASE_URL, apiKey: env.BRAIN_FALLBACK_API_KEY, model: env.BRAIN_FALLBACK_MODEL, qualityTier: env.BRAIN_FALLBACK_QUALITY_TIER }),
-    new UpstreamExecutionProvider("external", "EXTERNAL_MODEL", { baseUrl: env.BRAIN_EXTERNAL_BASE_URL, apiKey: env.BRAIN_EXTERNAL_API_KEY, model: env.BRAIN_EXTERNAL_MODEL, qualityTier: env.BRAIN_EXTERNAL_QUALITY_TIER }),
+    new UpstreamExecutionProvider("cloud-fallback", "CLOUD_GPU", { baseUrl: env.BRAIN_FALLBACK_BASE_URL, apiKey: env.BRAIN_FALLBACK_API_KEY, model: env.BRAIN_FALLBACK_MODEL, qualityTier: env.BRAIN_FALLBACK_QUALITY_TIER, tools: env.BRAIN_FALLBACK_TOOLS }),
+    new UpstreamExecutionProvider("external", "EXTERNAL_MODEL", { baseUrl: env.BRAIN_EXTERNAL_BASE_URL, apiKey: env.BRAIN_EXTERNAL_API_KEY, model: env.BRAIN_EXTERNAL_MODEL, qualityTier: env.BRAIN_EXTERNAL_QUALITY_TIER, tools: env.BRAIN_EXTERNAL_TOOLS }),
   ];
 }

@@ -1,4 +1,5 @@
 import type { Capability, ExecutionDependency, ExecutionPlan, ExecutionRequest, ExecutionStep, PrivacyRequirement, RequestClassification, RequestConstraints, RoutingMode } from "@/domain/economy";
+import { chatChars, wantsTools } from "@/domain/chat";
 
 /**
  * BRAIN AUTO front half: REQUEST → CLASSIFY → PLAN. Pure functions; no I/O, no providers.
@@ -15,13 +16,14 @@ export function classify(req: ExecutionRequest): RequestClassification {
   if (req.kind === "compute") {
     return { capability: "compute.matmul_u32", privacy: req.privacy ?? "PUBLIC", size: req.redundancy === 2 ? 2 : 1, needsTools: false, parallelizable: true };
   }
-  const promptChars = req.messages.reduce((s, m) => s + m.content.length, 0);
-  const capability: Capability = req.tools ? "tools" : "chat";
+  const promptChars = chatChars(req.messages, req.tools);
+  const needsTools = wantsTools(req.tools, req.tool_choice);
+  const capability: Capability = needsTools ? "tools" : "chat";
   return {
     capability,
     privacy: req.privacy ?? defaultPrivacy,
     size: Math.ceil(promptChars / 4) + (req.maxTokens ?? 512),
-    needsTools: Boolean(req.tools),
+    needsTools,
     parallelizable: false,
   };
 }

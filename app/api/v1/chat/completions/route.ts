@@ -51,7 +51,7 @@ export const POST = nodeRoute(async (req) => {
   }
   const t0 = Date.now();
   const chatId = `chatcmpl-${randomBytes(10).toString("hex")}`;
-  const request = { kind: "chat" as const, model: chat.model, messages: chat.messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy };
+  const request = { kind: "chat" as const, model: chat.model, messages: chat.messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy, tools: chat.tools, tool_choice: chat.tool_choice, response_format: chat.response_format, stop: chat.stop };
 
   const record = async (order: ComputeOrder, s: Awaited<ReturnType<typeof summarize>>) => {
     if (account && s.receipt) await consumeForReceipt(account, s.receipt, { orderId: order.orderId, inputUnits: s.brain.usage?.inputUnits, outputUnits: s.brain.usage?.outputUnits });
@@ -90,7 +90,13 @@ export const POST = nodeRoute(async (req) => {
       object: "chat.completion",
       created: Math.floor(t0 / 1000),
       model: chat.model,
-      choices: [{ index: 0, message: { role: "assistant", content: order.output ?? "" }, finish_reason: "stop" }],
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: order.toolCalls?.length && !order.output ? null : (order.output ?? ""), ...(order.toolCalls?.length ? { tool_calls: order.toolCalls } : {}) },
+          finish_reason: order.finishReason ?? (order.toolCalls?.length ? "tool_calls" : "stop"),
+        },
+      ],
       brain: s.brain,
     },
     { headers: { "x-brain-receipt": order.receiptId ?? "" } },

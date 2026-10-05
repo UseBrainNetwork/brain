@@ -7,6 +7,7 @@ import { WalletButton } from "@/components/wallet/WalletButton";
 import { cx } from "@/lib/format";
 import { Logo } from "./Logo";
 import { SocialLinks } from "./SocialLinks";
+import { openStupified } from "@/components/layout/Stupified";
 
 const links = [
   { href: "/chat", label: "Chat" },
@@ -127,6 +128,20 @@ export function Nav() {
                     <span className="text-fog">→</span>
                   </Link>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMore(false);
+                    openStupified();
+                  }}
+                  className="flex w-full items-center justify-between rounded-[10px] px-3 py-2.5 text-left hover:bg-chalk/5"
+                >
+                  <span>
+                    <span className="block text-[13.5px] font-medium">BRAIN, stupified</span>
+                    <span className="block text-[11.5px] text-chalk/45">The whole thing in three sentences</span>
+                  </span>
+                  <span className="text-fog">→</span>
+                </button>
                 <div className="mt-1 border-t border-chalk/10 px-3 pb-1 pt-2.5">
                   <div className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-chalk/40">Account</div>
                   <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px]">

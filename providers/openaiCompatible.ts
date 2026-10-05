@@ -1,5 +1,13 @@
 import "server-only";
-import type { ChatRequest, ChatResult } from "./types";
+import type { ChatRequest, ChatResult, ToolCall } from "./types";
+
+/** Tool / format options forwarded to the upstream exactly as the caller sent them. */
+const passthrough = (req: ChatRequest) => ({
+  ...(req.tools?.length ? { tools: req.tools } : {}),
+  ...(req.tool_choice != null && req.tools?.length ? { tool_choice: req.tool_choice } : {}),
+  ...(req.response_format ? { response_format: req.response_format } : {}),
+  ...(req.stop?.length ? { stop: req.stop } : {}),
+});
 
 interface Options {
   id: string;
@@ -28,7 +36,7 @@ export class OpenAICompatibleProvider {
         method: "POST",
         signal: ctrl.signal,
         headers: { "content-type": "application/json", authorization: `Bearer ${this.o.apiKey}` },
-        body: JSON.stringify({ model: this.o.model, messages: req.messages, max_tokens: req.max_tokens, temperature: req.temperature, stream: true, stream_options: { include_usage: true } }),
+        body: JSON.stringify({ model: this.o.model, messages: req.messages, max_tokens: req.max_tokens, temperature: req.temperature, ...passthrough(req), stream: true, stream_options: { include_usage: true } }),
       });
       if (!r.ok || !r.body) throw new Error(`upstream ${r.status}`);
       return r.body;
@@ -50,14 +58,17 @@ export class OpenAICompatibleProvider {
           messages: req.messages,
           max_tokens: req.max_tokens,
           temperature: req.temperature,
+          ...passthrough(req),
         }),
       });
       if (!r.ok) throw new Error(`upstream ${r.status}`);
       const j = await r.json();
       const choice = j.choices?.[0];
+      const toolCalls = Array.isArray(choice?.message?.tool_calls) ? (choice.message.tool_calls as ToolCall[]).filter((t) => t && t.type === "function" && t.function?.name).map((t) => ({ id: String(t.id), type: "function" as const, function: { name: String(t.function.name), arguments: String(t.function.arguments ?? "") } })) : undefined;
       return {
         content: String(choice?.message?.content ?? ""),
-        finishReason: String(choice?.finish_reason ?? "stop"),
+        toolCalls: toolCalls?.length ? toolCalls : undefined,
+        finishReason: String(choice?.finish_reason ?? (toolCalls?.length ? "tool_calls" : "stop")),
         usage: {
           prompt_tokens: j.usage?.prompt_tokens ?? 0,
           completion_tokens: j.usage?.completion_tokens ?? 0,
