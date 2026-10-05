@@ -1,4 +1,6 @@
 import "server-only";
+import { after } from "next/server";
+import { withTimeout } from "@/lib/async";
 import type { ComputeOrder, ComputeReceipt, PrivacyRequirement, RoutingMode } from "@/domain/economy";
 import { placeStreamingOrder, type PlaceOrderInput } from "@/engine/orders";
 import { attachCompute, type AttachedComputeSummary } from "@/services/attachedCompute";
@@ -40,7 +42,7 @@ export interface BrainRunSummary {
 export async function finalize(order: ComputeOrder, t0: number, mode: RoutingMode, privacy: PrivacyRequirement) {
   const summary = await summarize(order, t0, mode, privacy);
   try {
-    summary.brain.attached = await attachCompute(order, summary.brain.usage);
+    summary.brain.attached = await withTimeout(attachCompute(order, summary.brain.usage), ATTACH_BUDGET_MS, null);
   } catch (e) {
     console.error("attached compute", e);
     summary.brain.attached = null;
@@ -48,8 +50,13 @@ export async function finalize(order: ComputeOrder, t0: number, mode: RoutingMod
   return summary;
 }
 
+/** Store time we spend looking up the receipt before answering with what we have. */
+const RECEIPT_BUDGET_MS = 6_000;
+/** Store time we wait for the attached-compute dispatch while the stream is still open. */
+const ATTACH_BUDGET_MS = 4_000;
+
 export async function summarize(order: ComputeOrder, t0: number, mode: RoutingMode, privacy: PrivacyRequirement): Promise<{ receipt: ComputeReceipt | null; brain: BrainRunSummary }> {
-  const receipt = order.receiptId ? await getReceipt(order.receiptId) : null;
+  const receipt = order.receiptId ? await withTimeout(getReceipt(order.receiptId).catch(() => null), RECEIPT_BUDGET_MS, null) : null;
   return {
     receipt,
     brain: {
@@ -110,18 +117,35 @@ export async function chatEventStream(o: StreamOptions): Promise<ReadableStream<
         if (!stream && order.status === "COMPLETED") {
           ctl.enqueue(enc.encode(`data: ${JSON.stringify({ id: o.chatId, object: "chat.completion.chunk", created, model: o.input.request.model, choices: [{ index: 0, delta: { role: "assistant", content: order.output ?? "" }, finish_reason: "stop" }] })}\n\n`));
         }
-        const summary = await finalize(order, o.t0, o.mode, o.privacy);
-        try {
-          await o.onComplete?.(order, summary);
-        } catch (e) {
-          console.error("chat onComplete", e);
-        }
+        // The run summary goes out as soon as the receipt is known; bookkeeping must not hold the stream.
+        const summary = await summarize(order, o.t0, o.mode, o.privacy);
         if (order.status !== "COMPLETED") {
           ctl.enqueue(enc.encode(`event: error\ndata: ${JSON.stringify({ error: { code: order.status === "REJECTED" ? "no_provider_available" : "upstream_failed", message: order.error ?? "execution failed" }, brain: summary.brain })}\n\n`));
         } else {
           ctl.enqueue(enc.encode(`event: brain\ndata: ${JSON.stringify(summary.brain)}\n\n`));
         }
+        // Attached compute: dispatched now; reported on this stream only if it lands within budget.
+        const attach = order.status === "COMPLETED" ? attachCompute(order, summary.brain.usage).catch((e) => (console.error("attached compute", e), null)) : Promise.resolve(null);
+        const attached = await withTimeout(attach, ATTACH_BUDGET_MS, undefined);
+        if (attached !== undefined) {
+          summary.brain.attached = attached;
+          ctl.enqueue(enc.encode(`event: attached\ndata: ${JSON.stringify(attached)}\n\n`));
+        }
         ctl.enqueue(enc.encode("data: [DONE]\n\n"));
+        // Credits, usage records and a late attach finish after the response; the platform keeps the function alive.
+        const tail = async () => {
+          summary.brain.attached = (await attach) ?? summary.brain.attached;
+          try {
+            await o.onComplete?.(order, summary);
+          } catch (e) {
+            console.error("chat onComplete", e);
+          }
+        };
+        try {
+          after(tail);
+        } catch {
+          void tail();
+        }
       } catch (e) {
         ctl.enqueue(enc.encode(`event: error\ndata: ${JSON.stringify({ error: { code: "stream_failed", message: e instanceof Error ? e.message : "stream failed" } })}\n\n`));
       } finally {

@@ -214,6 +214,11 @@ export function ChatApp() {
             patch((m) => ({ ...m, brain, streaming: false }));
             continue;
           }
+          if (ev.event === "attached") {
+            const attached = JSON.parse(ev.data) as BrainRunSummary["attached"];
+            patch((m) => (m.brain ? { ...m, brain: { ...m.brain, attached } } : m));
+            continue;
+          }
           if (ev.event === "error") {
             const j = JSON.parse(ev.data) as { error?: { code?: string; message?: string }; brain?: BrainRunSummary };
             patch((m) => ({ ...m, streaming: false, error: friendlyError(j.error?.message ?? j.error?.code), brain: j.brain }));

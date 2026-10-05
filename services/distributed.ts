@@ -382,11 +382,11 @@ export async function nodeLost(nodeId: string) {
  * Self-healing pass run from the node sweep: no distributed job may hold an open unit on a node
  * that is no longer live, and none may outlive its TTL in a non-terminal state.
  */
-export async function reapStale() {
+export async function reapStale(knownLive?: Set<string>) {
   const store = getStore();
   const now = Date.now();
-  const liveIds = new Set((await store.listNodes()).filter(live).map((n) => n.id));
-  for (const job of await store.listDistributedJobs(60)) {
+  const liveIds = knownLive ?? new Set((await store.listNodes()).filter(live).map((n) => n.id));
+  for (const job of await store.listDistributedJobs(25)) {
     if (job.status === "completed" || job.status === "failed") continue;
     const orphans = job.units.filter((u) => (u.status === "assigned" || u.status === "computing") && !liveIds.has(u.nodeId));
     for (const u of orphans) {

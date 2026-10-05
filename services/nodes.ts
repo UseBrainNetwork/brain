@@ -182,20 +182,27 @@ export async function authNode(sessionToken: string | null): Promise<StoredNode>
 
 const isLive = (n: StoredNode) => n.status === "idle" || n.status === "computing";
 
-const sweepState = globalThis as typeof globalThis & { __brainSweepAt?: number };
+const sweepState = globalThis as typeof globalThis & { __brainSweepAt?: number; __brainReapAt?: number };
 
-/** Marks silent nodes offline and expires overdue jobs. Throttled per instance: at most one sweep per 5 s. */
+/**
+ * Marks silent nodes offline and expires overdue jobs. Throttled per instance (one sweep per 15 s,
+ * the heavier distributed-job reap once per 45 s) because every instance of the function runs its
+ * own sweep and the store is the shared bottleneck. The sweep never blocks the caller for long:
+ * it is awaited only for its first phase and bounded by the store timeouts.
+ */
 export async function sweepOffline() {
   const now = Date.now();
-  if (now - (sweepState.__brainSweepAt ?? 0) < 5_000) return;
+  if (now - (sweepState.__brainSweepAt ?? 0) < 15_000) return;
   sweepState.__brainSweepAt = now;
   const store = getStore();
-  for (const n of await store.listNodes()) {
+  const nodes = await store.listNodes();
+  const liveIds = new Set<string>();
+  for (const n of nodes) {
     if (isLive(n) && now - n.lastHeartbeatAt > networkConfig.nodes.offlineAfterMs) {
       await store.saveNode({ ...n, status: "offline" });
       eventBus.publish({ type: "node.left", at: now, nodeId: n.id, memoryGb: n.advertisedMemoryGb, reason: "lost" });
       await nodeLost(n.id);
-    }
+    } else if (isLive(n)) liveIds.add(n.id);
   }
   for (const j of await store.listOpenJobs(200, now - 10 * 60_000)) {
     if (now > j.deadline) {
@@ -203,7 +210,10 @@ export async function sweepOffline() {
       if (j.parentId) await unitLost(j, "deadline");
     }
   }
-  await reapStale();
+  if (now - (sweepState.__brainReapAt ?? 0) >= 45_000) {
+    sweepState.__brainReapAt = now;
+    await reapStale(liveIds);
+  }
 }
 
 /** Standby → live. This is the moment the node becomes part of the network. */
