@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chatEventStream, sseHeaders, summarize } from "@/api/chatStream";
+import { chatEventStream, finalize, sseHeaders } from "@/api/chatStream";
 import { validateChat } from "@/api/gateway";
 import { body, nodeRoute } from "@/api/http";
 import type { ComputeOrder, PrivacyRequirement } from "@/domain/economy";
@@ -53,7 +53,7 @@ export const POST = nodeRoute(async (req) => {
   const chatId = `chatcmpl-${randomBytes(10).toString("hex")}`;
   const request = { kind: "chat" as const, model: chat.model, messages: chat.messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy, tools: chat.tools, tool_choice: chat.tool_choice, response_format: chat.response_format, stop: chat.stop };
 
-  const record = async (order: ComputeOrder, s: Awaited<ReturnType<typeof summarize>>) => {
+  const record = async (order: ComputeOrder, s: Awaited<ReturnType<typeof finalize>>) => {
     if (account && s.receipt) await consumeForReceipt(account, s.receipt, { orderId: order.orderId, inputUnits: s.brain.usage?.inputUnits, outputUnits: s.brain.usage?.outputUnits });
     await recordRequest({
       customerId: customer.customerId,
@@ -78,7 +78,7 @@ export const POST = nodeRoute(async (req) => {
   }
 
   const order = await placeOrder({ request, mode, privacy }, customer.customerId);
-  const s = await summarize(order, t0, mode, privacy);
+  const s = await finalize(order, t0, mode, privacy);
   await record(order, s);
   if (order.status !== "COMPLETED") {
     const status = order.status === "REJECTED" ? 503 : 502;

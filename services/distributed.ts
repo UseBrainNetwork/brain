@@ -41,6 +41,10 @@ export interface CreateJobInput {
   /** Set by the routing engine when the job fulfils a compute order. */
   orderId?: string;
   decisionId?: string;
+  /** Compute attached to a completed chat/inference request. Runs alongside other jobs; never blocks or is blocked by them. */
+  attachedTo?: DistributedJob["attachedTo"];
+  /** Upper bound on nodes used (attached jobs spread thin on purpose). */
+  maxNodes?: number;
 }
 
 const live = (n: StoredNode) => n.status === "idle" || n.status === "computing";
@@ -104,9 +108,11 @@ function slotOpen(job: DistributedJob, index: number, replica: number) {
   return job.units.some((u) => u.index === index && u.replica === replica && (u.status === "assigned" || u.status === "computing" || u.status === "returned"));
 }
 
+/** The in-flight interactive (demo / compute-order) job, if any. Attached jobs are excluded: they run concurrently. */
 export async function activeJob(): Promise<DistributedJob | null> {
   const now = Date.now();
-  for (const j of await getStore().listDistributedJobs(5)) {
+  for (const j of await getStore().listDistributedJobs(20)) {
+    if (j.attachedTo) continue;
     if (j.status !== "completed" && j.status !== "failed" && now - j.createdAt < cfg.jobTtlMs) return j;
   }
   return null;
@@ -118,9 +124,14 @@ export function createJob(input: CreateJobInput = {}): Promise<DistributedJob> {
 
 async function createJobUnlocked(input: CreateJobInput): Promise<DistributedJob> {
   const store = getStore();
-  if (await activeJob()) throw new NodeError("job_in_progress", 409);
-  const nodes = (await store.listNodes()).filter(live).sort((a, b) => b.computeScore - a.computeScore);
+  if (!input.attachedTo && (await activeJob())) throw new NodeError("job_in_progress", 409);
+  let nodes = (await store.listNodes()).filter(live).sort((a, b) => b.computeScore - a.computeScore);
   if (nodes.length === 0) throw new NodeError("no_real_nodes", 409);
+  if (input.maxNodes && input.maxNodes > 0 && nodes.length > input.maxNodes) {
+    // Attached jobs rotate through the fleet rather than always landing on the strongest nodes.
+    const offset = Math.floor(Math.random() * nodes.length);
+    nodes = Array.from({ length: input.maxNodes }, (_, i) => nodes[(offset + i) % nodes.length]);
+  }
 
   const size: WorkloadSize = input.size && input.size in cfg.sizes ? input.size : "medium";
   const dims = input.dims ?? cfg.sizes[size];
@@ -144,7 +155,8 @@ async function createJobUnlocked(input: CreateJobInput): Promise<DistributedJob>
     source: "real",
     orderId: input.orderId,
     decisionId: input.decisionId,
-    lifecycle: [{ stage: "queued", at: now, detail: `${unitCount} work units · ${nodes.length} real nodes` }],
+    attachedTo: input.attachedTo,
+    lifecycle: [{ stage: "queued", at: now, detail: `${unitCount} work units · ${nodes.length} real nodes${input.attachedTo ? ` · attached to ${input.attachedTo.orderId}` : ""}` }],
   };
   await store.saveDistributedJob(job);
   eventBus.publish({ type: "djob.created", at: now, job: structuredClone(job) });
@@ -364,7 +376,7 @@ export async function reapStale() {
   const store = getStore();
   const now = Date.now();
   const liveIds = new Set((await store.listNodes()).filter(live).map((n) => n.id));
-  for (const job of await store.listDistributedJobs(10)) {
+  for (const job of await store.listDistributedJobs(60)) {
     if (job.status === "completed" || job.status === "failed") continue;
     const orphans = job.units.filter((u) => (u.status === "assigned" || u.status === "computing") && !liveIds.has(u.nodeId));
     for (const u of orphans) {

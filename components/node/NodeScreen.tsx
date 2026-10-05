@@ -2,11 +2,13 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Prov } from "@/components/ui";
+import { PayoutEmail } from "@/components/wallet/PayoutEmail";
 import { WalletButton } from "@/components/wallet/WalletButton";
 import type { RewardsSummary } from "@/domain/types";
 import { cx, fmtInt, fmtSol, shortAddr } from "@/lib/format";
+import { useKeepAwake } from "@/lib/keepAwake";
 import { useWallet } from "@/lib/wallet/store";
 import { contributor, useContributor } from "@/network/client/contributor";
 import { loadIdentity } from "@/network/client/identity";
@@ -87,8 +89,11 @@ function WalletStrip({ connected, jobs }: { connected: boolean; jobs: number }) 
   if (linked) {
     return (
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-chalk/[0.08] px-6 py-3 text-[11px] uppercase tracking-[0.1em] md:px-10">
-        <span className="flex items-center gap-2 text-chalk/60">
-          <span className="inline-block size-[6px] bg-ok" /> Wallet {shortAddr(linked)} · linked
+        <span className="flex flex-wrap items-center gap-x-4 gap-y-1 text-chalk/60">
+          <span className="flex items-center gap-2">
+            <span className="inline-block size-[6px] bg-ok" /> Wallet {shortAddr(linked)} · linked
+          </span>
+          <PayoutEmail dark className="normal-case tracking-normal" />
         </span>
         <span className="flex flex-wrap items-center gap-x-5 gap-y-1">
           <span className="text-chalk/60">
@@ -161,6 +166,27 @@ export function NodeScreen() {
 
   const connected = s.phase === "running";
   const working = screen === "received" || screen === "computing" || screen === "verifying";
+  const awake = useKeepAwake(connected);
+  // When the tab comes back after being hidden a while, say so for a bit; while hidden, the tab title says so.
+  const [cameBack, setCameBack] = useState(0);
+  const hiddenForRef = useRef(0);
+  hiddenForRef.current = awake.hiddenFor;
+  useEffect(() => {
+    if (!connected) return;
+    if (awake.hidden) {
+      const prev = document.title;
+      document.title = "⏸ BRAIN node in background · work slows";
+      return () => {
+        document.title = prev;
+        if (hiddenForRef.current >= 20) setCameBack(hiddenForRef.current);
+      };
+    }
+  }, [awake.hidden, connected]);
+  useEffect(() => {
+    if (!cameBack) return;
+    const t = setTimeout(() => setCameBack(0), 25_000);
+    return () => clearTimeout(t);
+  }, [cameBack]);
 
   return (
     <div data-theme="dark" className="surface-dark dotgrid-dark relative flex min-h-dvh flex-col font-mono">
@@ -178,8 +204,29 @@ export function NodeScreen() {
           <span className="hidden sm:inline">
             {realNodes} REAL {realNodes === 1 ? "NODE" : "NODES"} <Prov p="live" />
           </span>
+          {connected && awake.wakeLock === "held" && (
+            <span className="hidden items-center gap-2 md:flex" title="Screen Wake Lock held: the display will not sleep while this node is active.">
+              <span className="inline-block size-[6px] bg-ok/70" /> SCREEN AWAKE
+            </span>
+          )}
         </div>
       </div>
+
+      {connected && (cameBack > 0 || awake.wakeLock !== "held") && (
+        <div className={cx("mx-6 mt-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-1 rounded-[10px] border px-4 py-2.5 text-[11.5px] normal-case tracking-normal md:mx-10", cameBack > 0 ? "border-warn/40 bg-warn/[0.08] text-warn" : "border-chalk/10 bg-chalk/[0.03] text-chalk/55")}>
+          <span>
+            {cameBack > 0
+              ? `This tab was in the background for ${cameBack >= 60 ? `${Math.round(cameBack / 60)} min` : `${cameBack}s`}. Browsers throttle hidden tabs, so work slows or stalls while it is hidden.`
+              : "Keep this tab in front. Browsers throttle hidden tabs and may sleep the display; a separate window on its own works best."}
+          </span>
+          {awake.wakeLock === "unsupported" && <span className="text-chalk/40">Screen wake lock not available in this browser.</span>}
+          {cameBack > 0 && (
+            <button type="button" onClick={() => setCameBack(0)} className="text-warn/80 hover:text-warn">
+              dismiss
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Main */}
       <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">

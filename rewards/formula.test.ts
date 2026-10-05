@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { defaultRevenueSplit, defaultRewardConfig, type RewardConfig } from "./config";
-import { computeEpoch, tokenMultiplier, type ContributorInput } from "./formula";
+import { computeEpoch, effectiveCap, tokenMultiplier, type ContributorInput } from "./formula";
 import { estimateReward } from "./simulate";
 
-const cfg: RewardConfig = { ...defaultRewardConfig, maxNodeShareOfPool: 1 };
+const cfg: RewardConfig = { ...defaultRewardConfig, maxNodeShareOfPool: 1, maxNodeShareWhenSmall: 1 };
 
 function node(id: string, compute: number, tokens = 0, extra: Partial<ContributorInput> = {}): ContributorInput {
   return {
@@ -113,10 +113,26 @@ describe("anti-whale", () => {
   });
 
   it("leaves pool undistributed when every node is capped", () => {
-    const c = { ...cfg, maxNodeShareOfPool: 0.25 };
+    const c = { ...cfg, maxNodeShareOfPool: 0.25, maxNodeShareWhenSmall: 0.25 };
     const a = computeEpoch([node("a", 100), node("b", 100)], 100, c);
     expect(a.distributedUsd).toBeCloseTo(50);
     expect(a.undistributedUsd).toBeCloseTo(50);
+  });
+
+  it("cap adapts to the number of eligible wallets: 1/n clamped between floor and small-network ceiling", () => {
+    const c = { ...cfg, maxNodeShareOfPool: 0.02, maxNodeShareWhenSmall: 0.25 };
+    expect(effectiveCap(1, c)).toBe(0.25);
+    expect(effectiveCap(4, c)).toBe(0.25);
+    expect(effectiveCap(10, c)).toBeCloseTo(0.1);
+    expect(effectiveCap(50, c)).toBe(0.02);
+    expect(effectiveCap(500, c)).toBe(0.02);
+    // Three equal wallets: each may take up to 1/3 → clamped to 25%, so 75% is distributed.
+    const a = computeEpoch([node("a", 100), node("b", 100), node("c", 100)], 100, c);
+    expect(a.distributedUsd).toBeCloseTo(75);
+    // Sixty wallets: floor of 2% binds and a whale cannot exceed it.
+    const many = [node("whale", 100_000), ...Array.from({ length: 59 }, (_, i) => node(`n${i}`, 100))];
+    const b = computeEpoch(many, 100, c);
+    expect(byId(b, "whale").rewardWeight).toBeCloseTo(0.02);
   });
 });
 

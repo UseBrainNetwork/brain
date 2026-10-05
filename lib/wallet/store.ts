@@ -16,6 +16,8 @@ export interface WalletState {
   error: string | null;
   /** Adapter that owns the connect UI (Privy once its bridge mounts); null → built-in wallet picker. */
   primaryAdapterId: string | null;
+  /** Payout-email preference for the linked wallet; null until known. `email` is masked by the server. */
+  notify: { on: boolean; email: string | null; configured: boolean } | null;
 }
 
 const initial: WalletState = {
@@ -27,6 +29,7 @@ const initial: WalletState = {
   demo: false,
   error: null,
   primaryAdapterId: null,
+  notify: null,
 };
 
 class WalletStore {
@@ -119,6 +122,7 @@ class WalletStore {
         const res = await post<{ holding: TokenHolding; linkToken: string }>("/api/wallet/verify", { address, message, signature }, session);
         this.linkToken = res.linkToken;
         this.set({ status: "connected", address, holding: res.holding, verified: true, demo: false });
+        void this.syncNotify(adapter.email?.() ?? null);
       } else {
         const r = await fetch(`/api/wallet/holdings?address=${encodeURIComponent(address)}`);
         const { holding } = (await r.json()) as { holding: TokenHolding };
@@ -141,6 +145,38 @@ class WalletStore {
     if (this.state.status === "error") this.set({ status: "disconnected", error: null, adapterId: null });
   }
 
+  /**
+   * Payout-email preference. After a verified link: if the login provider knows an email (Privy email
+   * login) and the wallet has no preference yet, enroll it; otherwise just read the current state.
+   * Every email carries an unsubscribe link; `setPayoutEmail(null)` turns it off here.
+   */
+  private async syncNotify(providerEmail: string | null) {
+    if (!this.linkToken) return;
+    try {
+      const cur = await getJson<NotifyShape>(`/api/wallet/email?linkToken=${encodeURIComponent(this.linkToken)}`);
+      if (!cur.on && cur.email === null && providerEmail && !cur.optedOut) {
+        const n = await post<NotifyShape>("/api/wallet/email", { linkToken: this.linkToken, email: providerEmail, source: "privy" });
+        this.set({ notify: { on: n.on, email: n.email, configured: n.configured } });
+      } else {
+        this.set({ notify: { on: cur.on, email: cur.email, configured: cur.configured } });
+      }
+    } catch {
+      /* notifications are optional; never surface as a wallet error */
+    }
+  }
+
+  async setPayoutEmail(email: string | null): Promise<string | null> {
+    if (!this.linkToken) return "Link a wallet first.";
+    try {
+      const n = email ? await post<NotifyShape>("/api/wallet/email", { linkToken: this.linkToken, email, source: "manual" }) : await del<NotifyShape>("/api/wallet/email", { linkToken: this.linkToken });
+      this.set({ notify: { on: n.on, email: n.email, configured: n.configured } });
+      return null;
+    } catch (e) {
+      const m = e instanceof Error ? e.message : "request_failed";
+      return m === "invalid_email" ? "That email does not look right." : m === "bad_link_token" ? "Wallet link expired. Reconnect and try again." : "Could not save. Try again.";
+    }
+  }
+
   async disconnect() {
     const a = this.adapter(this.state.adapterId);
     await a?.disconnect().catch(() => {});
@@ -161,6 +197,27 @@ function describe(e: unknown): string {
   if (l === "request_failed" || l.includes("fetch") || l.includes("network")) return "Could not reach the server. Try again.";
   if (l.includes("timed out") || l.includes("timeout")) return "Timed out waiting for the wallet. Try again.";
   return m || "Connection failed. Try again.";
+}
+
+interface NotifyShape {
+  on: boolean;
+  email: string | null;
+  configured: boolean;
+  optedOut: boolean;
+}
+
+async function getJson<T>(url: string): Promise<T> {
+  const r = await fetch(url, { cache: "no-store" });
+  const j = await r.json();
+  if (!r.ok) throw new Error(typeof j.error === "string" ? j.error : "request_failed");
+  return j as T;
+}
+
+async function del<T>(url: string, body: unknown): Promise<T> {
+  const r = await fetch(url, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(typeof j.error === "string" ? j.error : "request_failed");
+  return j as T;
 }
 
 async function post<T>(url: string, body: unknown, bearer?: string | null): Promise<T> {

@@ -40,7 +40,7 @@ export default function PrivyBridgeInner() {
 type Waiter = { resolve: (address: string) => void; reject: (e: Error) => void };
 
 function Bridge() {
-  const { authenticated, ready } = usePrivy();
+  const { authenticated, ready, user } = usePrivy();
   const { wallets } = useWallets();
   const { signMessage } = useSignMessage();
   const { logout } = useLogout();
@@ -58,8 +58,9 @@ function Bridge() {
   const { connectWallet } = useConnectWallet({ onSuccess: noSolana, onError: (err) => settle((w) => w.reject(new Error(String(err)))) });
 
   // Hooks are re-created every render; the adapter is registered once and reads the latest through this ref.
-  const latest = useRef({ authenticated, ready, wallets, signMessage, logout, login, connectWallet });
-  latest.current = { authenticated, ready, wallets, signMessage, logout, login, connectWallet };
+  const email = user?.email?.address ?? null;
+  const latest = useRef({ authenticated, ready, wallets, signMessage, logout, login, connectWallet, email });
+  latest.current = { authenticated, ready, wallets, signMessage, logout, login, connectWallet, email };
 
   useEffect(() => {
     const w = wallets[0];
@@ -112,6 +113,7 @@ function Bridge() {
       async disconnect() {
         await latest.current.logout();
       },
+      email: () => latest.current.email,
     };
     walletStore.registerAdapter(adapter, { primary: true });
     return () => walletStore.unregisterAdapter(adapter.id);

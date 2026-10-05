@@ -28,6 +28,16 @@ export function ReceiptView({ receipt: r, job, decision }: { receipt: ComputeRec
         Permanent record of job #{r.jobId}: {r.workloadType === "matmul_u32" ? "parallel integer matrix multiplication executed on real browser GPUs and verified by this server." : "a chat request executed through BRAIN AUTO."}
       </PageHead>
 
+      {r.attachedTo && (
+        <div className="mt-6 rounded-[12px] border border-signal/30 bg-signal/[0.06] p-4 text-[12.5px] leading-relaxed text-chalk/75">
+          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">Attached compute</div>
+          <p className="mt-1.5">
+            This workload was sized by chat request <span className="font-mono text-chalk">{r.attachedTo.orderId}</span> ({r.attachedTo.model}) and dispatched to the browser network after that request completed. The nodes below ran and were verified on this
+            matmul; they did <span className="text-chalk">not</span> produce the chat answer, which came from the routed provider. The customer charge lives on the chat receipt; these verified units count toward each node&apos;s hourly reward share.
+          </p>
+        </div>
+      )}
+
       <div className="mt-8 grid grid-cols-2 gap-x-6 gap-y-7 md:grid-cols-4 lg:grid-cols-6">
         <Metric k="Nodes used" v={r.nodesUsed.length} />
         <Metric k="Work units" v={r.workUnits} />
@@ -68,11 +78,11 @@ export function ReceiptView({ receipt: r, job, decision }: { receipt: ComputeRec
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
         <Panel title="Customer cost">
           <div className="font-mono text-[15px] text-chalk">{money(r.customerCost)}</div>
-          <p className="mt-2 text-[12px] text-chalk/50">{r.customerCost ? "Accrued at the configured list price. No payment has been collected for this job." : "No list price is configured on this server, so nothing is charged or claimed."}</p>
+          <p className="mt-2 text-[12px] text-chalk/50">{r.customerCost ? "Accrued at the configured list price. No payment has been collected for this job." : r.attachedTo ? "No separate charge. Paid for by the chat request this compute was attached to." : "No list price is configured on this server, so nothing is charged or claimed."}</p>
         </Panel>
         <Panel title="Provider compensation">
           <div className="font-mono text-[15px] text-chalk">{money(r.providerCompensation)}</div>
-          <p className="mt-2 text-[12px] text-chalk/50">{r.providerCompensation ? "Split across the nodes above in proportion to verified compute units." : r.workloadType === "chat" ? "Chat ran on an external provider; no browser nodes were compensated." : "Nodes were credited compute units; monetary value awaits a price."}</p>
+          <p className="mt-2 text-[12px] text-chalk/50">{r.providerCompensation ? "Split across the nodes above in proportion to verified compute units." : r.workloadType === "chat" ? "Chat ran on an external provider; no browser nodes were compensated." : r.attachedTo ? "Nodes are paid for these verified units from the hourly reward pool, not from this receipt." : "Nodes were credited compute units; monetary value awaits a price."}</p>
         </Panel>
         <Panel title="Protocol revenue">
           <div className="font-mono text-[15px] text-chalk">{money(r.protocolRevenue)}</div>
@@ -110,6 +120,7 @@ export function ReceiptView({ receipt: r, job, decision }: { receipt: ComputeRec
         <span>Created {when(r.createdAt)}</span>
         <span>Completed {when(r.completedAt)}</span>
         {r.orderId && <span>Order {r.orderId}</span>}
+        {r.attachedTo && <span>Attached to {r.attachedTo.orderId}</span>}
         <Link href={`/api/receipts/${r.receiptId}`} className="text-chalk/70 hover:text-chalk">
           JSON →
         </Link>

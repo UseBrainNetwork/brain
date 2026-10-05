@@ -301,6 +301,11 @@ export interface DistributedJob {
   /** Set when the job was created by a compute order through the routing engine. */
   orderId?: string;
   decisionId?: string;
+  /**
+   * Set when the job is compute attached to a chat/inference request: a verification workload sized by
+   * that request and dispatched to the browser network after it completed. It did NOT produce the answer.
+   */
+  attachedTo?: { orderId: string; model: string; inputUnits: number; outputUnits: number };
 }
 
 export type NetworkEvent =

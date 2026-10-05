@@ -491,6 +491,28 @@ function PoweredBy({ b }: { b: BrainRunSummary }) {
                 <Cell k="Latency" v={b.latencyMs >= 1000 ? `${(b.latencyMs / 1000).toFixed(2)}s` : `${b.latencyMs}ms`} sub="end to end, server measured" />
                 <Cell k="Verified" v={b.verified ? "YES" : "NO"} sub={b.verification ?? undefined} tone={b.verified ? "ok" : undefined} />
               </div>
+              {b.attached !== undefined && (
+                <div className="mt-4 rounded-[10px] border border-chalk/10 bg-chalk/[0.03] px-3.5 py-3 text-[12px] leading-relaxed text-chalk/60">
+                  <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-chalk/45">
+                    <span>Attached compute</span>
+                    {b.attached && !b.attached.skipped ? (
+                      <Link href={`/explorer/job/${b.attached.jobId}`} className="text-chalk/70 hover:text-chalk">
+                        job {b.attached.jobId} →
+                      </Link>
+                    ) : (
+                      <span>none dispatched</span>
+                    )}
+                  </div>
+                  {b.attached && !b.attached.skipped ? (
+                    <p className="mt-1.5">
+                      {b.attached.workUnits} {b.attached.size} verification unit{b.attached.workUnits === 1 ? "" : "s"} sent to {b.attached.nodes} network node{b.attached.nodes === 1 ? "" : "s"} after this answer completed. Sized by this request; it did not produce the answer above.
+                      Verified units pay those nodes from the hourly pool.
+                    </p>
+                  ) : (
+                    <p className="mt-1.5">{b.attached?.skipped === "no_nodes" ? "No network nodes were online to take work for this request." : "No verification work was attached to this request."}</p>
+                  )}
+                </div>
+              )}
               <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-[11px]">
                 {b.receiptId && (
                   <Link href={`/receipt/${b.receiptId}`} className="rounded-full bg-chalk px-3.5 py-1.5 font-sans text-[12.5px] font-semibold text-ink hover:bg-white">

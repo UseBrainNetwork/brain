@@ -1,6 +1,7 @@
 import "server-only";
 import type { ComputeOrder, ComputeReceipt, PrivacyRequirement, RoutingMode } from "@/domain/economy";
 import { placeStreamingOrder, type PlaceOrderInput } from "@/engine/orders";
+import { attachCompute, type AttachedComputeSummary } from "@/services/attachedCompute";
 import { getReceipt } from "@/services/receipts";
 import { reframeStream } from "./gateway";
 
@@ -26,8 +27,25 @@ export interface BrainRunSummary {
   /** True only when the server verified the work itself (spot-checks / redundancy). */
   verified: boolean;
   usage?: { inputUnits: number; outputUnits: number };
+  /**
+   * Compute attached to this request and dispatched to the browser network after the answer completed.
+   * It did not produce the answer; it is verifiable work sized by this request. null = none dispatched.
+   */
+  attached?: AttachedComputeSummary | null;
   status: ComputeOrder["status"];
   error?: string;
+}
+
+/** Terminal order → summary, plus the attached-compute dispatch. Both chat routes go through this. */
+export async function finalize(order: ComputeOrder, t0: number, mode: RoutingMode, privacy: PrivacyRequirement) {
+  const summary = await summarize(order, t0, mode, privacy);
+  try {
+    summary.brain.attached = await attachCompute(order, summary.brain.usage);
+  } catch (e) {
+    console.error("attached compute", e);
+    summary.brain.attached = null;
+  }
+  return summary;
 }
 
 export async function summarize(order: ComputeOrder, t0: number, mode: RoutingMode, privacy: PrivacyRequirement): Promise<{ receipt: ComputeReceipt | null; brain: BrainRunSummary }> {
@@ -49,6 +67,7 @@ export async function summarize(order: ComputeOrder, t0: number, mode: RoutingMo
       cost: receipt?.customerCost ?? null,
       verification: receipt?.verificationMethod ?? null,
       verified: receipt ? receipt.verificationMethod !== "unverified-provider-response" : false,
+      usage: receipt?.tokens ? { inputUnits: receipt.tokens.prompt, outputUnits: receipt.tokens.completion } : undefined,
       status: order.status,
       error: order.error,
     },
@@ -91,7 +110,7 @@ export async function chatEventStream(o: StreamOptions): Promise<ReadableStream<
         if (!stream && order.status === "COMPLETED") {
           ctl.enqueue(enc.encode(`data: ${JSON.stringify({ id: o.chatId, object: "chat.completion.chunk", created, model: o.input.request.model, choices: [{ index: 0, delta: { role: "assistant", content: order.output ?? "" }, finish_reason: "stop" }] })}\n\n`));
         }
-        const summary = await summarize(order, o.t0, o.mode, o.privacy);
+        const summary = await finalize(order, o.t0, o.mode, o.privacy);
         try {
           await o.onComplete?.(order, summary);
         } catch (e) {

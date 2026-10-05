@@ -281,6 +281,7 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
       orderId: ctx.orderId,
       planId: ctx.planId,
       stepId: ctx.stepId,
+      tokens: { prompt: usage.prompt, completion: usage.completion, basis: usage.basis },
       status: "VERIFIED",
     };
     await getStore().putDoc("receipt", receipt.receiptId, receipt, { at: receipt.completedAt, key: receipt.source });

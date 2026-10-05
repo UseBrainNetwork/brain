@@ -9,6 +9,7 @@ import { GpuCounter, LiveNodeCount } from "@/components/network/Metrics";
 import { SimOnly } from "@/components/layout/SimOnly";
 import { ComputeDie } from "@/components/network/ComputeDie";
 import { Button, Dot, Prov } from "@/components/ui";
+import { PayoutEmail } from "@/components/wallet/PayoutEmail";
 import { WalletModal } from "@/components/wallet/WalletButton";
 import { contributor, useContributor, type ContributorState } from "@/network/client/contributor";
 import { useWallet, walletStore } from "@/lib/wallet/store";
@@ -324,6 +325,7 @@ function NodeDashboard({ s, onWallet }: { s: ContributorState; onWallet: () => v
               <div className="mt-1 font-mono text-[11px] text-chalk/40">
                 {w.verified ? "linked · rewards settle to this wallet" : "demo wallet · not linked"} · {w.holding?.supplyShare != null ? `${fmtPct(w.holding.supplyShare, 3)} of supply` : "holdings unknown"}
               </div>
+              <PayoutEmail className="mt-1.5" />
             </>
           ) : (
             <>

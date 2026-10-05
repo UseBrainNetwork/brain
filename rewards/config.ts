@@ -27,8 +27,14 @@ export interface RewardConfig {
   minVerificationPassRate: number;
   /** verifiedCompute must exceed this. Holding tokens alone NEVER earns. */
   minVerifiedCompute: number;
-  /** No single node may receive more than this fraction of an epoch pool. */
+  /** Floor of the per-wallet pool cap: no wallet ever takes more than this once the network is large. */
   maxNodeShareOfPool: number;
+  /**
+   * Ceiling of the per-wallet cap while few wallets are eligible. The effective cap is
+   * clamp(1 / eligibleWallets, maxNodeShareOfPool, maxNodeShareWhenSmall), so a handful of early
+   * wallets can actually receive the pool instead of most of it returning to the treasury.
+   */
+  maxNodeShareWhenSmall: number;
   circulatingSupply: number;
 }
 
@@ -41,6 +47,7 @@ export const defaultRewardConfig: RewardConfig = {
   minVerificationPassRate: 0.9,
   minVerifiedCompute: 0,
   maxNodeShareOfPool: 0.02,
+  maxNodeShareWhenSmall: 0.25,
   circulatingSupply: 1_000_000_000,
 };
 

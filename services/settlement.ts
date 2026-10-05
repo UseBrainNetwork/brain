@@ -5,6 +5,7 @@ import { computeEpoch, type ContributorInput } from "@/rewards/formula";
 import { contributorPoolToday } from "@/rewards/simulate";
 import { demoSolPriceUsd } from "@/services/mock/mockData";
 import { NodeError } from "./nodes";
+import { notifySettled } from "./notify";
 import { getStore, type StoredNode } from "./store";
 import { allocateFromTreasury, syncedTreasury } from "./treasury";
 import { getHoldings } from "./wallet";
@@ -368,6 +369,15 @@ export async function settleEpoch(opts: SettleOptions): Promise<{ epoch: RewardE
   if (created && provenance === "live" && treasuryPool > 0 && epoch.distributedLamports > 0) {
     const fromTreasury = Math.min(treasuryPool, epoch.distributedLamports) / LAMPORTS_PER_SOL;
     await allocateFromTreasury(fromTreasury, e.id);
+  }
+  // Payout emails for wallets that asked for them. Never affects the settlement itself.
+  if (created && provenance === "live" && allocations.length > 0) {
+    try {
+      const r = await notifySettled(epoch, allocations);
+      if (r.error) console.error("[settlement] notify", e.id, r.error);
+    } catch (err) {
+      console.error("[settlement] notify failed", e.id, err instanceof Error ? err.message : err);
+    }
   }
   return { epoch: created ? epoch : ((await store.getEpoch(e.id)) ?? epoch), created };
 }

@@ -135,13 +135,20 @@ export function computeEpoch(
   const totalScore = rows.reduce((s, r) => s + r.score, 0);
   if (totalScore > 0) for (const r of rows) r.rewardWeight = r.score / totalScore;
 
-  waterFill(rows, cfg.maxNodeShareOfPool);
+  waterFill(rows, effectiveCap(rows.filter((r) => r.eligible).length, cfg));
   for (const r of rows) r.payout = r.rewardWeight * poolUsd;
   const distributed = rows.reduce((s, r) => s + r.payout, 0);
   return { poolUsd, distributedUsd: distributed, undistributedUsd: Math.max(0, poolUsd - distributed), rewards: rows };
 }
 
 /** Cap each weight at `cap`, redistribute the excess proportionally to uncapped rows. */
+/** Per-wallet cap for this epoch: 1/eligible wallets, clamped between the floor and the small-network ceiling. */
+export function effectiveCap(eligibleWallets: number, cfg: RewardConfig): number {
+  const ceiling = cfg.maxNodeShareWhenSmall ?? cfg.maxNodeShareOfPool;
+  if (eligibleWallets <= 0) return ceiling;
+  return Math.min(ceiling, Math.max(cfg.maxNodeShareOfPool, 1 / eligibleWallets));
+}
+
 function waterFill(rows: ContributorReward[], cap: number) {
   for (let iter = 0; iter < 64; iter++) {
     let excess = 0;

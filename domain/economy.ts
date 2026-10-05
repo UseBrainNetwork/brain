@@ -61,6 +61,13 @@ export interface ComputeReceipt {
   /** Set when the receipt belongs to one step of a compound plan. */
   planId?: string;
   stepId?: string;
+  /** Chat receipts: token usage as the upstream reported it, or estimated from characters. */
+  tokens?: { prompt: number; completion: number; basis: "provider-reported" | "estimated-from-chars" };
+  /**
+   * Set on receipts for compute attached to a chat/inference request. The nodes on this receipt ran a
+   * verification workload sized by that request; they did not produce the request's answer.
+   */
+  attachedTo?: { orderId: string; model: string };
   /** Final outcome. A FAILED job also gets a receipt so the failure is auditable. */
   status: "VERIFIED" | "PARTIAL" | "FAILED";
 }

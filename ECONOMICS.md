@@ -64,6 +64,15 @@ If an account attaches the wallet that its nodes verified with, every REAL `COMP
 
 A `ComputeReceipt` is the unit of account: who computed, what was verified, how long it took, what it cost, how the money splits. `customerCost`, `providerCompensation` and `protocolRevenue` are present only when priced, and then carry `basis: "list-price"`. Receipts are REAL or SIMULATED, never both; only REAL receipts are listed publicly.
 
+## Attached compute (`services/attachedCompute.ts`)
+
+Every completed chat request (`/chat`, `/v1/chat/completions`) dispatches one distributed job to the browser network, sized by the request's token usage (small / medium / large → 2 / 4 / 8 nodes, one unit each). This is how customer traffic becomes node work today. The rules:
+
+- The attached job did **not** produce the answer. The answer came from the routed provider; the attached job is an integer matmul the server spot-checks. The chat panel, the receipt and `DistributedJob.attachedTo` / `ComputeReceipt.attachedTo` all say so.
+- No second customer charge. The chat receipt carries the customer cost; the attached receipt has `customerCost: null` and records no `CUSTOMER_PAYMENT`.
+- Nodes are paid for these units the same way as for every other verified unit: they count in `measureWork` for the hourly pool. Zero verified → zero.
+- Attached jobs run concurrently with each other and with the single interactive (demo / routed) job; `activeJob()` ignores them. They are skipped, not faked, when no node is live. `BRAIN_ATTACHED_COMPUTE=off` disables them.
+
 ## Contributor rewards (engine v2, `rewards/engine.ts`)
 
 For each node in an epoch:
@@ -72,7 +81,7 @@ For each node in an epoch:
 \text{weight} = \text{verifiedCompute} \times \underbrace{\min\!\big(1 + \alpha \ln(1 + \tfrac{\min(\text{share},\,\text{cap})}{\text{cap}}),\ M\big)}_{\text{holding multiplier}} \times \underbrace{\text{reputation} \times \text{reliability}}_{\text{quality multiplier}}
 \]
 
-with defaults α = 0.5, cap = 1 % of circulating supply, M = 1.35, and eligibility thresholds reputation ≥ 0.35, reliability ≥ 0.5. The pool is split pro rata by weight, then a per-**account** cap (25 %) is water-filled so that sybil-splitting one account into many nodes does not lift the cap. If the cap is unsatisfiable (fewer than four accounts) it is lifted and the epoch says so.
+with defaults α = 0.5, cap = 1 % of circulating supply, M = 1.35, and eligibility thresholds reputation ≥ 0.35, reliability ≥ 0.5. The pool is split pro rata by weight, then a per-**wallet** cap is water-filled. The cap adapts to the number of eligible wallets: `clamp(1 / eligibleWallets, 2 %, 25 %)`, so four or fewer wallets may each take up to 25 % of the pool, and at fifty or more wallets no wallet may take more than 2 %. Whatever the cap leaves unallocated stays in the treasury for later epochs. Allocations are per wallet, so splitting one wallet's work across many nodes does not lift the cap.
 
 Properties enforced by tests:
 

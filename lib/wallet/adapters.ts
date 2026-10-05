@@ -16,6 +16,8 @@ export interface WalletAdapter {
   /** null when the adapter cannot sign (demo). */
   signMessage: ((message: Uint8Array) => Promise<Uint8Array>) | null;
   disconnect(): Promise<void>;
+  /** Email the login provider knows for this user (Privy email login), used for payout notifications. */
+  email?: () => string | null;
 }
 
 interface InjectedProvider {

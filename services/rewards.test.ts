@@ -175,10 +175,10 @@ describe("settlement", () => {
     expect(a2).toHaveLength(1);
     expect(a1[0].verifiedCompute).toBe(200);
     expect(a2[0].verifiedCompute).toBe(100);
-    // Two participants: both hit maxNodeShareOfPool (2%); the rest stays undistributed.
+    // Two eligible wallets: the adaptive cap is 25% each (small-network ceiling); the rest stays undistributed.
     expect(a1[0].capped && a2[0].capped).toBe(true);
-    expect(a1[0].lamports).toBe(20_000_000);
-    expect(epoch.distributedLamports).toBe(40_000_000);
+    expect(a1[0].lamports).toBe(250_000_000);
+    expect(epoch.distributedLamports).toBe(500_000_000);
     expect(await s.allocationsForWallet(w3.address)).toHaveLength(0);
     expect(epoch.distributedLamports).toBeLessThanOrEqual(epoch.poolLamports);
     expect(Number.isInteger(a1[0].lamports)).toBe(true);
@@ -372,8 +372,8 @@ describe("end to end: verified work → linked wallet → auto-settle from creat
       expect(e.provenance).toBe("live");
       expect(e.poolLamports).toBe(pool);
       expect(e.participants).toBe(1);
-      // One participant hits the 2% anti-whale cap; the rest of the pool stays in the treasury.
-      expect(e.distributedLamports).toBe(Math.floor(pool * 0.02));
+      // One participant hits the small-network cap (25%); the rest of the pool stays in the treasury.
+      expect(e.distributedLamports).toBe(Math.floor(pool * 0.25));
       const after = await getTreasury("REAL");
       expect(after.allocated).toBeCloseTo(e.distributedLamports / 1e9, 9);
       expect(after.balance).toBeCloseTo(29.78 - e.distributedLamports / 1e9, 9);
