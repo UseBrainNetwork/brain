@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AccountingEvent, AccountingEventType, ComputeReceipt, EconomicsSnapshot, Source, SumCell } from "@/domain/economy";
 import { defaultRevenueSplit } from "@/rewards/config";
 import { eventBus } from "./eventBus";
+import { tokenListPricePer1MUsd } from "@/lib/pricing";
 import { getStore } from "./store";
 
 /**
@@ -45,32 +46,56 @@ export async function snapshot(source: Source, from = 0, to = Date.now() + 1, re
   const creatorRewards = cell(own, "CREATOR_REWARD_RECEIVED", "SOL");
   const protocolRevenue = cell(own, "PROTOCOL_REVENUE", "USD");
   const infrastructureCost = cell(own, "INFRASTRUCTURE_COST", "USD");
+  const subscriptionRevenue = cell(own, "SUBSCRIPTION_PAYMENT", "USD");
 
   const total = (c: SumCell) => (c.settled ?? 0) + (c.accrued ?? 0);
-  const haveMargin = customersPaid.count > 0 && providersEarned.count > 0;
-  const paid = total(customersPaid);
-  const networkMargin = haveMargin && paid > 0 ? (paid - total(providersEarned) - total(infrastructureCost)) / paid : null;
+  const revenue = total(customersPaid) + total(subscriptionRevenue);
+  // Margin needs both a revenue side and a cost side; infra alone (upstream prices) counts as a cost side.
+  const haveMargin = customersPaid.count + subscriptionRevenue.count > 0 && providersEarned.count + infrastructureCost.count > 0;
+  const networkMargin = haveMargin && revenue > 0 ? (revenue - total(providersEarned) - total(infrastructureCost)) / revenue : null;
 
   let costPer1MUnits: number | null = null;
+  let costPer1MTokens: number | null = null;
+  let avgCostPerJob: number | null = null;
+  let avgProviderCostPerChat: number | null = null;
+  let pricedReceipts = 0;
   if (receipts) {
-    const priced = receipts.filter((r) => r.source === source && r.customerCost && r.totalComputeUnits > 0);
-    const units = priced.reduce((s, r) => s + r.totalComputeUnits, 0);
-    const usd = priced.reduce((s, r) => s + (r.customerCost?.amount ?? 0), 0);
-    costPer1MUnits = units > 0 ? (usd / units) * 1_000_000 : null;
+    const priced = receipts.filter((r) => r.source === source && r.customerCost);
+    pricedReceipts = priced.length;
+    const compute = priced.filter((r) => r.workloadType !== "chat" && r.totalComputeUnits > 0);
+    const units = compute.reduce((s, r) => s + r.totalComputeUnits, 0);
+    costPer1MUnits = units > 0 ? (compute.reduce((s, r) => s + (r.customerCost?.amount ?? 0), 0) / units) * 1_000_000 : null;
+    // Chat receipts: tokens are recorded as INFRASTRUCTURE_COST notes, not on the receipt, so derive per-1M from the configured list price when any chat receipt is priced.
+    const chats = priced.filter((r) => r.workloadType === "chat");
+    const infraByReceipt = new Map(own.filter((e) => e.type === "INFRASTRUCTURE_COST" && e.relatedReceiptId).map((e) => [e.relatedReceiptId!, e.amount]));
+    const chatUpstream = chats.map((r) => infraByReceipt.get(r.receiptId)).filter((x): x is number => x != null);
+    avgProviderCostPerChat = chatUpstream.length ? chatUpstream.reduce((a, b) => a + b, 0) / chatUpstream.length : null;
+    const listPer1M = tokenListPricePer1MUsd();
+    costPer1MTokens = chats.length && listPer1M != null ? listPer1M : null;
+    avgCostPerJob = priced.length ? priced.reduce((s, r) => s + (r.customerCost?.amount ?? 0), 0) / priced.length : null;
   }
-  return { source, from, to, customersPaid, providersEarned, creatorRewards, protocolRevenue, infrastructureCost, networkMargin, costPer1MUnits, events: own.length };
+  return { source, from, to, customersPaid, providersEarned, creatorRewards, protocolRevenue, infrastructureCost, subscriptionRevenue, networkMargin, costPer1MUnits, costPer1MTokens, avgCostPerJob, avgProviderCostPerChat, pricedReceipts, events: own.length };
 }
 
 /**
  * Accrue the economics of one receipt. Only runs when the receipt carries a price; unpriced work
  * produces no monetary events (it is still credited as compute units on the nodes).
  */
-export async function accrueReceipt(r: ComputeReceipt, nodeUnits: Record<string, number>) {
+export async function accrueReceipt(
+  r: ComputeReceipt,
+  nodeUnits: Record<string, number>,
+  opts: {
+    /** Real USD the upstream provider charges for this receipt (null = UNKNOWN). When known it is the infrastructure cost line. */
+    upstreamCost?: number | null;
+    usageBasis?: "provider-reported" | "estimated-from-chars";
+    customerId?: string;
+  } = {},
+) {
   if (!r.customerCost) return [];
   const split = defaultRevenueSplit.inferenceRevenue;
   const out: AccountingEvent[] = [];
-  const base = { currency: "USD" as const, timestamp: r.completedAt, relatedJobId: r.jobId, relatedReceiptId: r.receiptId, source: r.source, settlement: "accrued" as const };
-  out.push(await record({ ...base, type: "CUSTOMER_PAYMENT", amount: r.customerCost.amount, note: `${r.customerCost.basis}; no payment received yet` }));
+  const base = { currency: "USD" as const, timestamp: r.completedAt, relatedJobId: r.jobId, relatedReceiptId: r.receiptId, relatedCustomerId: opts.customerId, source: r.source, settlement: "accrued" as const };
+  out.push(await record({ ...base, type: "CUSTOMER_PAYMENT", amount: r.customerCost.amount, note: `${r.customerCost.basis}; no payment received yet${opts.usageBasis === "estimated-from-chars" ? "; token usage estimated from characters" : ""}` }));
   const providerTotal = r.providerCompensation?.amount ?? 0;
   const unitSum = Object.values(nodeUnits).reduce((s, u) => s + u, 0);
   if (providerTotal > 0 && unitSum > 0) {
@@ -80,7 +105,11 @@ export async function accrueReceipt(r: ComputeReceipt, nodeUnits: Record<string,
     }
   }
   if (r.protocolRevenue && r.protocolRevenue.amount > 0) out.push(await record({ ...base, type: "PROTOCOL_REVENUE", amount: r.protocolRevenue.amount, note: "buyback + treasury share" }));
-  const infra = r.customerCost.amount * split.infrastructure;
-  if (infra > 0) out.push(await record({ ...base, type: "INFRASTRUCTURE_COST", amount: infra, note: "infrastructure share of list price" }));
+  if (opts.upstreamCost != null) {
+    if (opts.upstreamCost > 0) out.push(await record({ ...base, type: "INFRASTRUCTURE_COST", amount: opts.upstreamCost, note: "upstream provider price for this request" }));
+  } else {
+    const infra = r.customerCost.amount * split.infrastructure;
+    if (infra > 0) out.push(await record({ ...base, type: "INFRASTRUCTURE_COST", amount: infra, note: "infrastructure share of list price" }));
+  }
   return out;
 }

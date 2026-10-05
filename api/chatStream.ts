@@ -1,0 +1,115 @@
+import "server-only";
+import type { ComputeOrder, ComputeReceipt, PrivacyRequirement, RoutingMode } from "@/domain/economy";
+import { placeStreamingOrder, type PlaceOrderInput } from "@/engine/orders";
+import { getReceipt } from "@/services/receipts";
+import { reframeStream } from "./gateway";
+
+/**
+ * Metadata BRAIN attaches to every answer: the "HOW BRAIN RAN THIS" panel and the `brain` field
+ * of the public API are both built from this. Every value comes from the persisted order and
+ * receipt; nothing is inferred client-side.
+ */
+export interface BrainRunSummary {
+  orderId: string;
+  decisionId?: string;
+  planId?: string;
+  receiptId: string | null;
+  mode: RoutingMode;
+  privacy: PrivacyRequirement;
+  target: string | null;
+  provider: string | null;
+  model: string | null;
+  nodesUsed: number;
+  latencyMs: number;
+  cost: ComputeReceipt["customerCost"];
+  verification: string | null;
+  /** True only when the server verified the work itself (spot-checks / redundancy). */
+  verified: boolean;
+  usage?: { inputUnits: number; outputUnits: number };
+  status: ComputeOrder["status"];
+  error?: string;
+}
+
+export async function summarize(order: ComputeOrder, t0: number, mode: RoutingMode, privacy: PrivacyRequirement): Promise<{ receipt: ComputeReceipt | null; brain: BrainRunSummary }> {
+  const receipt = order.receiptId ? await getReceipt(order.receiptId) : null;
+  return {
+    receipt,
+    brain: {
+      orderId: order.orderId,
+      decisionId: order.decisionId,
+      planId: order.planId,
+      receiptId: order.receiptId ?? null,
+      mode,
+      privacy,
+      target: receipt?.route?.target ?? null,
+      provider: receipt?.route?.providerId ?? null,
+      model: receipt?.model ?? null,
+      nodesUsed: receipt?.nodesUsed.length ?? 0,
+      latencyMs: Date.now() - t0,
+      cost: receipt?.customerCost ?? null,
+      verification: receipt?.verificationMethod ?? null,
+      verified: receipt ? receipt.verificationMethod !== "unverified-provider-response" : false,
+      status: order.status,
+      error: order.error,
+    },
+  };
+}
+
+export interface StreamOptions {
+  input: PlaceOrderInput & { request: Extract<PlaceOrderInput["request"], { kind: "chat" }> };
+  customerId: string;
+  chatId: string;
+  t0: number;
+  mode: RoutingMode;
+  privacy: PrivacyRequirement;
+  /** Runs after the order is terminal (credits, usage records). Errors are swallowed so the stream still closes cleanly. */
+  onComplete?: (order: ComputeOrder, summary: { receipt: ComputeReceipt | null; brain: BrainRunSummary }) => Promise<void>;
+}
+
+/**
+ * OpenAI-style SSE: token chunks first (re-framed with our ids), then `event: brain` with the run
+ * summary, then `data: [DONE]`. Failures after routing arrive as `event: error` with the same
+ * `brain` object so the client can still show what was attempted.
+ */
+export async function chatEventStream(o: StreamOptions): Promise<ReadableStream<Uint8Array>> {
+  const { firstByte, done } = await placeStreamingOrder(o.input, o.customerId);
+  const { stream } = await firstByte;
+  const enc = new TextEncoder();
+  const created = Math.floor(o.t0 / 1000);
+  return new ReadableStream<Uint8Array>({
+    async start(ctl) {
+      try {
+        if (stream) {
+          const reader = reframeStream(stream, o.chatId, o.input.request.model, created).getReader();
+          for (;;) {
+            const { value, done: d } = await reader.read();
+            if (d) break;
+            ctl.enqueue(value);
+          }
+        }
+        const order = await done;
+        if (!stream && order.status === "COMPLETED") {
+          ctl.enqueue(enc.encode(`data: ${JSON.stringify({ id: o.chatId, object: "chat.completion.chunk", created, model: o.input.request.model, choices: [{ index: 0, delta: { role: "assistant", content: order.output ?? "" }, finish_reason: "stop" }] })}\n\n`));
+        }
+        const summary = await summarize(order, o.t0, o.mode, o.privacy);
+        try {
+          await o.onComplete?.(order, summary);
+        } catch (e) {
+          console.error("chat onComplete", e);
+        }
+        if (order.status !== "COMPLETED") {
+          ctl.enqueue(enc.encode(`event: error\ndata: ${JSON.stringify({ error: { code: order.status === "REJECTED" ? "no_provider_available" : "upstream_failed", message: order.error ?? "execution failed" }, brain: summary.brain })}\n\n`));
+        } else {
+          ctl.enqueue(enc.encode(`event: brain\ndata: ${JSON.stringify(summary.brain)}\n\n`));
+        }
+        ctl.enqueue(enc.encode("data: [DONE]\n\n"));
+      } catch (e) {
+        ctl.enqueue(enc.encode(`event: error\ndata: ${JSON.stringify({ error: { code: "stream_failed", message: e instanceof Error ? e.message : "stream failed" } })}\n\n`));
+      } finally {
+        ctl.close();
+      }
+    },
+  });
+}
+
+export const sseHeaders = { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no" };

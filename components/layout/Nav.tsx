@@ -8,14 +8,27 @@ import { Prov } from "@/components/ui";
 import { cx } from "@/lib/format";
 import { getToken } from "@/services/data";
 import { Logo } from "./Logo";
+import { SocialLinks } from "./SocialLinks";
 
 const links = [
-  { href: "/brain", label: "Network" },
-  { href: "/contribute", label: "Contribute" },
-  { href: "/inference", label: "Inference" },
-  { href: "/explorer", label: "Explorer" },
-  { href: "/rewards", label: "Rewards" },
+  { href: "/chat", label: "Chat" },
+  { href: "/network", label: "Network" },
+  { href: "/pricing", label: "Pricing" },
+  { href: "/earn", label: "Earn" },
   { href: "/developers", label: "Developers" },
+];
+const secondary = [
+  { href: "/explorer", label: "Explorer", hint: "Every job, node and receipt" },
+  { href: "/capacity", label: "Capacity", hint: "What the network can run today" },
+  { href: "/economics", label: "Economics", hint: "Where the money moves" },
+  { href: "/auto", label: "BRAIN AUTO", hint: "Routing console" },
+  { href: "/rewards", label: "Rewards", hint: "Contributor epochs" },
+];
+const accountLinks = [
+  { href: "/account", label: "Account" },
+  { href: "/account#api-keys", label: "API keys" },
+  { href: "/earn", label: "Compute" },
+  { href: "/pricing", label: "Billing" },
 ];
 
 /** Reads the theme of whatever section is under the nav so it can invert over dark surfaces. */
@@ -50,8 +63,18 @@ export function Nav() {
   const path = usePathname();
   const dark = useSurfaceTheme();
   const [open, setOpen] = useState(false);
+  const [more, setMore] = useState(false);
   const token = getToken();
-  useEffect(() => setOpen(false), [path]);
+  useEffect(() => {
+    setOpen(false);
+    setMore(false);
+  }, [path]);
+  useEffect(() => {
+    if (!more) return;
+    const close = (e: MouseEvent) => !(e.target as HTMLElement).closest("[data-more]") && setMore(false);
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [more]);
 
   return (
     <header className="pointer-events-none fixed inset-x-0 top-0 z-50">
@@ -87,6 +110,39 @@ export function Nav() {
               </Link>
             );
           })}
+          <div data-more className="relative">
+            <button
+              type="button"
+              onClick={() => setMore((v) => !v)}
+              aria-expanded={more}
+              className={cx("rounded-full px-3 py-1.5 text-[13.5px] font-medium transition-colors xl:px-3.5", dark ? (more ? "bg-chalk/10 text-chalk" : "text-chalk/70 hover:text-chalk") : more ? "bg-ink/[0.07] text-ink" : "text-ink/70 hover:text-ink")}
+            >
+              More
+            </button>
+            {more && (
+              <div className="absolute right-0 top-[calc(100%+10px)] w-[300px] rounded-[16px] bg-ink p-2 text-chalk shadow-2xl ring-1 ring-chalk/10">
+                {secondary.map((l) => (
+                  <Link key={l.href} href={l.href} className="flex items-center justify-between rounded-[10px] px-3 py-2.5 hover:bg-chalk/5">
+                    <span>
+                      <span className="block text-[13.5px] font-medium">{l.label}</span>
+                      <span className="block text-[11.5px] text-chalk/45">{l.hint}</span>
+                    </span>
+                    <span className="text-fog">→</span>
+                  </Link>
+                ))}
+                <div className="mt-1 border-t border-chalk/10 px-3 pb-1 pt-2.5">
+                  <div className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-chalk/40">Account</div>
+                  <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px]">
+                    {accountLinks.map((l) => (
+                      <Link key={l.label} href={l.href} className="text-chalk/75 hover:text-chalk">
+                        {l.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </nav>
 
         <div className="pointer-events-auto flex items-center gap-2">
@@ -101,6 +157,7 @@ export function Nav() {
             <span className="num">${token.priceUsd.toFixed(6)}</span>
             <Prov p="simulated" />
           </div>
+          <SocialLinks dark={dark} className="hidden md:flex" />
           <WalletButton dark={dark} />
           <button
             onClick={() => setOpen((v) => !v)}
@@ -127,8 +184,18 @@ export function Nav() {
               <span className="text-fog">→</span>
             </Link>
           ))}
-          <div className="flex items-center gap-2 px-4 py-3 font-mono text-[12px] text-fog">
-            {token.symbol} ${token.priceUsd.toFixed(6)} <Prov p="simulated" />
+          <div className="mt-1 grid grid-cols-2 gap-1 border-t border-chalk/10 pt-2">
+            {[...secondary, ...accountLinks.filter((a) => a.label === "Account")].map((l) => (
+              <Link key={l.href + l.label} href={l.href} className="rounded-lg px-4 py-2.5 text-[14px] text-chalk/75 hover:bg-chalk/5 hover:text-chalk">
+                {l.label}
+              </Link>
+            ))}
+          </div>
+          <div className="flex items-center justify-between px-4 py-3">
+            <span className="flex items-center gap-2 font-mono text-[12px] text-fog">
+              {token.symbol} ${token.priceUsd.toFixed(6)} <Prov p="simulated" />
+            </span>
+            <SocialLinks dark size="md" />
           </div>
         </div>
       )}

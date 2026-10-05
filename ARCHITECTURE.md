@@ -52,19 +52,25 @@ Money fields are `null` unless a list price is configured (`lib/pricing.ts`); pr
 
 ## 4. Accounting
 
-`services/accounting.ts` stores `AccountingEvent`s (`CUSTOMER_PAYMENT`, `COMPUTE_PROVIDER_EARNED`, `PROTOCOL_REVENUE`, `INFRASTRUCTURE_COST`, `CREATOR_REWARD_RECEIVED`) with `source` and `settlement: "accrued" | "settled"`. `accrueReceipt` writes the split from `rewards/config.ts → inferenceRevenue` (60 % providers by verified units, 30 % buyback/protocol, 10 % infrastructure) only for priced receipts. `snapshot(source, from, to)` sums per cell; the source key is part of the store index, so REAL and SIMULATED cannot be summed together.
+`services/accounting.ts` stores `AccountingEvent`s (`CUSTOMER_PAYMENT`, `SUBSCRIPTION_PAYMENT`, `COMPUTE_PROVIDER_EARNED`, `PROTOCOL_REVENUE`, `INFRASTRUCTURE_COST`, `CREATOR_REWARD_RECEIVED`) with `source` and `settlement: "accrued" | "settled"`. `accrueReceipt` writes the split from `rewards/config.ts → inferenceRevenue` (60 % providers by verified units, 30 % buyback/protocol, 10 % infrastructure) only for priced receipts. `snapshot(source, from, to)` sums per cell; the source key is part of the store index, so REAL and SIMULATED cannot be summed together.
 
 ## 5. BRAIN AUTO
 
 ```
-ExecutionRequest ─▶ providers.estimate() ×3 ─▶ router.scoreEstimates(mode) ─▶ execute(best) ─▶ receipt
-                                                 │ reject: unsupported / over budget / unhealthy
-                                                 └ fallthrough to next eligible target on failure
+ExecutionRequest ─▶ classify ─▶ plan ─▶ providers.estimate() ×4 ─▶ router.scoreEstimates(mode, privacy, budget)
+                                                                    │ reject: unsupported / unavailable / privacy / over budget
+                                                                    ▼
+                                             execute(best) ─▶ verify ─▶ receipt ─▶ credits / accounting ─▶ observeRoute
+                                                   └ fallthrough to next eligible target on failure (before first byte when streaming)
 ```
 
-- `engine/providers.ts`: `BrowserNetworkExecutionProvider` (estimate = list price × units, latency = median of same-size completed jobs, capacity = live nodes; execute = `createJob` then poll to terminal) and `UpstreamExecutionProvider` for `cloud-fallback` and `external` (wrap the OpenAI-compatible provider; price and latency from config and `engine/metrics.ts` samples).
-- `engine/router.ts`: min-max normalises known cost and latency across eligible estimates, assigns `unknownPenalty` to unknowns, and scores `w_cost·cost + w_latency·latency + w_reliability·(1 − reliability)` (lower wins). Modes: `AUTO`, `CHEAPEST`, `FASTEST`, `BROWSER_ONLY`; `priority` on the public API maps `cheap → CHEAPEST`, `fast → FASTEST`, `balanced → AUTO`.
-- `engine/orders.ts`: `ComputeOrder` state machine `PENDING → ROUTED → EXECUTING → COMPLETED | FAILED | REJECTED`, with the `RouteDecision` stored and linked from the receipt.
+- `engine/providers.ts`: `IntelligenceProvider { id, type, capabilities, estimate, execute, executeStream?, health }`. `BrowserNetworkExecutionProvider` (estimate = list price × units, latency = median of same-size completed jobs, capacity = live nodes; execute = `createJob` then poll to terminal), `NativeNetworkExecutionProvider` (honest unsupported placeholder), `UpstreamExecutionProvider` for `cloud-fallback` (`CLOUD_GPU`) and `external` (`EXTERNAL_MODEL`): wrap the OpenAI-compatible client; price and latency from config and `engine/metrics.ts` samples; streaming taps the upstream to issue the receipt once the stream ends, recording provider-reported cost when present.
+- `engine/plan.ts`: `classify` (capability, carries plaintext), single-step `plan`, `compoundPlan` DAG validation, topological execution helpers.
+- `engine/router.ts`: hard constraints (supported, available, `BROWSER_ONLY`, privacy via `privacyAllows`/`targetTrust`, `maxCost`, `maxLatency`) then min-max normalised scoring `w_cost·cost + w_latency·latency + w_reliability·(1 − reliability) + w_quality·(1 − qualityTier)` (lower wins), unknowns penalised. Modes `AUTO · CHEAP · FAST · QUALITY · BROWSER_ONLY`; legacy `CHEAPEST/FASTEST/BALANCED` and `priority` still accepted. Full tables in `ROUTING.md`.
+- `engine/orders.ts`: `ComputeOrder` state machine `PENDING → ROUTED → EXECUTING → COMPLETED | FAILED | REJECTED`; `placeOrder` and `placeStreamingOrder`; `executePlan` for compound plans; `publicOrder` redaction for public endpoints; the `RouteDecision` (incl. attempts) stored and linked from the receipt.
+- `engine/learning.ts`: `observeRoute` recorder (no adaptation yet).
+- `api/chatStream.ts`: SSE framing for `/api/chat` and `/v1` streaming (reframed tokens → `event: brain` → `[DONE]`).
+- `services/accounts.ts`, `services/credits.ts`, `services/accountSummary.ts`, `lib/plans.ts`: consumer accounts (signed cookie), plan config, credit ledger, REAL-only compute offsets. See `BRAIN_ARCHITECTURE.md`.
 
 ## 6. Reputation, capacity, epochs, treasury, customers
 
@@ -77,7 +83,7 @@ ExecutionRequest ─▶ providers.estimate() ×3 ─▶ router.scoreEstimates(mo
 
 ## 7. Storage and realtime
 
-`services/store.ts` defines `NetworkStore`; `MemoryStore` is a `globalThis` singleton (self-healing across HMR), `PgStore` is selected when `DATABASE_URL` is set (`db/schema.sql`). Phase 2 records use one generic indexed collection: `putDoc / getDoc / listDocs / findDocByKey` with `kind ∈ receipt | accounting | order | decision | customer | apikey | request | treasury | epochv2 | metric`, `key` (usually the source) and `at` for range queries; Postgres table `brain_documents`.
+`services/store.ts` defines `NetworkStore`; `MemoryStore` is a `globalThis` singleton (self-healing across HMR), `PgStore` is selected when `DATABASE_URL` is set (`db/schema.sql`). Phase 2 records use one generic indexed collection: `putDoc / getDoc / listDocs / findDocByKey` with `kind ∈ receipt | accounting | order | decision | plan | account | credit | session | customer | apikey | request | treasury | epochv2 | metric`, `key` (usually the source) and `at` for range queries; Postgres table `brain_documents`.
 
 `services/eventBus.ts` is in-process pub/sub with a 200-event history, fanned out by `/api/network/stream` (SSE). Pages use `network/realtime/real.ts` (REAL store: nodes, jobs, summary, feed) and poll `/api/network/real` every 4 s as a backstop.
 

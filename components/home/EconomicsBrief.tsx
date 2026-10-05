@@ -17,7 +17,7 @@ export function EconomicsBrief() {
             Rewards are paid for verified compute, from creator fees and inference sales. Holding tokens raises your multiplier, up to a cap. Holding alone earns nothing.
           </p>
           <div className="flex flex-wrap gap-3">
-            <Button href="/contribute" tone="dark" arrow>
+            <Button href="/earn" tone="dark" arrow>
               Measure your GPU
             </Button>
             <Button href="/rewards#formula" tone="dark" variant="secondary">

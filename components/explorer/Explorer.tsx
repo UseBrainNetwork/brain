@@ -159,7 +159,7 @@ export function LiveNodesTable() {
             <tr>
               <td colSpan={7} className="py-10 text-center text-chalk/45">
                 No real nodes connected to this server right now.{" "}
-                <Link href="/contribute" className="text-chalk underline underline-offset-4">
+                <Link href="/earn" className="text-chalk underline underline-offset-4">
                   Be the first →
                 </Link>
               </td>

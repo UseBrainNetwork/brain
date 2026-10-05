@@ -41,7 +41,7 @@ export default async function EconomicsPage() {
     { k: "More capacity", v: `${network.realNodes} real nodes`, sub: `${fmtInt(network.capacityScore)} capacity score` },
     { k: "Customer jobs", v: `${receipts.filter((r) => r.customerCost).length} priced / ${receipts.length} receipts`, sub: `${network.jobsCompleted} jobs completed` },
     { k: "Inference revenue", v: paidAny ? <Cell c={snap.customersPaid} /> : "AWAITING DATA", sub: paidAny ? "accrued at list price; nothing collected" : "no priced requests yet" },
-    { k: "Network economics", v: snap.networkMargin == null ? "AWAITING DATA" : pct(snap.networkMargin), sub: "margin = (paid − providers − infra) ÷ paid" },
+    { k: "Network economics", v: snap.networkMargin == null ? "AWAITING DATA" : pct(snap.networkMargin), sub: "margin = (paid + subscriptions − providers − infra) ÷ revenue" },
   ];
 
   return (
@@ -70,6 +70,12 @@ export default async function EconomicsPage() {
         <Metric k="Infrastructure cost" v={<Cell c={snap.infrastructureCost} />} />
         <Metric k="Network margin" v={pct(snap.networkMargin)} />
         <Metric k="Cost per 1M compute units" v={snap.costPer1MUnits == null ? NO_DATA : usd(snap.costPer1MUnits, 2)} />
+      </div>
+      <div className="mt-7 grid grid-cols-2 gap-x-6 gap-y-7 md:grid-cols-4">
+        <Metric k="Subscription revenue" v={<Cell c={snap.subscriptionRevenue} />} sub="no payment processor connected" />
+        <Metric k="List price per 1M tokens" v={snap.costPer1MTokens == null ? NO_DATA : usd(snap.costPer1MTokens, 2)} sub={snap.costPer1MTokens == null ? "no priced chat receipts" : "configured list price, applied to real receipts"} />
+        <Metric k="Avg customer cost / request" v={snap.avgCostPerJob == null ? NO_DATA : usd(snap.avgCostPerJob)} sub={`${snap.pricedReceipts} priced receipts`} />
+        <Metric k="Avg upstream cost / chat" v={snap.avgProviderCostPerChat == null ? NO_DATA : usd(snap.avgProviderCostPerChat)} sub="what the model provider charged BRAIN" />
       </div>
 
       <Panel className="mt-10" title="Flywheel" right="each stage from a real metric or AWAITING DATA">

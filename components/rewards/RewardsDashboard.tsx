@@ -191,7 +191,7 @@ export function RewardsDashboard() {
             <Stat k="Availability" v={`${Math.round(cur.availability * 100)}%`} />
           </dl>
           {cur.verifiedCompute === 0 && (
-            <Link href="/contribute" className="mt-7 inline-flex items-center gap-1.5 text-[13.5px] text-signal hover:underline">
+            <Link href="/earn" className="mt-7 inline-flex items-center gap-1.5 text-[13.5px] text-signal hover:underline">
               Start contributing to accrue this epoch →
             </Link>
           )}

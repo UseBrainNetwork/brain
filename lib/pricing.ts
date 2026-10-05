@@ -6,7 +6,7 @@
  *   BRAIN_PRICE_USD_PER_1K_COMPUTE_UNITS  list price customers accrue per 1,000 verified compute units
  *   BRAIN_PRICE_USD_PER_1M_TOKENS         list price customers accrue per 1M chat tokens routed by BRAIN
  *   BRAIN_FALLBACK_PRICE_USD_PER_1M       what the CLOUD_GPU upstream charges us per 1M tokens
- *   BRAIN_EXTERNAL_PRICE_USD_PER_1M       what the EXTERNAL_PROVIDER upstream charges us per 1M tokens
+ *   BRAIN_EXTERNAL_PRICE_USD_PER_1M       what the EXTERNAL_MODEL upstream charges us per 1M tokens
  */
 
 const num = (v: string | undefined): number | null => {

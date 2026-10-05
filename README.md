@@ -1,211 +1,181 @@
 <p align="center">
-  <a href="https://brainnetwork.app"><img src=".github/assets/hero.svg" alt="brain — the crowd is the GPU" width="100%"></a>
+  <a href="https://brainnetwork.app"><img src=".github/assets/hero.svg" alt="BRAIN — one request, the best available intelligence" width="100%"></a>
 </p>
 
 <p align="center">
   <a href="https://brainnetwork.app/network"><img alt="nodes online" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbrainnetwork.app%2Fapi%2Fstats&query=%24.nodesOnline&label=nodes%20online&color=3d5afe&labelColor=0b0d11&style=flat-square"></a>
   <a href="https://brainnetwork.app/explorer"><img alt="jobs completed" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbrainnetwork.app%2Fapi%2Fstats&query=%24.jobsCompleted&label=jobs%20completed&color=27c46d&labelColor=0b0d11&style=flat-square"></a>
   <a href="https://brainnetwork.app/explorer"><img alt="work units verified" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbrainnetwork.app%2Fapi%2Fstats&query=%24.workUnitsVerified&label=work%20units%20verified&color=27c46d&labelColor=0b0d11&style=flat-square"></a>
-  <a href="https://brainnetwork.app/api/stats"><img alt="store" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbrainnetwork.app%2Fapi%2Fstats&query=%24.backend&label=store&color=e6e9ee&labelColor=0b0d11&style=flat-square"></a>
-  <img alt="tests" src="https://img.shields.io/badge/tests-89%20passing-27c46d?labelColor=0b0d11&style=flat-square">
+  <img alt="tests" src="https://img.shields.io/badge/tests-102%20passing-27c46d?labelColor=0b0d11&style=flat-square">
   <img alt="stack" src="https://img.shields.io/badge/Next.js%2016%20%C2%B7%20React%2019%20%C2%B7%20WebGPU%20%C2%B7%20Postgres-0b0d11?labelColor=0b0d11&color=1a1e26&style=flat-square">
+  <a href="https://x.com/useBrainnetwork"><img alt="X" src="https://img.shields.io/badge/@useBrainnetwork-0b0d11?logo=x&logoColor=e6e9ee&labelColor=0b0d11&style=flat-square"></a>
 </p>
 
 <p align="center">
-  <a href="https://brainnetwork.app"><b>brainnetwork.app</b></a> ·
-  <a href="https://brainnetwork.app/node">Contribute a GPU</a> ·
-  <a href="https://brainnetwork.app/developers">Developers</a> ·
-  <a href="https://brainnetwork.app/network">Network ops</a> ·
+  <a href="https://brainnetwork.app/chat"><b>Use BRAIN</b></a> ·
+  <a href="https://brainnetwork.app/earn"><b>Power BRAIN</b></a> ·
+  <a href="https://brainnetwork.app/developers">API</a> ·
+  <a href="https://brainnetwork.app/pricing">Pricing</a> ·
+  <a href="https://brainnetwork.app/network">Network</a> ·
   <a href="https://brainnetwork.app/economics">Economics</a> ·
-  <a href="REAL_VS_SIMULATED.md">Real vs simulated</a>
+  <a href="https://x.com/useBrainnetwork">X</a>
 </p>
 
 <img src=".github/assets/divider.svg" width="100%" alt="">
 
-**brain** is a distributed AI compute network that runs in the browser. Contributors open a tab; the server measures and verifies their WebGPU compute; they earn a share of real revenue. Developers buy inference through an OpenAI-compatible API. There are no token emissions and no passive staking. Holding the token raises a contributor's reward weighting, but **only verified compute earns**, and zero verified compute always produces zero reward.
+**BRAIN** is an intelligence network. One request goes in; BRAIN AUTO estimates every resource class that could run it (browser compute, native GPUs, operator cloud, external models), executes the cheapest path that meets the request's constraints, and returns the answer with a receipt that shows exactly how it ran. The same network is powered by ordinary computers: open a tab, the server measures and verifies your WebGPU compute, and verified work offsets what you use. Developers get the same engine through an OpenAI-compatible API.
 
-> **Status.** Phase 2 prototype, live at [brainnetwork.app](https://brainnetwork.app). The full path is real end to end on one server: device detection → server-verified benchmark → join → verified distributed jobs → proof-of-compute receipts → node reputation → routing (`brain/auto`) → accounting → reward epochs. Network-wide marketing numbers, the token price and the distributed-LLM path are **simulated and labeled as such** in the UI. The badges above come from [`/api/stats`](https://brainnetwork.app/api/stats), which reports only values this server has measured.
-
-<img src=".github/assets/divider.svg" width="100%" alt="">
-
-## One request, traced
-
-<p align="center"><img src=".github/assets/trace.svg" alt="A request passing through the gateway, router, four verified nodes, merge and response" width="100%"></p>
-
-1. **Request.** `POST /v1/chat/completions` with `model: brain/auto`. Same shape as the OpenAI API, so existing SDKs work unchanged.
-2. **Gateway.** API key, rate limit, schema validation, and a usage meter every later step reports into.
-3. **Router.** Every execution target (browser network, cloud fallback, external provider) is estimated on compatibility, live capacity, latency, cost and reliability. The cheapest valid one wins; the decision is recorded.
-4. **Split.** Work is cut into units sized by each node's *server-measured* score and the memory its adapter could actually allocate. Nothing the browser claims is trusted.
-5. **Nodes.** WGSL compute kernels run through WebGPU on ordinary machines.
-6. **Verify.** Rows chosen in secret before dispatch are recomputed server-side. Canary jobs have known answers. Low-reputation nodes get redundant replicas. Kernels are integer (u32 wrapping), so verification is bit-exact, not tolerance-based.
-7. **Merge.** Verified units are reassembled in order. A failed unit is re-dispatched and the node loses reputation.
-8. **Response + receipt.** `200 OK`, a shareable [proof-of-compute receipt](https://brainnetwork.app/receipt/r-5000002), and verified compute units credited to each node for the open reward epoch.
+Live at [brainnetwork.app](https://brainnetwork.app). Every figure on the site and in this README carries its provenance; the design rules are in [REAL_VS_SIMULATED.md](REAL_VS_SIMULATED.md).
 
 <img src=".github/assets/divider.svg" width="100%" alt="">
 
-## What is real today
+## Quickstart
 
-Every number in the product carries a provenance badge: **LIVE** (measured or verified by this server), **SIM** (demo data from `services/mock/`) or **EST** (the real formula on simulated inputs). Real and simulated values are never mixed in one figure.
-
-| Real, end to end | Simulated, labeled |
-| --- | --- |
-| WebGPU detection, server-timed benchmark, join, heartbeat | Network-wide node counts, GPU totals, req/s on the marketing pages |
-| Distributed `matmul_u32` jobs across real browsers, secret spot-check verification | Token price and market data |
-| Proof-of-compute receipts with result hashes and route decisions | Distributed LLM inference across the browser pool |
-| Node reputation (EWMA, failures weigh double, bans below 0.35) | Illustrative earnings in the calculator |
-| `brain/auto` routing across browser network / cloud / external provider | — |
-| Chat completions through a configured OpenAI-compatible upstream | — |
-| Accounting events, reward epochs, Postgres persistence with advisory-locked job updates | — |
-
-Full table with the rules we hold ourselves to: [REAL_VS_SIMULATED.md](REAL_VS_SIMULATED.md).
-
-<img src=".github/assets/divider.svg" width="100%" alt="">
-
-## Try it
-
-**Contribute.** Open [brainnetwork.app/node](https://brainnetwork.app/node) in Chrome, Edge, Safari 26+ or Firefox 141+ (Windows) and press *Join network*. Your device is benchmarked by the server, joins the pool, and receives verified work. Open [/demo](https://brainnetwork.app/demo) on another device to watch the room and run a test job across everything connected.
-
-**Build.** The API is OpenAI-compatible:
+### Use it
 
 ```bash
 curl https://brainnetwork.app/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{ "model": "brain/auto", "messages": [{ "role": "user", "content": "explain entropy in one line" }] }'
+  -d '{
+    "model": "brain/auto",
+    "mode": "CHEAP",
+    "messages": [{ "role": "user", "content": "explain entropy in one line" }]
+  }'
 ```
 
-Every response carries a `brain` extension with the target, provider, latency, the full routing decision, and a receipt id. If no target is eligible the API returns `503 no_provider_available` with the routing trace, never an invented answer.
+Same wire format as the OpenAI API, so existing SDKs work by changing `base_url`. Set `stream: true` for SSE. Optional fields: `mode` (`AUTO` · `CHEAP` · `FAST` · `QUALITY` · `BROWSER_ONLY`), `privacy` (`PUBLIC` · `STANDARD` · `PRIVATE`), `maxCost` (USD), `maxLatency` (ms).
+
+Every response carries a `brain` object and an `x-brain-receipt` header. Streams end with `event: brain` before `data: [DONE]`.
 
 ```json
 "brain": {
-  "target": "EXTERNAL_PROVIDER",
+  "mode": "CHEAP",
+  "privacy": "STANDARD",
+  "target": "EXTERNAL_MODEL",
   "provider": "external",
-  "latencyMs": 284,
-  "cost": { "amount": 0.0000084, "currency": "USD", "basis": "list-price" },
-  "receiptId": "r-c-muudky9h-lvge",
-  "verification": "unverified-provider-response"
+  "model": "meta-llama/llama-3.1-8b-instruct",
+  "nodesUsed": 0,
+  "latencyMs": 874,
+  "cost": { "amount": 0.000003, "currency": "USD", "basis": "list-price" },
+  "verification": "unverified-provider-response",
+  "verified": false,
+  "receiptId": "r-c-muuhiedx-pxal"
 }
 ```
+
+If nothing can run the request, you get `503 no_provider_available` with every target's exclusion reason. BRAIN never answers from a target it did not select.
+
+### Power it
+
+Open [brainnetwork.app/earn](https://brainnetwork.app/earn) in Chrome, Edge, Safari 26+ or Firefox 141+ (Windows) and press **Join network**. Nothing is installed. Your GPU is benchmarked by the server, joins the pool, and receives verified work. [/node](https://brainnetwork.app/node) is the full-screen worker; [/demo](https://brainnetwork.app/demo) runs a job across every device in the room.
+
+### Run it
+
+```bash
+git clone https://github.com/UseBrainNetwork/brain && cd brain
+npm install
+npm run dev          # http://localhost:3000
+npm test             # 102 tests
+npm run typecheck && npm run build
+```
+
+Node 20+. With no configuration the app runs on an in-memory store and the inference API returns an honest `503`. Copy `.env.example` to `.env.local` to configure a provider, prices or Postgres. Every variable is server-only except `NEXT_PUBLIC_BRAIN_WS_URL`. The full table is in [the environment reference](#environment) below.
+
+<img src=".github/assets/divider.svg" width="100%" alt="">
+
+## How a request runs
+
+<p align="center"><img src=".github/assets/trace.svg" alt="A request passing through the gateway, router, four verified nodes, merge and response" width="100%"></p>
+
+```
+REQUEST → CLASSIFY → PLAN → ESTIMATE → SELECT → EXECUTE → VERIFY → MERGE → RESPONSE → RECEIPT → LEARN
+```
+
+| Stage | What happens | Code |
+| --- | --- | --- |
+| Gateway | Account or API key, plan rate limit, schema validation | `api/gateway.ts`, `app/api/chat`, `app/api/v1` |
+| Classify · Plan | Capability, whether the request carries plaintext, a single-step plan (compound DAG plans supported) | `engine/plan.ts` |
+| Estimate | Each resource class returns cost, latency, reliability, capacity, model, quality tier and the basis for each. Unmeasured = `UNKNOWN`, never guessed | `engine/providers.ts` |
+| Select | Hard constraints (supported, available, privacy, budget) then a published weighted score per mode | `engine/router.ts` |
+| Execute | Selected provider runs it; fallback to the next eligible target if it fails before the first byte | `engine/orders.ts` |
+| Verify | Browser-network work is spot-checked against secret rows or a canary; upstream model output is marked unverified | `services/verification.ts` |
+| Response · Receipt | OpenAI-shaped response or reframed stream; `ComputeReceipt` with route, cost, verification; credits consumed; accounting accrued | `api/chatStream.ts`, `services/receipts.ts` |
+
+Routing weights, the privacy matrix and fallback semantics: [ROUTING.md](ROUTING.md). Components and data flow: [BRAIN_ARCHITECTURE.md](BRAIN_ARCHITECTURE.md).
+
+### Resource classes
+
+| Class | Trust | Today |
+| --- | --- | --- |
+| `BROWSER_NETWORK` | untrusted, verified | Live. WebGPU nodes run integer kernels verified bit-exactly by the server |
+| `NATIVE_NETWORK` | untrusted, verified | Not built. Reports unsupported so the estimate table is complete |
+| `CLOUD_GPU` | operator | Available when `BRAIN_FALLBACK_*` is configured |
+| `EXTERNAL_MODEL` | third-party | Live. Provider-reported cost is recorded per request |
 
 <img src=".github/assets/divider.svg" width="100%" alt="">
 
 ## Security model
 
-Contributors are assumed adversarial. The server does **not** trust any client-reported GPU model, compute units, job completion, benchmark score or uptime.
+Contributors are assumed adversarial. The server does not trust any client-reported GPU model, compute units, job completion, benchmark score or uptime.
 
-- **GPU model** is display-only. Placement and rewards use the server-measured score.
-- **Benchmark score** is the server's clock between issuing a seeded challenge and receiving a verified answer.
-- **Job completion** counts only after a canary or secret spot-check passes, within plausibility bounds. Expected outputs and sampled indices never leave the server.
-- **Uptime** is derived from server-received heartbeats.
-- **Reputation** is an EWMA where failures weigh double; nodes below 0.35 are banned.
-- **Rate limits** are per hashed IP. Session tokens are random and stored only as SHA-256 hashes.
-- **Provider keys** live only in server env; upstream errors are mapped to fixed strings. The client bundle contains no secret names or values.
-- **Wallets** prove ownership by signing a server nonce (ed25519). Public pages show anonymous 4-hex node ids, never wallets, IPs or device names.
+- **Benchmark** is the server's clock between issuing a seeded challenge and receiving a verified answer. Scores drive placement; the GPU name is display-only.
+- **Completion** counts only after a canary or secret spot-check passes within plausibility bounds. Expected outputs and sampled indices never leave the server. Kernels are integer, so verification is bit-exact.
+- **Reputation** is an EWMA where failures weigh double; nodes below 0.35 are banned. **Uptime** comes from server-received heartbeats.
+- **Secrets** live in server env only. Upstream vendor fields and prices are stripped from streamed chunks. Session and API-key material is stored as hashes. Public pages show 4-hex node ids, never wallets, IPs or device names; public order endpoints carry no prompts or outputs.
+- **Wallets** prove ownership by signing a server nonce (ed25519).
 
 Report a vulnerability: [SECURITY.md](SECURITY.md).
 
 <img src=".github/assets/divider.svg" width="100%" alt="">
 
-## Rewards
+## Economics
 
-`rewards/formula.ts`, every parameter in `rewards/config.ts`:
+One subscription, one ledger. A **BRAIN credit** is a unit of real cost (`1 credit = $0.001`), consumed from each receipt's list price. The Free plan (500 credits/month) is live; Pro and Max are configuration placeholders until a payment rail exists and are labelled as such everywhere they appear. Verified compute from nodes your wallet powers is mirrored into your account as credit offsets.
+
+Contributor rewards (`rewards/engine.ts`):
 
 ```
-normCompute = verifiedCompute / meanVerifiedCompute
-normToken   = min(tokens / supply, cap) / meanTokenShare
-effToken    = max(normToken, λ · normCompute)        # non-holders still earn on compute
-mult        = min(√(normCompute · effToken) / (√λ · normCompute), maxMultiplier)
-score       = √λ · normCompute · mult · quality       # quality = reliability · completion · availability^0.5
-share       = water-filled under maxNodeShareOfPool
+weight_i = verifiedCompute_i × min(1 + α·ln(1 + normalizedHoldings_i), M) × reputation_i × reliability_i
+share_i  = weight_i / Σ weight, water-filled under a per-account cap
 ```
 
-Properties covered by tests: tokens alone earn exactly 0; banned and sub-threshold nodes earn 0; splitting wallets or compute gains nothing; the multiplier is capped (max 1.35×); no node exceeds the pool cap; allocations never exceed the pool. Pricing, splits and the current list prices are documented in [ECONOMICS.md](ECONOMICS.md). We do not publish projected returns.
+Tested properties: zero verified compute earns zero regardless of holdings; the holding multiplier is capped (1.35×) and concave, so splitting compute across sybil nodes gains nothing; no account exceeds the pool cap; allocations never exceed the pool. No emissions, no staking yield, no projected returns. Prices, splits and how list prices were derived: [ECONOMICS.md](ECONOMICS.md).
 
 <img src=".github/assets/divider.svg" width="100%" alt="">
 
-## Run it locally
+## Repository
 
-```bash
-npm install
-npm run dev          # http://localhost:3000
-npm test             # vitest: workloads, verification, routers, reward engine, receipts/accounting invariants
-npm run typecheck
-npm run build && npm start
 ```
-
-Node 20+. Without any configuration the app runs on an in-memory store with simulated holdings and returns an honest `503` from the inference API. Copy `.env.example` to `.env.local` to configure; **every variable is server-only** except `NEXT_PUBLIC_BRAIN_WS_URL`.
-
-<details>
-<summary><b>Environment variables</b></summary>
-
-| Variable | Effect |
-| --- | --- |
-| `BRAIN_EXTERNAL_BASE_URL` / `_API_KEY` / `_MODEL` | OpenAI-compatible external provider for `/v1/chat/completions` (production uses OpenRouter) |
-| `BRAIN_FALLBACK_BASE_URL` / `_API_KEY` / `_MODEL` | Self-hosted cloud fallback (e.g. vLLM) |
-| `BRAIN_API_KEYS` | Comma-separated keys required on `/v1/*`. Empty = open but rate limited |
-| `DATABASE_URL` (or `POSTGRES_URL` as injected by Vercel's Supabase/Neon/Prisma integrations) | Postgres instead of the in-memory store. `db/schema.sql` is applied automatically on first connection (idempotent); distributed-job updates are serialized with transaction-scoped advisory locks so several instances can share one database |
-| `SOLANA_RPC_URL` + `BRAIN_TOKEN_MINT` | Real SPL token holdings lookup |
-| `NEXT_PUBLIC_BRAIN_WS_URL` | External WebSocket event bus (defaults to the built-in SSE stream) |
-| `BRAIN_PRICE_USD_PER_1K_COMPUTE_UNITS` | List price for browser-network compute. Unset = receipts carry `UNKNOWN` cost and no accounting events are created |
-| `BRAIN_PRICE_USD_PER_1M_TOKENS` / `BRAIN_FALLBACK_PRICE_USD_PER_1M` / `BRAIN_EXTERNAL_PRICE_USD_PER_1M` | List price for chat tokens and the upstream cost of each provider. Unset = `UNKNOWN`, never estimated |
-| `BRAIN_EXTERNAL_EMBED_MODEL` | Enables `/v1/embeddings` passthrough to the external provider |
-| `BRAIN_ADMIN_TOKEN` | Bearer token for operator routes: create customers/API keys, finalize epochs, record manual treasury receipts |
-| `BRAIN_DEMO_TOKEN` | Optional. When set, `POST /api/jobs` and `POST /api/orders` from the console require it |
-| `BRAIN_SERVER_SECRET` | HMAC key for session tokens and claims. Set it in production |
-| `BRAIN_PAYOUTS_ENABLED` + `BRAIN_PAYOUT_SECRET_KEY` | Enable SOL claim payouts. Off by default |
-
-To exercise the inference success path without a real provider:
-
-```bash
-node scripts/mock-upstream.mjs 3999
-BRAIN_EXTERNAL_BASE_URL=http://localhost:3999/v1 BRAIN_EXTERNAL_API_KEY=test BRAIN_EXTERNAL_MODEL=mock npm run dev
+app/          Next.js routes (pages + /api handlers)
+components/   UI by page; components/ui.tsx holds primitives
+domain/       Shared types: ExecutionRequest, ExecutionEstimate, ComputeReceipt, ComputeNode, …
+engine/       BRAIN AUTO: providers, router, plan, orders (streaming + fallback), learning
+api/          Gateway (validation, reframed streams, API keys), chat event stream
+services/     Server: nodes, distributed jobs, verification, reputation, receipts, accounting,
+              accounts, credits, capability, store (memory | Postgres), event bus, mock/
+webgpu/       Browser: device detection, WGSL kernels, ComputeBackend, benchmark
+network/      Deterministic workloads, contributor engine, realtime sources
+rewards/      Reward formula and engine, config, simulator
+providers/    OpenAI-compatible upstream client
+lib/          Non-secret config, plans, pricing, formatting, wallet adapters
+db/           Postgres schema (self-applied on first connection)
+scripts/      Headless-Chrome e2e with real WebGPU, screenshots, mock upstream
 ```
-
-</details>
 
 <details>
 <summary><b>Pages</b></summary>
 
 | Route | What it is |
 | --- | --- |
-| `/` | Hero, live network topology + event feed, "One request, traced", economics flywheel |
-| `/contribute` | Detect → benchmark → wallet (optional) → join → live contributor dashboard |
-| `/node` | Full-screen worker: JOIN NETWORK → WAITING → JOB RECEIVED → COMPUTING → VERIFYING → VERIFIED +N units |
-| `/demo` | Live room view: real node count, join topology, RUN TEST JOB (real parallel `matmul_u32`), per-unit lifecycle |
-| `/auto` | `brain/auto` console: one request, every target estimated, cheapest valid one executed, receipt issued |
-| `/inference` | Models, pricing, playground through the real gateway |
-| `/explorer` | Live jobs, real nodes, top contributors; `/explorer/job/[id]` lifecycle |
-| `/receipt/[id]` | Shareable proof-of-compute receipt: nodes, verification, result hash, cost, route decision |
-| `/node/[nodeId]` | Node reputation measured by the server from issued work |
-| `/network` | Operations view: is this real, is compute happening, is someone paying, who is doing the work, where is the money going |
-| `/economics` | REAL live economics: customers paid, providers earned, creator rewards, protocol revenue, cost, margin; epochs; accounting events |
-| `/rewards` | Reward formula explainer, calculator, epoch history, claims |
-| `/epoch/[id]` | Immutable reward epoch with its allocations and hash |
-| `/capacity` | What the network can run right now (AVAILABLE / LIMITED / UNAVAILABLE / EXPERIMENTAL) |
-| `/developers` | Quickstart (Python/JS/cURL), request path, routing, response format, node protocol, verification |
-| `/brain` | The network as one machine: totals, dense topology, model pools, job waterfall |
-
-</details>
-
-<details>
-<summary><b>Repository layout</b></summary>
-
-```
-app/          Next.js routes (pages + /api route handlers)
-components/   UI, grouped by page; components/ui.tsx holds primitives
-domain/       Shared types: ComputeNode, ComputeJob, ModelPool, RewardEpoch, NodeBenchmark, …
-webgpu/       Browser-side: device detection, WGSL kernels, ComputeBackend, benchmark
-network/      workloads.ts (deterministic workloads shared by GPU, CPU and server),
-              client/contributor.ts (contributor engine), realtime/ (event sources + store)
-services/     Server-side: nodes & jobs, verification, reputation, security, wallet,
-              store (memory | Postgres), event bus, mock/ (ALL demo data lives here)
-rewards/      Reward formula, configurable reward engine, config, simulator, tests
-engine/       brain/auto: ExecutionProvider implementations, scoring router, compute orders
-providers/    Inference providers (browser network, OpenAI-compatible) + gateway router
-api/          Gateway (validation → routing → fallback → OpenAI-shaped response)
-lib/          Config (non-secret), formatting, pricing, wallet adapters
-db/           Postgres schema (self-applied on first connection)
-scripts/      Dev utilities: e2e flows in headless Chrome with real WebGPU, screenshots, mock upstream
-```
+| `/` | Use BRAIN / Power BRAIN, live metrics strip, resource classes, network panel |
+| `/chat` | Streaming chat through BRAIN AUTO; "Powered by BRAIN" expands to route, model, nodes, cost, latency, verification, receipt |
+| `/pricing` · `/account` | Plans and credits; your plan, usage, compute earnings, net, credit ledger |
+| `/earn` · `/node` · `/demo` | Contributor flow, full-screen worker, multi-device room |
+| `/developers` | Quickstart (Python / JS / cURL), request path, routing, response format, node protocol, verification |
+| `/auto` | Routing console: every resource class estimated for one request, decision, receipt |
+| `/network` · `/explorer` · `/capacity` · `/economics` | Operations, jobs and nodes, what can run today, where the money goes |
+| `/receipt/[id]` · `/node/[id]` · `/epoch/[id]` | Proof-of-compute receipt, node reputation, immutable reward epoch |
+| `/rewards` · `/brain` | Reward formula and claims; the network as one machine |
 
 </details>
 
@@ -234,34 +204,60 @@ heartbeat 5 s    ─────────────────────
 
 </details>
 
+<details id="environment">
+<summary><b>Environment</b></summary>
+
+| Variable | Effect |
+| --- | --- |
+| `BRAIN_EXTERNAL_BASE_URL` / `_API_KEY` / `_MODEL` | OpenAI-compatible external provider (`EXTERNAL_MODEL`) |
+| `BRAIN_FALLBACK_BASE_URL` / `_API_KEY` / `_MODEL` | Operator cloud (`CLOUD_GPU`), e.g. vLLM |
+| `BRAIN_EXTERNAL_QUALITY_TIER` / `BRAIN_FALLBACK_QUALITY_TIER` | Operator-assigned 0..1 tier used by `QUALITY` mode. Unset = UNKNOWN |
+| `BRAIN_API_KEYS` | Comma-separated keys required on `/v1/*`. Empty = open but rate limited |
+| `DATABASE_URL` (or `POSTGRES_URL`) | Postgres instead of the in-memory store; schema self-applied; advisory-locked job updates |
+| `BRAIN_PRICE_USD_PER_1K_COMPUTE_UNITS` | List price for browser compute. Unset = receipts carry `UNKNOWN` cost |
+| `BRAIN_PRICE_USD_PER_1M_TOKENS` / `BRAIN_FALLBACK_PRICE_USD_PER_1M` / `BRAIN_EXTERNAL_PRICE_USD_PER_1M` | Chat list price and each upstream's cost. Unset = `UNKNOWN`, never estimated |
+| `BRAIN_EXTERNAL_EMBED_MODEL` | Enables `/v1/embeddings` passthrough |
+| `BRAIN_CREDIT_USD`, `BRAIN_PLAN_FREE_CREDITS`, `BRAIN_PLAN_PRO_USD` / `_CREDITS`, `BRAIN_PLAN_MAX_USD` / `_CREDITS` | Credit value and plan allowances. Pro/Max stay unpurchasable until payments exist |
+| `SOLANA_RPC_URL` + `BRAIN_TOKEN_MINT` | Real SPL holdings lookup |
+| `BRAIN_SERVER_SECRET` | HMAC key for sessions and claims. Required in production |
+| `BRAIN_ADMIN_TOKEN` · `BRAIN_DEMO_TOKEN` | Operator routes · optional gate on console job/order creation |
+| `BRAIN_PAYOUTS_ENABLED` + `BRAIN_PAYOUT_SECRET_KEY` | SOL claim payouts. Off by default |
+| `NEXT_PUBLIC_BRAIN_WS_URL` | External WebSocket event bus (default: built-in SSE) |
+
+Exercise the inference path without a real provider:
+
+```bash
+node scripts/mock-upstream.mjs 3999
+BRAIN_EXTERNAL_BASE_URL=http://localhost:3999/v1 BRAIN_EXTERNAL_API_KEY=test BRAIN_EXTERNAL_MODEL=mock npm run dev
+```
+
+</details>
+
 <img src=".github/assets/divider.svg" width="100%" alt="">
 
-## Verification we have done
-
-- `typecheck`, `build` and `test` (89 tests) pass.
-- Multi-device demo in headless Chrome with real WebGPU (`scripts/multitab.mjs`): four browser contexts join through `/node`, `/demo` counts 1→4 real nodes, a job verifies 16/16 units across all four. With `--kill`, a node closed mid-job has its unit reassigned and the job still completes.
-- Phase 2 path (`scripts/phase2.mjs`): three nodes join, a compute order is placed through `/auto`, the browser network is selected, the job runs, a receipt is issued and renders, and `/node/<id>`, `/network`, `/economics`, `/capacity` render from the same records.
-- Production on Postgres (Supabase via Vercel): two real devices, 8/8 units verified, receipt persisted across deploys.
-- All routes return 200, no hydration errors, no horizontal overflow at 1440 px or 390 px (`scripts/routes.mjs`).
-- WebGPU fallback tested with a missing `navigator.gpu` and a null adapter: the benchmark is withheld and unknown fields are labeled.
-
-## Documents
+## Documentation
 
 | | |
 | --- | --- |
+| [BRAIN_ARCHITECTURE.md](BRAIN_ARCHITECTURE.md) | BRAIN · NETWORK · AUTO · POWER BRAIN · RECEIPT; request flow, resource classes, privacy, accounts and credits |
+| [ROUTING.md](ROUTING.md) | Estimation, constraints, published weights per mode, fallback |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Modules, data flow, store and locking, event bus |
-| [ECONOMICS.md](ECONOMICS.md) | Pricing config, how list prices were derived, splits, what is never claimed |
-| [REAL_VS_SIMULATED.md](REAL_VS_SIMULATED.md) | Every number's provenance and the rules for mixing (never) |
-| [PHASE_3.md](PHASE_3.md) | Deploy runbook, 5-device demo script, known limitations, critical path |
-| [NEXT_STEPS.md](NEXT_STEPS.md) | Open work |
+| [ECONOMICS.md](ECONOMICS.md) | Pricing config, plans and credits, pay with compute, splits |
+| [REAL_VS_SIMULATED.md](REAL_VS_SIMULATED.md) | Provenance of every number and the rule that they are never mixed |
+| [CURRENT_STATE.md](CURRENT_STATE.md) | Audit and current status |
+| [NEXT_30_DAYS.md](NEXT_30_DAYS.md) | Validation-first plan |
+| [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) | How to contribute · how to report |
 
-## What we will not build
+## Principles
 
-Token emissions. Passive staking. Points, quests, node licenses, NFTs. Promised returns or implied price appreciation. Fabricated benchmarks or "cheaper than X" claims. Our own foundation model.
+- Nothing client-reported is trusted. Only server-verified compute earns.
+- Unknown is a valid value. Prices, latencies and hardware are measured or configured, never estimated.
+- Real and simulated records never share a total. Demo data lives in `services/mock/` and is labelled.
+- No token emissions, staking yield, points, quests, licenses, NFTs, projected returns or "cheaper than X" claims.
 
-## Design
+## Community
 
-Cool graphite surfaces, one signal color (cobalt `#3d5afe`) reserved for work in flight, green only for verified work. Geist paired with JetBrains Mono. Animations show real system behavior: particles are jobs, flashes are joins and leaves, the cobalt marker is your node. The README assets are generated by `scripts/github-assets.mjs`.
+[@useBrainnetwork](https://x.com/useBrainnetwork) on X · [github.com/UseBrainNetwork](https://github.com/UseBrainNetwork)
 
 ## License
 

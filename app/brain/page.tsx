@@ -46,7 +46,7 @@ export default function BrainPage() {
               <Button href="/explorer" tone="dark" arrow>
                 Open explorer
               </Button>
-              <Button href="/contribute" tone="dark" variant="secondary">
+              <Button href="/earn" tone="dark" variant="secondary">
                 Add your GPU
               </Button>
             </div>

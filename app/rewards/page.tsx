@@ -52,7 +52,7 @@ export default function RewardsPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Button href="/contribute" tone="dark" arrow>
+              <Button href="/earn" tone="dark" arrow>
                 Contribute GPU
               </Button>
               <Button href="/developers#verification" tone="dark" variant="secondary">

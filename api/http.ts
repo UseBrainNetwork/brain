@@ -16,7 +16,7 @@ export function nodeRoute(handler: Handler, limit: number = networkConfig.rateLi
     } catch (e) {
       if (e instanceof NodeError) return json({ error: e.code }, e.status);
       if (e instanceof GatewayError) {
-        return json({ error: { code: e.code, message: e.message }, brain: e.routing ? { routing: e.routing, plan: e.plan } : undefined }, e.status);
+        return json({ error: { code: e.code, message: e.message } }, e.status);
       }
       console.error(e);
       return json({ error: "internal_error" }, 500);

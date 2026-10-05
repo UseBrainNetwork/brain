@@ -4,8 +4,8 @@ import { motion, useMotionValueEvent, useScroll, useTransform } from "motion/rea
 import { useRef, useState } from "react";
 import { Ticker } from "@/components/home/Ticker";
 import { ComputeDie } from "@/components/network/ComputeDie";
-import { GpuCounter } from "@/components/network/Metrics";
-import { Button, Prov } from "@/components/ui";
+import { Button } from "@/components/ui";
+import { useReal } from "@/network/realtime/real";
 
 /**
  * Pinned hero. Scrolling scrubs one camera move: the copy falls away, the die turns top-down,
@@ -17,6 +17,7 @@ export function HeroDive() {
   const { scrollYProgress: p } = useScroll({ target: ref, offset: ["start start", "end end"] });
   const [dark, setDark] = useState(false);
   useMotionValueEvent(p, "change", (v) => setDark(v > 0.6));
+  const realNodes = useReal((r) => Object.keys(r.nodes).length);
 
   const copyOpacity = useTransform(p, [0, 0.16], [1, 0]);
   const copyY = useTransform(p, [0, 0.22], [0, -90]);
@@ -50,22 +51,25 @@ export function HeroDive() {
         <motion.div style={{ opacity: copyOpacity, y: copyY }} className="pointer-events-none relative z-10 mx-auto max-w-[1600px] px-5 pt-[104px] md:px-10 lg:pt-[150px]">
           <div className="lg:max-w-[780px]">
             <div className="label mb-7 flex items-center gap-2.5 text-ink/60">
-              Network live · <GpuCounter className="text-ink" /> GPUs online <Prov p="simulated" />
+              <span className={realNodes > 0 ? "size-[7px] bg-ok" : "size-[7px] bg-ink/25"} />
+              {realNodes > 0 ? `${realNodes} real node${realNodes === 1 ? "" : "s"} online` : "No real nodes online right now"} <span className="rounded-sm px-1 text-[9.5px] text-ok ring-1 ring-ok/40">REAL</span>
             </div>
-            <h1 className="display text-[56px] sm:text-[92px] lg:text-[100px] xl:text-[112px]">
-              The crowd
+            <h1 className="display text-[52px] sm:text-[84px] lg:text-[92px] xl:text-[104px]">
+              One request.
               <br />
-              is the GPU.
+              The best available
+              <br />
+              intelligence.
             </h1>
-            <p className="mt-7 max-w-[420px] text-[16px] leading-[1.5] text-ink/75 md:mt-8 md:text-[19px]">
-              Your browser becomes part of an AI supercomputer. Contribute verified compute. Earn from real creator revenue.
+            <p className="mt-7 max-w-[460px] text-[16px] leading-[1.5] text-ink/75 md:mt-8 md:text-[19px]">
+              BRAIN routes every request to the cheapest path that can run it, browser compute, cloud GPUs or external models, and attaches a receipt. Your computer can power it.
             </p>
             <div className="pointer-events-auto mt-7 flex flex-wrap gap-2.5 md:mt-8">
-              <Button href="/contribute" variant="primary" arrow>
-                Contribute GPU
+              <Button href="/chat" variant="primary" arrow>
+                Use BRAIN
               </Button>
-              <Button href="/inference" variant="secondary">
-                Use the network
+              <Button href="/earn" variant="secondary">
+                Power BRAIN
               </Button>
             </div>
           </div>

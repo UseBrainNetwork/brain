@@ -1,22 +1,28 @@
 import { randomBytes } from "node:crypto";
-import { chatCompletionStream, validateChat } from "@/api/gateway";
+import { chatEventStream, sseHeaders, summarize } from "@/api/chatStream";
+import { validateChat } from "@/api/gateway";
 import { body, nodeRoute } from "@/api/http";
-import type { Priority } from "@/domain/economy";
+import type { ComputeOrder, PrivacyRequirement } from "@/domain/economy";
+import { normalizeMode } from "@/domain/economy";
 import { placeOrder } from "@/engine/orders";
 import { networkConfig } from "@/lib/config";
 import { authenticate, customerRateLimit, openAccess, recordRequest } from "@/services/customers";
-import { getReceipt } from "@/services/receipts";
 import { bearer, json, tooMany } from "@/services/security";
 
 export const dynamic = "force-dynamic";
 
-const PRIORITIES: Record<string, Priority> = { cheap: "CHEAP", fast: "FAST", balanced: "BALANCED" };
+const PRIVACY = new Set<PrivacyRequirement>(["PUBLIC", "STANDARD", "PRIVATE"]);
 
 /**
  * OpenAI-compatible: POST /v1/chat/completions (rewritten from /v1/*).
- * Extensions: `priority: "cheap" | "fast" | "balanced"` (BRAIN AUTO mode) and an `x-brain-receipt` header.
- * Non-streaming requests go through the compute market (order → route → execute → receipt);
- * streaming requests use the direct gateway path and are recorded without a receipt.
+ *
+ * Extensions:
+ *   mode: "auto" | "cheap" | "fast" | "quality" | "browser_only"   (BRAIN AUTO routing; `priority` accepted as an alias)
+ *   privacy: "public" | "standard" | "private"
+ *   Response carries a `brain` object (route, model, cost, latency, verification, receipt id) and an `x-brain-receipt` header.
+ *   Streaming responses emit the same object as a final `event: brain` SSE message after the last token.
+ *
+ * Both paths go through BRAIN AUTO: order → classify → plan → estimate → select → execute → receipt.
  */
 export const POST = nodeRoute(async (req) => {
   const auth = await authenticate(bearer(req));
@@ -26,44 +32,50 @@ export const POST = nodeRoute(async (req) => {
 
   const raw = await body<Record<string, unknown>>(req, 128 * 1024);
   const chat = validateChat(raw);
-  const priority = PRIORITIES[String(raw.priority ?? "balanced").toLowerCase()] ?? "BALANCED";
+  const mode = normalizeMode(String(raw.mode ?? raw.priority ?? "auto"));
+  const privacyRaw = String(raw.privacy ?? "standard").toUpperCase() as PrivacyRequirement;
+  const privacy = PRIVACY.has(privacyRaw) ? privacyRaw : "STANDARD";
   const t0 = Date.now();
+  const chatId = `chatcmpl-${randomBytes(10).toString("hex")}`;
+  const request = { kind: "chat" as const, model: chat.model, messages: chat.messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy };
+
+  const record = (order: ComputeOrder, s: Awaited<ReturnType<typeof summarize>>) =>
+    recordRequest({
+      customerId: customer.customerId,
+      at: t0,
+      model: chat.model,
+      endpoint: "chat.completions",
+      route: s.receipt?.route ? { target: s.receipt.route.target, providerId: s.receipt.route.providerId } : null,
+      nodesUsed: s.receipt?.nodesUsed ?? [],
+      inputUnits: 0,
+      outputUnits: 0,
+      cost: s.receipt?.customerCost?.amount ?? null,
+      latencyMs: Date.now() - t0,
+      receiptId: order.receiptId ?? null,
+      ok: order.status === "COMPLETED",
+      source: "REAL",
+    }).then(() => undefined);
 
   if (chat.stream) {
-    const out = await chatCompletionStream(chat);
-    await recordRequest({ customerId: customer.customerId, at: t0, model: chat.model, endpoint: "chat.completions", route: { target: out.target === "CLOUD_FALLBACK" ? "CLOUD_GPU" : "EXTERNAL_PROVIDER", providerId: out.provider }, nodesUsed: [], inputUnits: 0, outputUnits: 0, cost: null, latencyMs: Date.now() - t0, receiptId: null, ok: true, source: "REAL" });
-    return new Response(out.stream, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no", "x-brain-target": out.target } });
+    const stream = await chatEventStream({ input: { request, mode, privacy }, customerId: customer.customerId, chatId, t0, mode, privacy, onComplete: record });
+    return new Response(stream, { headers: sseHeaders });
   }
 
-  const order = await placeOrder({ request: { kind: "chat", model: chat.model, messages: chat.messages, maxTokens: chat.max_tokens, temperature: chat.temperature }, priority }, customer.customerId);
-  const receipt = order.receiptId ? await getReceipt(order.receiptId) : null;
-  await recordRequest({
-    customerId: customer.customerId,
-    at: t0,
-    model: chat.model,
-    endpoint: "chat.completions",
-    route: receipt?.route ? { target: receipt.route.target, providerId: receipt.route.providerId } : null,
-    nodesUsed: receipt?.nodesUsed ?? [],
-    inputUnits: 0,
-    outputUnits: 0,
-    cost: receipt?.customerCost?.amount ?? null,
-    latencyMs: Date.now() - t0,
-    receiptId: order.receiptId ?? null,
-    ok: order.status === "COMPLETED",
-    source: "REAL",
-  });
+  const order = await placeOrder({ request, mode, privacy }, customer.customerId);
+  const s = await summarize(order, t0, mode, privacy);
+  await record(order, s);
   if (order.status !== "COMPLETED") {
     const status = order.status === "REJECTED" ? 503 : 502;
-    return json({ error: { code: order.status === "REJECTED" ? "no_provider_available" : "upstream_failed", message: order.error ?? "execution failed" }, brain: { orderId: order.orderId, decisionId: order.decisionId } }, status);
+    return json({ error: { code: order.status === "REJECTED" ? "no_provider_available" : "upstream_failed", message: order.error ?? "execution failed" }, brain: s.brain }, status);
   }
   return json(
     {
-      id: `chatcmpl-${randomBytes(10).toString("hex")}`,
+      id: chatId,
       object: "chat.completion",
       created: Math.floor(t0 / 1000),
       model: chat.model,
       choices: [{ index: 0, message: { role: "assistant", content: order.output ?? "" }, finish_reason: "stop" }],
-      brain: { orderId: order.orderId, decisionId: order.decisionId, receiptId: order.receiptId, target: receipt?.route?.target, provider: receipt?.route?.providerId, latencyMs: Date.now() - t0, cost: receipt?.customerCost ?? null, verification: receipt?.verificationMethod },
+      brain: s.brain,
     },
     { headers: { "x-brain-receipt": order.receiptId ?? "" } },
   );

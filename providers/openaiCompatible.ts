@@ -1,47 +1,22 @@
 import "server-only";
-import type { Candidate, ChatRequest, ChatResult, ExecutionTarget, InferenceProvider } from "./types";
+import type { ChatRequest, ChatResult } from "./types";
 
 interface Options {
   id: string;
-  target: ExecutionTarget;
   baseUrl?: string;
   apiKey?: string;
   model?: string;
-  estLatencyMs: number;
-  costPer1M: number | null;
-  reliability: number;
 }
 
 /**
- * Any OpenAI-compatible upstream (OpenAI, OpenRouter, Together, Groq, self-hosted vLLM).
- * Credentials come from server env only and never reach the client.
+ * Thin client for any OpenAI-compatible upstream (OpenAI, OpenRouter, Together, Groq, self-hosted
+ * vLLM). Credentials come from server env only and never reach the client. Routing, estimates and
+ * receipts live in engine/providers.ts; this class only speaks HTTP.
  */
-export class OpenAICompatibleProvider implements InferenceProvider {
+export class OpenAICompatibleProvider {
   readonly id: string;
-  readonly target: ExecutionTarget;
   constructor(private o: Options) {
     this.id = o.id;
-    this.target = o.target;
-  }
-
-  private get configured() {
-    return Boolean(this.o.baseUrl && this.o.apiKey && this.o.model);
-  }
-
-  async evaluate(model: string): Promise<Candidate> {
-    const notes: string[] = [];
-    if (!this.configured) notes.push("not configured (set env credentials)");
-    return {
-      target: this.target,
-      providerId: this.id,
-      compatible: model.startsWith("brain/") && model !== "brain/embed",
-      available: this.configured,
-      notes,
-      estLatencyMs: this.o.estLatencyMs,
-      costPer1M: this.o.costPer1M,
-      reliability: this.o.reliability,
-      capacity: 1,
-    };
   }
 
   async stream(req: ChatRequest): Promise<ReadableStream<Uint8Array>> {
@@ -53,7 +28,7 @@ export class OpenAICompatibleProvider implements InferenceProvider {
         method: "POST",
         signal: ctrl.signal,
         headers: { "content-type": "application/json", authorization: `Bearer ${this.o.apiKey}` },
-        body: JSON.stringify({ model: this.o.model, messages: req.messages, max_tokens: req.max_tokens, temperature: req.temperature, stream: true }),
+        body: JSON.stringify({ model: this.o.model, messages: req.messages, max_tokens: req.max_tokens, temperature: req.temperature, stream: true, stream_options: { include_usage: true } }),
       });
       if (!r.ok || !r.body) throw new Error(`upstream ${r.status}`);
       return r.body;
@@ -87,6 +62,7 @@ export class OpenAICompatibleProvider implements InferenceProvider {
           prompt_tokens: j.usage?.prompt_tokens ?? 0,
           completion_tokens: j.usage?.completion_tokens ?? 0,
           total_tokens: j.usage?.total_tokens ?? 0,
+          cost: typeof j.usage?.cost === "number" ? j.usage.cost : null,
         },
         upstreamModel: String(j.model ?? this.o.model),
       };

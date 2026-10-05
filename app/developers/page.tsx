@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Architecture } from "@/components/developers/Architecture";
 import { CodeBlock, CodeTabs } from "@/components/developers/CodeBlock";
 import { Button, Container, Dot, Section } from "@/components/ui";
-import { defaultRoutingWeights } from "@/providers/router";
+import { modeWeights } from "@/engine/router";
 import { networkConfig } from "@/lib/config";
 import { cx } from "@/lib/format";
 
@@ -22,7 +22,7 @@ res = client.chat.completions.create(
 )
 
 print(res.choices[0].message.content)
-print(res.model_extra["brain"]["target"])  # BROWSER_NETWORK | CLOUD_FALLBACK | EXTERNAL_MODEL_PROVIDER`;
+print(res.model_extra["brain"]["target"])  # BROWSER_NETWORK | NATIVE_NETWORK | CLOUD_GPU | EXTERNAL_MODEL`;
 
 const JS = `import OpenAI from "openai";
 
@@ -38,10 +38,14 @@ const res = await client.chat.completions.create({
 
 console.log(res.choices[0].message.content);
 
-// Streaming uses the standard SSE chunk format. The target is in the x-brain-target header.
+// Streaming uses the standard SSE chunk format. After the last token BRAIN sends an
+// \`event: brain\` message with the route, model, cost and receipt id.
 const stream = await client.chat.completions.create({
   model: "brain/auto",
   stream: true,
+  // BRAIN extensions (ignored by other servers): mode and privacy
+  // @ts-expect-error extension fields
+  mode: "auto", privacy: "standard",
   messages: [{ role: "user", content: "Summarize this audit report." }],
 });
 for await (const chunk of stream) process.stdout.write(chunk.choices[0]?.delta?.content ?? "");`;
@@ -61,12 +65,12 @@ const RESPONSE = `{
   "choices": [{ "index": 0, "message": { "role": "assistant", "content": "…" }, "finish_reason": "stop" }],
   "usage": { "prompt_tokens": 412, "completion_tokens": 233, "total_tokens": 645 },
   "brain": {
-    "target": "CLOUD_FALLBACK",
-    "provider": "cloud-fallback",
-    "latencyMs": 1184,
-    "routing": { "ranked": [ … ], "selected": { … } },
-    "attempts": [{ "providerId": "cloud-fallback", "ok": true }],
-    "plan": { "provenance": "simulated", "shards": [ … ] }
+    "orderId": "o-…", "decisionId": "d-…", "planId": "p-…", "receiptId": "r-c-…",
+    "mode": "AUTO", "privacy": "STANDARD",
+    "target": "EXTERNAL_MODEL", "provider": "external", "model": "meta-llama/…",
+    "nodesUsed": 0, "latencyMs": 1184,
+    "cost": { "amount": 0.0000084, "currency": "USD", "basis": "list-price" },
+    "verification": "unverified-provider-response", "verified": false
   }
 }`;
 
@@ -76,8 +80,8 @@ const ERRORS = [
   ["404", "model_not_found", "Model id is not one of the brain/* models."],
   ["413", "too_large", "Prompt exceeds the V1 size limit."],
   ["429", "rate_limited", "Per-IP fixed window exceeded."],
-  ["502", "upstream_failed", "Every eligible target failed; attempts are listed."],
-  ["503", "no_provider_available", "No target can serve the model; routing trace included."],
+  ["502", "upstream_failed", "Every eligible target failed; the order and decision ids are returned for inspection."],
+  ["503", "no_provider_available", "No target met the constraints (capability, privacy, budget); the decision explains why."],
 ];
 
 const PROTOCOL = [
@@ -105,14 +109,15 @@ const VERIFICATION: [string, string, "live" | "interface"][] = [
 export default function DevelopersPage() {
   const fallback = Boolean(process.env.BRAIN_FALLBACK_BASE_URL && process.env.BRAIN_FALLBACK_API_KEY);
   const external = Boolean(process.env.BRAIN_EXTERNAL_BASE_URL && process.env.BRAIN_EXTERNAL_API_KEY);
-  const w = defaultRoutingWeights;
+  const w = modeWeights.AUTO;
   const criteria = [
-    ["Compatibility", "Hard filter. Can this target run this model at all?", "required"],
-    ["Capacity", "Free capacity on the target right now.", w.capacity.toFixed(2)],
-    ["Latency", "Estimated time to first full response.", w.latency.toFixed(2)],
-    ["Cost", "USD per 1M tokens. Unknown cost is scored neutral, not free.", w.cost.toFixed(2)],
-    ["Reliability", "Rolling success rate of the target.", w.reliability.toFixed(2)],
-    ["Network preference", "Bias toward the browser pool when it is eligible.", `+${w.browserPreference.toFixed(2)}`],
+    ["Capability", "Hard filter. Can this target run this request at all?", "required"],
+    ["Privacy", "Hard filter. STANDARD keeps plaintext off untrusted nodes; PRIVATE allows operator infrastructure only.", "required"],
+    ["Budget", "Hard filter. maxCost / maxLatency when supplied.", "required"],
+    ["Cost", "Estimated USD for this request from configured prices. UNKNOWN is penalised, never treated as free.", w.costWeight.toFixed(2)],
+    ["Latency", "Measured median latency of the target for this request class. UNKNOWN penalised.", w.latencyWeight.toFixed(2)],
+    ["Reliability", "Measured success rate of the target.", w.reliabilityWeight.toFixed(2)],
+    ["Quality", "Operator-configured quality tier. Dominant in QUALITY mode; UNKNOWN penalised.", w.qualityWeight.toFixed(2)],
   ];
 
   return (
@@ -129,8 +134,8 @@ export default function DevelopersPage() {
                 Brain speaks the OpenAI Chat Completions format. Change the base URL, set <span className="font-mono text-[15px] text-chalk">model: &quot;brain/auto&quot;</span>, and the router does the rest.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
-                <Button href="/inference#playground" tone="dark" arrow>
-                  Try the playground
+                <Button href="/chat" tone="dark" arrow>
+                  Try BRAIN chat
                 </Button>
                 <Button href="#protocol" tone="dark" variant="secondary">
                   Node protocol
@@ -172,7 +177,7 @@ export default function DevelopersPage() {
             <div>
               <h3 className="display-md text-[26px] md:text-[34px]">Routing</h3>
               <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
-                Ineligible targets are filtered out, the rest ranked by a weighted score. Weights are configurable per request class. Every response carries the full decision in <span className="font-mono text-chalk">brain.routing</span>.
+                Ineligible targets are filtered out, the rest ranked by a weighted score (weights shown for <span className="font-mono text-chalk">mode: auto</span>; CHEAP, FAST and QUALITY re-weight). Every response carries <span className="font-mono text-chalk">brain.decisionId</span>; fetch the full decision from <span className="font-mono text-chalk">/api/orders/:orderId</span> or open the receipt.
               </p>
             </div>
             <div className="font-mono text-[12.5px]">

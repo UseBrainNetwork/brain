@@ -1,8 +1,20 @@
+import type { ComputeOrder } from "@/domain/economy";
+import type { NetworkEvent } from "@/domain/types";
 import { eventBus } from "@/services/eventBus";
 import { sweepOffline } from "@/services/nodes";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+/**
+ * Orders carry customer prompts and outputs. The public stream only ever sees the order's
+ * routing facts, never its content.
+ */
+function redact(e: NetworkEvent): NetworkEvent | { type: "order.updated"; at: number; order: Pick<ComputeOrder, "orderId" | "status" | "mode" | "privacy" | "workload" | "model" | "createdAt" | "completedAt" | "receiptId" | "decisionId" | "error"> } {
+  if (e.type !== "order.updated") return e;
+  const { orderId, status, mode, privacy, workload, model, createdAt, completedAt, receiptId, decisionId, error } = e.order;
+  return { type: "order.updated", at: e.at, order: { orderId, status, mode, privacy, workload, model, createdAt, completedAt, receiptId, decisionId, error } };
+}
 
 /** Server-Sent Events stream of REAL network events. */
 export async function GET(req: Request) {
@@ -18,7 +30,7 @@ export async function GET(req: Request) {
         }
       };
       send(`retry: 3000\n\n`);
-      const unsubscribe = eventBus.subscribe((e) => send(`data: ${JSON.stringify(e)}\n\n`));
+      const unsubscribe = eventBus.subscribe((e) => send(`data: ${JSON.stringify(redact(e))}\n\n`));
       const ping = setInterval(() => {
         send(`: ping\n\n`);
         void sweepOffline();

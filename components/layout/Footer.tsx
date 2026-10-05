@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { Button, Container } from "@/components/ui";
 import { FooterStatus } from "@/components/layout/FooterStatus";
+import { SocialLinks } from "@/components/layout/SocialLinks";
+import { social } from "@/lib/site";
 
 const cols = [
-  { h: "Network", l: [["The Brain", "/brain"], ["Explorer", "/explorer"], ["Operations", "/network"], ["Capacity", "/capacity"], ["Contribute GPU", "/contribute"]] },
-  { h: "Developers", l: [["API reference", "/developers"], ["BRAIN AUTO", "/auto"], ["Playground", "/inference#playground"], ["Models", "/inference"]] },
-  { h: "Protocol", l: [["Your rewards", "/rewards"], ["Live economics", "/economics"], ["Earnings calculator", "/rewards#formula"], ["Verification", "/developers#verification"]] },
+  { h: "Product", l: [["Chat", "/chat"], ["Pricing", "/pricing"], ["Account", "/account"], ["Power BRAIN", "/earn"]] },
+  { h: "Network", l: [["Operations", "/network"], ["The Brain", "/brain"], ["Explorer", "/explorer"], ["Capacity", "/capacity"], ["Economics", "/economics"]] },
+  { h: "Developers", l: [["API reference", "/developers"], ["BRAIN AUTO", "/auto"], ["Source", social.repoUrl], ["Verification", "/developers#verification"]] },
+  { h: "Community", l: [["X / Twitter", social.xUrl], ["GitHub", social.githubUrl], ["Rewards", "/rewards"], ["Live economics", "/economics"]] },
 ];
 
 export function Footer() {
@@ -16,16 +19,16 @@ export function Footer() {
       <Container className="relative pt-16 md:pt-20">
         <div className="flex flex-col justify-between gap-8 border-b border-chalk/10 pb-12 md:flex-row md:items-end">
           <h2 className="display-md max-w-[560px] text-[28px] leading-[1.02] md:text-[40px]">
-            Put your GPU
+            Use BRAIN.
             <br />
-            <span className="text-chalk/40">to work.</span>
+            <span className="text-chalk/40">Or power it.</span>
           </h2>
           <div className="flex flex-wrap gap-3">
-            <Button href="/contribute" tone="dark" arrow>
-              Contribute GPU
+            <Button href="/chat" tone="dark" arrow>
+              Use BRAIN
             </Button>
-            <Button href="/developers" tone="dark" variant="secondary">
-              Read the API
+            <Button href="/earn" tone="dark" variant="secondary">
+              Power BRAIN
             </Button>
           </div>
         </div>
@@ -42,14 +45,21 @@ export function Footer() {
               <div key={c.h}>
                 <div className="label mb-5 text-chalk/35">{c.h}</div>
                 <ul className="space-y-3">
-                  {c.l.map(([label, href]) => (
-                    <li key={href}>
-                      <Link href={href} className="group inline-flex items-center gap-1.5 text-[15px] text-chalk/75 transition-colors hover:text-chalk">
-                        {label}
-                        <span className="-translate-x-1 text-signal opacity-0 transition-all duration-300 group-hover:translate-x-0 group-hover:opacity-100">→</span>
-                      </Link>
-                    </li>
-                  ))}
+                  {c.l.map(([label, href]) => {
+                    const ext = href.startsWith("http");
+                    return (
+                      <li key={href}>
+                        <Link
+                          href={href}
+                          {...(ext ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                          className="group inline-flex items-center gap-1.5 text-[15px] text-chalk/75 transition-colors hover:text-chalk"
+                        >
+                          {label}
+                          <span className="-translate-x-1 text-signal opacity-0 transition-all duration-300 group-hover:translate-x-0 group-hover:opacity-100">{ext ? "↗" : "→"}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             ))}
@@ -63,7 +73,10 @@ export function Footer() {
             </span>
             <span>© {new Date().getFullYear()} BRAIN (working name) · Experimental software · Not an investment; rewards are not guaranteed</span>
           </span>
-          <span>SIM = demo data · EST = illustrative estimate</span>
+          <span className="flex items-center gap-4">
+            <span>SIM = demo data · EST = illustrative estimate</span>
+            <SocialLinks dark />
+          </span>
         </div>
       </Container>
     </footer>

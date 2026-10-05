@@ -92,13 +92,13 @@ export function ReceiptView({ receipt: r, job, decision }: { receipt: ComputeRec
                   </span>
                   <span>{e.estimatedCost == null ? "cost UNKNOWN" : `$${e.estimatedCost.toFixed(4)}`}</span>
                   <span>{e.estimatedLatency == null ? "latency UNKNOWN" : ms(e.estimatedLatency)}</span>
-                  <span>{(e.reliability * 100).toFixed(0)}% rel.</span>
+                  <span>{(e.estimatedReliability * 100).toFixed(0)}% rel.</span>
                   <span>{e.eligible ? `score ${e.score.toFixed(3)}` : e.notes.at(-1)}</span>
                 </div>
               ))}
             </div>
             <div className="mt-2 text-chalk/40">
-              Mode {decision.mode} · weights cost {decision.weights.costWeight} / latency {decision.weights.latencyWeight} / reliability {decision.weights.reliabilityWeight} · lower score wins
+              Mode {decision.mode}{decision.privacy ? ` · privacy ${decision.privacy}` : ""} · weights cost {decision.weights.costWeight} / latency {decision.weights.latencyWeight} / reliability {decision.weights.reliabilityWeight} / quality {decision.weights.qualityWeight ?? 0} · lower score wins
             </div>
           </div>
         ) : (

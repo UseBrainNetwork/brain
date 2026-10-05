@@ -5,11 +5,12 @@ import { CrowdScale } from "@/components/home/CrowdScale";
 import { HeroDive } from "@/components/home/HeroDive";
 import { NodePlate } from "@/components/home/NodePlate";
 import { LiveNetworkPanel } from "@/components/network/LiveNetworkPanel";
+import { RealMetricsStrip, ResourceClasses } from "@/components/home/RealMetrics";
 import { CodeBlock } from "@/components/developers/CodeBlock";
 import { Button, Container, Section } from "@/components/ui";
 import { getInferenceModels } from "@/services/data";
 
-const curl = `curl https://brain.network/v1/chat/completions \\
+const curl = `curl https://brainnetwork.app/v1/chat/completions \\
   -H "Authorization: Bearer $BRAIN_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -22,6 +23,12 @@ export default function Home() {
     <>
       <HeroDive />
 
+      <Section tone="dark" className="py-10 md:py-14">
+        <Container>
+          <RealMetricsStrip tone="dark" />
+        </Container>
+      </Section>
+
       <JobPipeline />
 
       <CrowdScale />
@@ -31,9 +38,10 @@ export default function Home() {
           <div className="mb-10 flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <h2 className="display-md text-[34px] md:text-[56px]">Live topology</h2>
             <p className="max-w-[440px] text-[14.5px] leading-relaxed text-chalk/55">
-              The same network as a routing graph: requests enter, split across device classes, execute, and merge. Green markers are real browsers connected right now.
+              Four classes of supply, each shown in its real state. The graph below is the browser network: requests enter, split across device classes, execute, and merge. Green markers are real browsers connected right now; grey cells are simulated scale.
             </p>
           </div>
+          <ResourceClasses className="mb-5" />
           <LiveNetworkPanel />
         </Container>
       </Section>
@@ -42,11 +50,11 @@ export default function Home() {
       <Section tone="light" className="py-24 md:py-36">
         <Container className="grid grid-cols-1 items-center gap-16 lg:grid-cols-[1.05fr_1fr]">
           <div>
-            <div className="label mb-5 text-signal">Contribute</div>
+            <div className="label mb-5 text-signal">Power BRAIN</div>
             <h2 className="display text-[44px] md:text-[80px]">
-              Your laptop
+              Your computer
               <br />
-              is a node.
+              can power BRAIN.
             </h2>
             <p className="mt-6 max-w-[520px] text-[17px] leading-relaxed text-ink/70">
               No install, no driver, no CLI. Open a tab, let it measure your GPU, and join. The server issues a challenge only a real GPU can answer in time, then starts
@@ -66,8 +74,8 @@ export default function Home() {
               ))}
             </ol>
             <div className="mt-10 flex flex-wrap gap-3">
-              <Button href="/contribute" arrow>
-                Contribute GPU
+              <Button href="/earn" arrow>
+                Power BRAIN
               </Button>
               <Button href="/explorer" variant="secondary">
                 See live jobs
@@ -84,15 +92,14 @@ export default function Home() {
       <Section tone="light" className="py-24 md:py-36">
         <Container className="grid grid-cols-1 gap-14 lg:grid-cols-[1fr_1.1fr]">
           <div>
-            <div className="label mb-5 text-signal">Inference</div>
+            <div className="label mb-5 text-signal">Use BRAIN</div>
             <h2 className="display text-[44px] md:text-[80px]">
-              Use the
+              One chat.
               <br />
-              crowd.
+              Every receipt.
             </h2>
             <p className="mt-6 max-w-[480px] text-[17px] leading-relaxed text-ink/70">
-              An OpenAI-compatible API in front of the network. The router sends each request where it runs best: the browser pool when the model fits, a cloud fallback when it
-              doesn&apos;t.
+              Ask in the app or call the OpenAI-compatible API. BRAIN AUTO estimates every execution target, picks one for your mode and privacy, and tells you exactly where the answer ran and what it cost.
             </p>
             <ul className="mt-10 border-t border-ink/15">
               {getInferenceModels().map((m) => (
@@ -103,8 +110,8 @@ export default function Home() {
               ))}
             </ul>
             <div className="mt-10 flex flex-wrap gap-3">
-              <Button href="/inference#playground" arrow>
-                Open playground
+              <Button href="/chat" arrow>
+                Open BRAIN chat
               </Button>
               <Button href="/developers" variant="secondary">
                 API reference

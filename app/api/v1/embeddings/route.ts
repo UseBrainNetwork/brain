@@ -28,7 +28,7 @@ export const POST = nodeRoute(async (req) => {
   const r = await fetch(`${base.replace(/\/$/, "")}/embeddings`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ model, input }) });
   const ok = r.ok;
   const j = ok ? await r.json() : null;
-  await recordRequest({ customerId: customer.customerId, at: t0, model: "brain/embed", endpoint: "embeddings", route: { target: "EXTERNAL_PROVIDER", providerId: "external" }, nodesUsed: [], inputUnits: j?.usage?.prompt_tokens ?? 0, outputUnits: 0, cost: null, latencyMs: Date.now() - t0, receiptId: null, ok, source: "REAL" });
+  await recordRequest({ customerId: customer.customerId, at: t0, model: "brain/embed", endpoint: "embeddings", route: { target: "EXTERNAL_MODEL", providerId: "external" }, nodesUsed: [], inputUnits: j?.usage?.prompt_tokens ?? 0, outputUnits: 0, cost: null, latencyMs: Date.now() - t0, receiptId: null, ok, source: "REAL" });
   if (!ok) return json({ error: { code: "upstream_failed", message: `upstream ${r.status}` } }, 502);
-  return json({ object: "list", model: "brain/embed", data: j.data, usage: j.usage, brain: { target: "EXTERNAL_PROVIDER", provider: "external", verification: "unverified-provider-response" } });
+  return json({ object: "list", model: "brain/embed", data: j.data, usage: j.usage, brain: { target: "EXTERNAL_MODEL", provider: "external", verification: "unverified-provider-response" } });
 }, networkConfig.rateLimit.inferenceRequests * 3);

@@ -1,14 +1,10 @@
 import "server-only";
-import { randomBytes } from "node:crypto";
 import { inferenceModels } from "@/services/mock/mockData";
-import { providers } from "@/providers/registry";
-import { route, type RoutingDecision } from "@/providers/router";
 import type { ChatMessage, ChatRequest } from "@/providers/types";
-import { mulberry32 } from "@/network/workloads";
 
 /**
- * Brain Gateway: validation → routing → execution with fallback → OpenAI-shaped response.
- * Shared by the public /v1 API and the in-site playground.
+ * Brain Gateway: request validation and OpenAI-shaped framing for /v1.
+ * Routing, execution, fallback and receipts live in engine/orders.ts (BRAIN AUTO).
  */
 
 export class GatewayError extends Error {
@@ -16,8 +12,6 @@ export class GatewayError extends Error {
     public status: number,
     public code: string,
     message: string,
-    public routing?: RoutingDecision,
-    public plan?: ReturnType<typeof shardPlan>,
   ) {
     super(message);
   }
@@ -52,86 +46,23 @@ export function validateChat(body: unknown): ChatRequest {
 }
 
 /**
- * How the browser network WOULD shard this request — rendered by the playground and
- * labeled simulated. Deterministic per request id so the visualization is stable.
- */
-export function shardPlan(requestId: string, promptChars: number) {
-  const rnd = mulberry32(parseInt(requestId.slice(-8), 16) || 1);
-  const shards = Math.min(8, Math.max(3, Math.round(promptChars / 160) + 3));
-  return {
-    provenance: "simulated" as const,
-    shards: Array.from({ length: shards }, (_, i) => ({
-      nodeId: (rnd() & 0xffff).toString(16).toUpperCase().padStart(4, "0"),
-      layers: `${i * 8}–${i * 8 + 7}`,
-      units: 4 + (rnd() % 14),
-    })),
-  };
-}
-
-export async function chatCompletion(req: ChatRequest) {
-  const id = `chatcmpl-${randomBytes(10).toString("hex")}`;
-  const t0 = Date.now();
-  const ps = providers();
-  const decision = await route(req.model, ps);
-  const promptChars = req.messages.reduce((s, m) => s + m.content.length, 0);
-  const plan = shardPlan(id, promptChars);
-  const eligible = decision.ranked.filter((c) => c.eligible);
-  if (eligible.length === 0) {
-    throw new GatewayError(
-      503,
-      "no_provider_available",
-      "No execution target can serve this model right now. Configure BRAIN_EXTERNAL_* or BRAIN_FALLBACK_* on the server.",
-      decision,
-      plan,
-    );
-  }
-
-  const attempts: { providerId: string; ok: boolean; error?: string }[] = [];
-  for (const cand of eligible) {
-    const provider = ps.find((p) => p.id === cand.providerId)!;
-    try {
-      const out = await provider.complete(req);
-      attempts.push({ providerId: cand.providerId, ok: true });
-      return {
-        id,
-        object: "chat.completion",
-        created: Math.floor(t0 / 1000),
-        model: req.model,
-        choices: [{ index: 0, message: { role: "assistant", content: out.content }, finish_reason: out.finishReason }],
-        usage: out.usage,
-        brain: {
-          target: cand.target,
-          provider: cand.providerId,
-          latencyMs: Date.now() - t0,
-          routing: decision,
-          attempts,
-          plan,
-        },
-      };
-    } catch (e) {
-      // Only fixed strings go to clients; raw errors could carry upstream URLs.
-      const msg = e instanceof Error ? e.message : "";
-      attempts.push({ providerId: cand.providerId, ok: false, error: /^upstream \d{3}$/.test(msg) ? msg : e instanceof Error && e.name === "AbortError" ? "timeout" : "unreachable" });
-    }
-  }
-  throw new GatewayError(502, "upstream_failed", "All eligible execution targets failed.", decision, plan);
-}
-
-/**
  * Re-frames an upstream OpenAI SSE stream as ours: every chunk gets our id and model name, so
- * upstream identifiers never reach the client. Non-JSON lines pass through untouched.
+ * upstream identifiers never reach the client. The upstream `[DONE]` is dropped so the caller
+ * can append its own trailer (the `brain` event) before closing. Non-JSON lines pass through.
  */
-function reframe(upstream: ReadableStream<Uint8Array>, id: string, model: string, created: number): ReadableStream<Uint8Array> {
+export function reframeStream(upstream: ReadableStream<Uint8Array>, id: string, model: string, created: number): ReadableStream<Uint8Array> {
   const dec = new TextDecoder();
   const enc = new TextEncoder();
   let buf = "";
-  const line = (l: string) => {
+  const line = (l: string): string | null => {
     if (!l.startsWith("data:")) return l;
     const payload = l.slice(5).trim();
-    if (payload === "[DONE]") return "data: [DONE]";
+    if (payload === "[DONE]") return null;
     try {
-      const j = JSON.parse(payload);
-      return `data: ${JSON.stringify({ ...j, id, model, created, object: "chat.completion.chunk", system_fingerprint: undefined })}`;
+      const j = JSON.parse(payload) as { choices?: unknown; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null };
+      // Whitelist: upstream vendor fields (provider names, upstream cost, tiers) never reach the client.
+      const usage = j.usage && typeof j.usage.total_tokens === "number" ? { prompt_tokens: j.usage.prompt_tokens ?? 0, completion_tokens: j.usage.completion_tokens ?? 0, total_tokens: j.usage.total_tokens } : undefined;
+      return `data: ${JSON.stringify({ id, object: "chat.completion.chunk", created, model, choices: j.choices ?? [], ...(usage ? { usage } : {}) })}`;
     } catch {
       return l;
     }
@@ -142,34 +73,15 @@ function reframe(upstream: ReadableStream<Uint8Array>, id: string, model: string
         buf += dec.decode(chunk, { stream: true });
         const lines = buf.split("\n");
         buf = lines.pop() ?? "";
-        ctl.enqueue(enc.encode(lines.map(line).join("\n") + "\n"));
+        const out = lines.map(line).filter((l): l is string => l != null);
+        if (out.length) ctl.enqueue(enc.encode(out.join("\n") + "\n"));
       },
       flush(ctl) {
-        if (buf) ctl.enqueue(enc.encode(line(buf)));
+        const last = buf ? line(buf) : null;
+        if (last) ctl.enqueue(enc.encode(last + "\n"));
       },
     }),
   );
-}
-
-/** Streaming variant: fallback between providers applies until the first provider answers. */
-export async function chatCompletionStream(req: ChatRequest): Promise<{ stream: ReadableStream<Uint8Array>; target: string; provider: string }> {
-  const id = `chatcmpl-${randomBytes(10).toString("hex")}`;
-  const created = Math.floor(Date.now() / 1000);
-  const ps = providers();
-  const decision = await route(req.model, ps);
-  const eligible = decision.ranked.filter((c) => c.eligible && ps.find((p) => p.id === c.providerId)?.stream);
-  if (eligible.length === 0) {
-    throw new GatewayError(503, "no_provider_available", "No execution target can stream this model right now. Configure BRAIN_EXTERNAL_* or BRAIN_FALLBACK_* on the server.", decision);
-  }
-  for (const cand of eligible) {
-    try {
-      const upstream = await ps.find((p) => p.id === cand.providerId)!.stream!(req);
-      return { stream: reframe(upstream, id, req.model, created), target: cand.target, provider: cand.providerId };
-    } catch {
-      // try the next target
-    }
-  }
-  throw new GatewayError(502, "upstream_failed", "All eligible execution targets failed.", decision);
 }
 
 export function listModels() {

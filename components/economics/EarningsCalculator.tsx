@@ -106,7 +106,7 @@ function MeasurePanel({ me, selected }: { me: ReturnType<typeof useContributor>;
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-chalk/10 pt-3 font-mono text-[11px] text-chalk/50">
           <span>{me.phase === "running" ? "Node live and earning" : "Node registered on standby"}</span>
-          <Link href="/contribute" className="text-chalk hover:text-signal">
+          <Link href="/earn" className="text-chalk hover:text-signal">
             {me.phase === "running" ? "View node →" : "Join network to start earning →"}
           </Link>
         </div>

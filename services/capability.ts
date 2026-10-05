@@ -1,5 +1,6 @@
 import type { CapabilityLevel, CapabilityState, NetworkCapability } from "@/domain/economy";
 import { networkConfig } from "@/lib/config";
+import { providerStats } from "@/engine/metrics";
 import { listJobs } from "./distributed";
 import { liveNodes } from "./nodes";
 
@@ -72,6 +73,49 @@ export async function assessCapabilities(): Promise<{ capabilities: NetworkCapab
     }
     return { id: d.id, label: d.label, description: d.description, state, reasons, requirements, evidence: { compatibleNodes: compatible.length, recentSuccessRate: okRate, recentJobs: ev.length, capacityScore: cap } };
   });
+
+  // Capabilities served by upstream providers (chat, embeddings). State comes from configuration
+  // and measured requests on this server; "configured" is never presented as "demonstrated".
+  const env = process.env;
+  const upstream = async (id: string, label: string, description: string, configured: boolean, providerId: "cloud-fallback" | "external", envHint: string): Promise<NetworkCapability> => {
+    const st = configured ? await providerStats(providerId) : { samples: 0, reliability: null as number | null, medianLatencyMs: null as number | null, lastError: undefined as string | undefined };
+    const requirements = [
+      { label: "Provider configured", required: envHint, current: configured ? "yes" : "no", met: configured },
+      { label: "Measured requests", required: "≥ 1", current: String(st.samples), met: st.samples > 0 },
+      { label: "Measured reliability", required: "≥ 90%", current: st.reliability == null ? "no data" : `${(st.reliability * 100).toFixed(0)}%`, met: st.reliability != null && st.reliability >= 0.9 },
+    ];
+    let state: CapabilityState;
+    const reasons: string[] = [];
+    if (!configured) {
+      state = "UNAVAILABLE";
+      reasons.push("no provider configured on this server");
+    } else if (st.samples === 0) {
+      state = "LIMITED";
+      reasons.push("configured but no request has been measured yet");
+    } else if (st.reliability != null && st.reliability < 0.9) {
+      state = "LIMITED";
+      reasons.push(`measured reliability ${(st.reliability * 100).toFixed(0)}%${st.lastError ? ` · last error ${st.lastError}` : ""}`);
+    } else {
+      state = "AVAILABLE";
+      reasons.push(`${st.samples} measured request${st.samples === 1 ? "" : "s"}${st.medianLatencyMs != null ? ` · median ${Math.round(st.medianLatencyMs)}ms` : ""}`);
+    }
+    return { id, label, description, state, reasons, requirements, evidence: { compatibleNodes: 0, recentSuccessRate: st.reliability, recentJobs: st.samples, capacityScore: 0 } };
+  };
+  const extConfigured = Boolean(env.BRAIN_EXTERNAL_BASE_URL && env.BRAIN_EXTERNAL_API_KEY && env.BRAIN_EXTERNAL_MODEL);
+  const cloudConfigured = Boolean(env.BRAIN_FALLBACK_BASE_URL && env.BRAIN_FALLBACK_API_KEY && env.BRAIN_FALLBACK_MODEL);
+  capabilities.push(
+    await upstream("chat-external", "Chat via external model", `OpenAI-compatible upstream${env.BRAIN_EXTERNAL_MODEL ? ` · ${env.BRAIN_EXTERNAL_MODEL}` : ""}; receipts unverified-provider-response`, extConfigured, "external", "BRAIN_EXTERNAL_*"),
+    await upstream("chat-cloud", "Chat via operator cloud GPU", "Operator-controlled inference; required for PRIVATE routing", cloudConfigured, "cloud-fallback", "BRAIN_FALLBACK_*"),
+    {
+      id: "embeddings-external",
+      label: "Embeddings via external model",
+      description: "Passthrough to the external provider's embeddings endpoint; unpriced",
+      state: env.BRAIN_EXTERNAL_EMBED_MODEL && extConfigured ? "LIMITED" : "UNAVAILABLE",
+      reasons: [env.BRAIN_EXTERNAL_EMBED_MODEL && extConfigured ? "configured; usage is recorded but no receipt or price is issued" : "BRAIN_EXTERNAL_EMBED_MODEL not configured"],
+      requirements: [{ label: "Embedding model configured", required: "BRAIN_EXTERNAL_EMBED_MODEL", current: env.BRAIN_EXTERNAL_EMBED_MODEL ? "yes" : "no", met: Boolean(env.BRAIN_EXTERNAL_EMBED_MODEL) }],
+      evidence: { compatibleNodes: 0, recentSuccessRate: null, recentJobs: 0, capacityScore: 0 },
+    },
+  );
 
   const completed = jobs.filter((j) => j.status === "completed");
   const verifiedUnits = completed.reduce((s, j) => s + j.totals.verified, 0);

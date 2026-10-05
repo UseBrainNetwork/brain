@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { fmtUsdSmall } from "@/lib/format";
 import type { ComputeNode, DistributedJob, NetworkEvent } from "@/domain/types";
 import { networkStore } from "./store";
 
@@ -172,6 +173,20 @@ class RealStore {
         this.upsertJob(e.job);
         this.push(e.at, `JOB #${e.job.id} FAILED`, e.job.failReason ?? "", "bad");
         break;
+      // Money lines. Every one of these is a REAL ledger write on the server; SIM never reaches this bus.
+      case "order.updated":
+        if (e.order.status === "COMPLETED" || e.order.status === "FAILED" || e.order.status === "REJECTED") this.push(e.at, `ORDER ${e.order.orderId.slice(0, 10)} ${e.order.status}`, `${e.order.workload} · ${e.order.mode}${e.order.privacy ? ` · ${e.order.privacy}` : ""}${e.order.error ? ` · ${e.order.error.slice(0, 60)}` : ""}`, e.order.status === "COMPLETED" ? "ok" : "bad");
+        break;
+      case "receipt.issued":
+        this.push(e.at, `RECEIPT ${e.receipt.receiptId.slice(0, 14)}`, `${e.receipt.route?.target ?? "direct"} · ${e.receipt.customerCost ? fmtUsdSmall(e.receipt.customerCost.amount) : "cost UNKNOWN"} · ${e.receipt.verificationMethod}`, e.receipt.verifiedWorkUnits > 0 ? "ok" : "neutral");
+        break;
+      case "accounting.recorded": {
+        const a = e.event;
+        if (a.source !== "REAL") return;
+        const who = a.type === "COMPUTE_PROVIDER_EARNED" ? `NODE ${a.relatedNodeId ?? "?"} earned` : a.type === "CUSTOMER_PAYMENT" ? "customer owes" : a.type === "PROTOCOL_REVENUE" ? "protocol keeps" : a.type === "INFRASTRUCTURE_COST" ? "infrastructure cost" : a.type === "SUBSCRIPTION_PAYMENT" ? "subscription paid" : "creator reward";
+        this.push(e.at, `${a.type.replace(/_/g, " ")}`, `${who} ${a.currency === "USD" ? fmtUsdSmall(a.amount) : `${a.amount} SOL`} · ${a.settlement}`, a.type === "COMPUTE_PROVIDER_EARNED" ? "ok" : "signal");
+        break;
+      }
     }
   }
 }

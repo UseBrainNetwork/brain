@@ -3,7 +3,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import type { ComputeOrder, Priority, RouteDecision, RoutingMode, ScoredEstimate } from "@/domain/economy";
+import type { ComputeOrder, PrivacyRequirement, RouteDecision, RoutingMode, ScoredEstimate } from "@/domain/economy";
 import type { DistributedJob } from "@/domain/types";
 import { cx } from "@/lib/format";
 import { useReal } from "@/network/realtime/real";
@@ -12,7 +12,7 @@ import { Metric, Panel, SourceBadge, ms, usd } from "./parts";
 
 type Phase = "idle" | "submitting" | "estimating" | "executing" | "done";
 
-const TARGET_LABEL: Record<string, string> = { BROWSER_NETWORK: "Browser network", CLOUD_GPU: "Cloud GPU", EXTERNAL_PROVIDER: "External provider" };
+const TARGET_LABEL: Record<string, string> = { BROWSER_NETWORK: "Browser compute", NATIVE_NETWORK: "Native GPU", CLOUD_GPU: "Cloud GPU", EXTERNAL_MODEL: "External model", EXTERNAL_PROVIDER: "External model" };
 
 export function AutoConsole() {
   const realNodes = useReal((r) => Object.keys(r.nodes).length);
@@ -20,8 +20,8 @@ export function AutoConsole() {
   const [kind, setKind] = useState<"compute" | "chat">("compute");
   const [size, setSize] = useState<"small" | "medium" | "large">("medium");
   const [prompt, setPrompt] = useState("Explain in two sentences what a compute receipt is.");
-  const [priority, setPriority] = useState<Priority>("CHEAP");
-  const [mode, setMode] = useState<RoutingMode | "">("");
+  const [mode, setMode] = useState<RoutingMode>("AUTO");
+  const [privacy, setPrivacy] = useState<PrivacyRequirement>("STANDARD");
   const [phase, setPhase] = useState<Phase>("idle");
   const [order, setOrder] = useState<ComputeOrder | null>(null);
   const [decision, setDecision] = useState<RouteDecision | null>(null);
@@ -53,7 +53,7 @@ export function AutoConsole() {
     const est = setTimeout(() => setPhase("estimating"), 150);
     const exec = setTimeout(() => setPhase("executing"), 700);
     try {
-      const r = await fetch("/api/orders", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ request, priority, mode: mode || undefined }) });
+      const r = await fetch("/api/orders", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ request, mode, privacy }) });
       const j = await r.json();
       clearTimeout(est);
       clearTimeout(exec);
@@ -115,24 +115,25 @@ export function AutoConsole() {
             <p className="mt-3 text-[12px] leading-relaxed text-chalk/50">Routed to a configured model provider. The browser network cannot run LLM inference yet, so it will be excluded with that reason shown.</p>
           </div>
         )}
-        <div className="mt-5 font-mono text-[10px] uppercase tracking-[0.14em] text-chalk/45">Priority</div>
+        <div className="mt-5 font-mono text-[10px] uppercase tracking-[0.14em] text-chalk/45">Routing mode</div>
+        <div className="mt-2 flex flex-wrap gap-1 font-mono text-[11px]">
+          {(["AUTO", "CHEAP", "FAST", "QUALITY", "BROWSER_ONLY"] as const).map((m) => (
+            <button key={m} type="button" onClick={() => setMode(m)} className={cx("rounded px-3 py-1.5 tracking-[0.08em]", mode === m ? "bg-chalk text-ink" : "text-chalk/60 ring-1 ring-inset ring-chalk/15")}>
+              {m.replace("_", " ")}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 font-mono text-[10px] uppercase tracking-[0.14em] text-chalk/45">Privacy</div>
         <div className="mt-2 flex gap-1 font-mono text-[11px]">
-          {(["CHEAP", "FAST", "BALANCED"] as const).map((p) => (
-            <button key={p} type="button" onClick={() => setPriority(p)} className={cx("rounded px-3 py-1.5 tracking-[0.08em]", priority === p ? "bg-chalk text-ink" : "text-chalk/60 ring-1 ring-inset ring-chalk/15")}>
+          {(["PUBLIC", "STANDARD", "PRIVATE"] as const).map((p) => (
+            <button key={p} type="button" onClick={() => setPrivacy(p)} className={cx("rounded px-3 py-1.5 tracking-[0.08em]", privacy === p ? "bg-chalk text-ink" : "text-chalk/60 ring-1 ring-inset ring-chalk/15")}>
               {p}
             </button>
           ))}
         </div>
-        <details className="mt-4 font-mono text-[11px] text-chalk/50">
-          <summary className="cursor-pointer uppercase tracking-[0.12em] hover:text-chalk">Routing mode override</summary>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {(["", "AUTO", "CHEAPEST", "FASTEST", "BROWSER_ONLY"] as const).map((m) => (
-              <button key={m} type="button" onClick={() => setMode(m)} className={cx("rounded px-2.5 py-1", mode === m ? "bg-chalk text-ink" : "text-chalk/60 ring-1 ring-inset ring-chalk/15")}>
-                {m || "from priority"}
-              </button>
-            ))}
-          </div>
-        </details>
+        <p className="mt-2 text-[11.5px] leading-relaxed text-chalk/45">
+          {privacy === "PUBLIC" ? "Any target may see the content." : privacy === "STANDARD" ? "Plaintext never goes to untrusted distributed nodes. Verified compute carries no plaintext, so it is unaffected." : "Operator-controlled infrastructure only. Third-party model APIs are excluded."}
+        </p>
         <button type="button" disabled={busy || (kind === "compute" && realNodes === 0)} onClick={() => void run()} className="mt-6 h-12 w-full rounded-full bg-signal font-sans text-[14px] font-semibold text-white transition hover:bg-signal-2 disabled:opacity-40">
           {busy ? "Running…" : "Route & execute"}
         </button>
@@ -140,7 +141,8 @@ export function AutoConsole() {
         {err && <p className="mt-2 font-mono text-[11px] text-signal">{err}</p>}
         <pre className="mt-5 overflow-x-auto rounded-[8px] bg-ink-2 p-3 font-mono text-[10.5px] leading-relaxed text-chalk/60">{`POST /v1/chat/completions
 { "model": "brain/auto",
-  "priority": "${priority.toLowerCase()}",
+  "mode": "${mode.toLowerCase()}",
+  "privacy": "${privacy.toLowerCase()}",
   "messages": [...] }`}</pre>
       </Panel>
 
@@ -150,7 +152,7 @@ export function AutoConsole() {
           {!decision && phase === "idle" && <div className="font-mono text-[12px] text-chalk/40">Submit a request. Every execution target is estimated from measured latency and configured prices; unknown values are shown as UNKNOWN and penalised, never guessed.</div>}
           {!decision && busy && (
             <div className="space-y-2">
-              {["BROWSER_NETWORK", "CLOUD_GPU", "EXTERNAL_PROVIDER"].map((t, i) => (
+              {["BROWSER_NETWORK", "NATIVE_NETWORK", "CLOUD_GPU", "EXTERNAL_MODEL"].map((t, i) => (
                 <motion.div key={t} initial={{ opacity: 0.3 }} animate={{ opacity: [0.3, 0.7, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.15 }} className="h-12 rounded-[8px] bg-chalk/[0.04]" />
               ))}
             </div>
@@ -246,8 +248,10 @@ function EstimateRow({ e, selected }: { e: ScoredEstimate; selected: boolean }) 
         <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-chalk/60">
           <span>cost {e.estimatedCost == null ? "UNKNOWN" : usd(e.estimatedCost)}</span>
           <span>latency {ms(e.estimatedLatency)}</span>
-          <span>reliability {(e.reliability * 100).toFixed(0)}%</span>
-          <span>capacity {(e.capacity * 100).toFixed(0)}%</span>
+          <span>reliability {(e.estimatedReliability * 100).toFixed(0)}%</span>
+          <span>capacity {(e.availableCapacity * 100).toFixed(0)}%</span>
+          <span>quality {e.qualityTier == null ? "UNKNOWN" : e.qualityTier.toFixed(2)}</span>
+          {e.model && <span>model {e.model}</span>}
           <span>confidence {(e.confidence * 100).toFixed(0)}%</span>
         </div>
         {e.notes.length > 0 && <div className="mt-1 text-[11px] text-chalk/40">{e.notes.join(" · ")}</div>}

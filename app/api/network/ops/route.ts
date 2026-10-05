@@ -1,5 +1,5 @@
 import { nodeRoute } from "@/api/http";
-import { listOrders } from "@/engine/orders";
+import { listOrders, publicOrder } from "@/engine/orders";
 import { eventBus } from "@/services/eventBus";
 import { snapshot } from "@/services/accounting";
 import { listRequests } from "@/services/customers";
@@ -27,7 +27,7 @@ export const GET = nodeRoute(async () => {
   };
   const store = getStore();
   const backend = "kind" in store && typeof (store as { kind?: () => string }).kind === "function" ? (store as { kind: () => string }).kind() : "memory";
-  return json({ source: "REAL", backend, nodes, summary, jobs, receipts, orders, requests, profiles, economics: snap, observability, recentEvents: eventBus.history(Date.now() - 15 * 60_000).filter((e) => e.type !== "node.heartbeat").slice(-40).reverse().map(describe) });
+  return json({ source: "REAL", backend, nodes, summary, jobs, receipts, orders: orders.map(publicOrder), requests, profiles, economics: snap, observability, recentEvents: eventBus.history(Date.now() - 15 * 60_000).filter((e) => e.type !== "node.heartbeat").slice(-40).reverse().map(describe) });
 });
 
 function stage(j: { lifecycle: { stage: string; at: number }[] }, s: string) {

@@ -3,7 +3,7 @@ import { Chrome } from "@/components/layout/Chrome";
 import { Footer } from "@/components/layout/Footer";
 import { Nav } from "@/components/layout/Nav";
 import { RevealObserver } from "@/components/layout/RevealObserver";
-import { siteUrl } from "@/lib/site";
+import { siteUrl, social } from "@/lib/site";
 import "./globals.css";
 
 const description =
@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   title: { default: "BRAIN — The crowd is the GPU", template: "%s · BRAIN" },
   description,
   openGraph: { type: "website", siteName: "BRAIN", title: "BRAIN — The crowd is the GPU", description },
-  twitter: { card: "summary_large_image", title: "BRAIN — The crowd is the GPU", description },
+  twitter: { card: "summary_large_image", site: `@${social.xHandle}`, creator: `@${social.xHandle}`, title: "BRAIN — The crowd is the GPU", description },
 };
 
 export const viewport: Viewport = {

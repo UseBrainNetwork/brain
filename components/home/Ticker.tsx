@@ -57,6 +57,12 @@ export function Ticker({ className }: { className?: string }) {
         {strip}
         {strip}
       </div>
+      <span
+        title="Simulated network tape. Real measurements are in the strip below."
+        className="absolute inset-y-0 left-0 z-10 flex items-center gap-2 bg-ink pl-5 pr-4 font-mono text-[10px] tracking-[0.14em] text-warn shadow-[12px_0_16px_-4px_var(--color-ink)]"
+      >
+        SIM
+      </span>
     </div>
   );
 }

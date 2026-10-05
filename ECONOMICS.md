@@ -11,7 +11,10 @@ Anyone can provide compute. Anyone can buy intelligence. BRAIN finds the cheapes
 | Inflow | Source of truth | Status |
 | --- | --- | --- |
 | Customer payments for executed work | `AccountingEvent CUSTOMER_PAYMENT` | **Accrued only.** Created when a receipt is priced (operator list price). No payment rail exists yet, so `settled` is always empty. |
+| Subscriptions | `AccountingEvent SUBSCRIPTION_PAYMENT` | **Type exists, never written.** Pro and Max are placeholders until payments are connected. `/economics` shows "no payment processor connected". |
 | Pump.fun creator rewards | `CreatorRewardTreasury` receipts via adapters | **Manual only.** The `manual` adapter records a receipt an operator posts with a transaction reference. The `pumpfun` adapter is not implemented and says so. The `mock` adapter is SIMULATED and cannot touch REAL totals. |
+
+And one real outflow: when the external model provider reports what it charged for a request, that amount is recorded as `INFRASTRUCTURE_COST` with basis `provider-reported` (OpenRouter returns `usage.cost`). When it does not, the configured `BRAIN_EXTERNAL_PRICE_USD_PER_1M` is used with basis `list-price`; when neither exists, the cost is UNKNOWN.
 
 Both feed the same ledger (`services/accounting.ts`), keyed by `source`. `/economics` shows the REAL ledger and nothing else; empty cells read NOT ENOUGH DATA.
 
@@ -38,6 +41,24 @@ Unset means `UNKNOWN` on receipts, estimates and dashboards. Nothing interpolate
 - Compute: `BRAIN_PRICE_USD_PER_1K_COMPUTE_UNITS=0.00000005` ($0.05 per 1B units). Derivation: 1k units ≈ 2.1 GFLOP. A browser GPU sustaining ~2 TFLOPS in WebGPU does ~3.4M k-units/hour, so this price values a contributor device at ≈ $0.17 gross per GPU-hour before the split — the floor of the consumer-GPU rental market, and roughly 10× datacenter cost per FLOP, which is the honest overhead of redundant, verified browser execution. A typical demo job (4,096 units) prices at $0.0000002.
 - Chat: `BRAIN_PRICE_USD_PER_1M_TOKENS=0.20`, routed through OpenRouter (`meta-llama/llama-3.1-8b-instruct`), whose published completion price is `BRAIN_EXTERNAL_PRICE_USD_PER_1M=0.08` (prompt $0.05). Margin on routed chat is therefore list minus upstream, recorded per request.
 - Embeddings remain unconfigured (OpenRouter does not list embedding models), so `/v1/embeddings` keeps returning `no_provider_available`.
+
+## Plans and BRAIN Credits (`lib/plans.ts`, `services/credits.ts`)
+
+A credit is a unit of real cost, not a token: `1 credit = BRAIN_CREDIT_USD` (default $0.001). A request consumes `customerCost ÷ creditUsd`, where `customerCost` is the list price on its receipt. UNKNOWN cost consumes nothing and is counted in `unknownCostRequests`; the account page shows that count.
+
+| Plan | Price | Included credits / month | Modes | Private routing | Status |
+| --- | --- | --- | --- | --- | --- |
+| Free | $0 | `BRAIN_PLAN_FREE_CREDITS` (500 ≈ $0.50 of routed requests) | AUTO, CHEAP | no | **Live** |
+| Pro | `BRAIN_PLAN_PRO_USD` (10) | `BRAIN_PLAN_PRO_CREDITS` (12 000) | all | no | **Placeholder** |
+| Max | `BRAIN_PLAN_MAX_USD` (25) | `BRAIN_PLAN_MAX_CREDITS` (35 000) | all | yes | **Placeholder** |
+
+`paymentsConnected()` is `false`: Pro and Max cannot be purchased, their prices are proposals, and every surface that shows them says PLACEHOLDER. Included credits are granted once per calendar month per account (deterministic ledger id, so retries cannot double-grant). The Free plan stops at zero with `402 out_of_credits`.
+
+Ledger event types: `GRANT_INCLUDED`, `CONSUME`, `COMPUTE_OFFSET`, `PURCHASE` (reserved, never written).
+
+## Pay with compute
+
+If an account attaches the wallet that its nodes verified with, every REAL `COMPUTE_PROVIDER_EARNED` event for those nodes is mirrored once as a `COMPUTE_OFFSET` credit (`earnedUsd ÷ creditUsd`). SIMULATED earnings are rejected by the ledger. The account page shows `NET = earned − used`; it is a ledger primitive, nothing is paid out and nothing is charged. This is the whole of "pay with compute" today, and it is the mechanism by which the consumer and contributor sides of BRAIN are one product.
 
 ## Receipts
 
@@ -76,7 +97,9 @@ Epochs (`services/epochs.ts`) are written once with a hash of allocations and ca
 
 ## Routing economics
 
-BRAIN AUTO scores targets on cost, latency and reliability per mode (`AUTO`, `CHEAPEST`, `FASTEST`, `BROWSER_ONLY`). Unknown cost or latency is penalised, not assumed. The decision, including rejected targets and the reason, is stored and linked from the receipt, so a customer can see why the browser network (or an upstream) was chosen.
+BRAIN AUTO scores resource classes on cost, latency, reliability and configured quality tier per mode (`AUTO`, `CHEAP`, `FAST`, `QUALITY`, `BROWSER_ONLY`), with privacy (`PUBLIC`, `STANDARD`, `PRIVATE`), `maxCost` and `maxLatency` as hard constraints. Unknown cost, latency or quality is penalised, not assumed. The decision, including rejected targets and the reason, is stored and linked from the receipt and from "HOW BRAIN RAN THIS" in `/chat`. Weights and rules: `ROUTING.md`.
+
+`/economics` adds: subscription revenue (none), list price per 1M tokens once applied to a real receipt, average customer cost per request, and average upstream cost per chat (what the provider charged BRAIN). Margin is `paid + subscriptions − providers − infrastructure` over revenue.
 
 ## What is not implemented, on purpose
 

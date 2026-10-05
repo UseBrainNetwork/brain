@@ -24,7 +24,7 @@ Don't start with full distributed LLM inference. Build up through the existing i
 1. **Tensor ops.** Extend `ComputeBackend` with real f16/f32 kernels (matmul, softmax, layernorm, RoPE, attention) and golden-output tests against a CPU reference with tolerance-based verification. `network/workloads.ts` stays the u32 verification path.
 2. **Embeddings first.** Small, highly parallel, and stateless. Ship `brain/embed` on the browser pool: model shards cached in the browser, batch splitting in the router, and spot-check by recomputing a sample server-side. This is the first point where `BrowserNetworkProvider.supportedModels` becomes non-empty and the router can pick `BROWSER_NETWORK`.
 3. **Shard caching.** Content-addressed weight shards in IndexedDB/OPFS, announced in the heartbeat. The router prefers nodes that already hold the needed shard.
-4. **Layer sharding.** Pipeline-parallel decoding for small models (1–3B): contiguous layer ranges per node, activations passed between stages. `shardPlan` in `api/gateway.ts` becomes a real plan.
+4. **Layer sharding.** Pipeline-parallel decoding for small models (1–3B): contiguous layer ranges per node, activations passed between stages, expressed as a `compoundPlan` in `engine/plan.ts`.
 5. **WebRTC data channels.** Node-to-node activation transfer with a signaling server, plus TURN fallback, to remove the server round trip per layer.
 6. **Mixed execution.** The router splits one request between browser stages and a cloud fallback (e.g. browser prefill and cloud decode) and reports the split in `brain.routing`.
 
