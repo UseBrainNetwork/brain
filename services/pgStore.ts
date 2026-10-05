@@ -36,6 +36,8 @@ export class PgStore implements NetworkStore {
     const common = { connectionString: cs, ssl, connectionTimeoutMillis: 8_000, idleTimeoutMillis: 2_000, allowExitOnIdle: true, statement_timeout: 15_000, query_timeout: 15_000 };
     this.pool = new Pool({ ...common, max: 3 });
     this.lockPool = new Pool({ ...common, max: 2 });
+    // Idle-client errors (pooler closing a socket) must not become unhandled rejections that kill the instance.
+    for (const pool of [this.pool, this.lockPool]) pool.on("error", (e) => console.warn("[pgStore] idle client error:", e.message));
     this.ready = this.migrate();
   }
 
