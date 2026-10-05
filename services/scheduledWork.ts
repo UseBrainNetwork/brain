@@ -52,17 +52,21 @@ export async function ensureScheduledWork(now = Date.now(), test?: { dims: { m: 
   st.__brainSchedAt = now;
   st.__brainScheduling = true;
   try {
-    const recent = await withTimeout(getStore().listDistributedJobs(60), 4_000, null);
-    if (!recent) return { job: null, reason: "store slow" };
-    const mine = recent.filter((j) => j.scheduled);
-    if (mine.some((j) => open(j, now))) return { job: null, reason: "in flight" };
-    const lastHour = mine.filter((j) => now - j.createdAt < 3_600_000).length;
-    if (lastHour >= perHour()) return { job: null, reason: "hourly cap" };
-    const last = mine[0];
-    const lastDone = last ? (last.completedAt ?? last.createdAt + jobTtlMs(last)) : 0;
-    if (now - lastDone < gapMs()) return { job: null, reason: "gap" };
-    const job = await createJob({ size: pickSize(), ...test, scheduled: { by: "operator", reason: REASON } });
-    return { job, reason: "dispatched" };
+    // Check and dispatch under one cross-instance lock: several serverless instances see the same
+    // idle fleet at the same moment and must not each dispatch a job.
+    return await getStore().withLock("sched:dispatch", async () => {
+      const recent = await withTimeout(getStore().listDistributedJobs(60), 4_000, null);
+      if (!recent) return { job: null, reason: "store slow" };
+      const mine = recent.filter((j) => j.scheduled);
+      if (mine.some((j) => open(j, now))) return { job: null, reason: "in flight" };
+      const lastHour = mine.filter((j) => now - j.createdAt < 3_600_000).length;
+      if (lastHour >= perHour()) return { job: null, reason: "hourly cap" };
+      const last = mine[0];
+      const lastDone = last ? (last.completedAt ?? last.createdAt + jobTtlMs(last)) : 0;
+      if (now - lastDone < gapMs()) return { job: null, reason: "gap" };
+      const job = await createJob({ size: pickSize(), ...test, scheduled: { by: "operator", reason: REASON } });
+      return { job, reason: "dispatched" };
+    });
   } catch (e) {
     const code = (e as { code?: string }).code ?? (e instanceof Error ? e.message : "error");
     return { job: null, reason: code };
