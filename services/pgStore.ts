@@ -240,6 +240,10 @@ export class PgStore implements NetworkStore {
     const r = await this.q(`SELECT data FROM brain_reward_allocations WHERE wallet = $1`, [wallet]);
     return r.rows.map((x) => x.data as RewardAllocation);
   }
+  async allocationsForEpoch(epochId: string) {
+    const r = await this.q(`SELECT data FROM brain_reward_allocations WHERE epoch_id = $1`, [epochId]);
+    return r.rows.map((x) => x.data as RewardAllocation);
+  }
   async insertClaim(cl: RewardClaim) {
     try {
       const r = await this.q(

@@ -148,6 +148,140 @@ export async function measureWork(from: number, to: number) {
   return { wallets: [...byWallet.values()], networkVerifiedCompute, totalBuckets };
 }
 
+export interface EpochWorkRow {
+  nodeId: string;
+  deviceClass: string;
+  reputation: number;
+  status: string;
+  wallet: string | null;
+  /** True only when the wallet was proven by signature; unlinked nodes never accrue. */
+  walletVerified: boolean;
+  jobs: number;
+  verifiedJobs: number;
+  verifiedCompute: number;
+  availability: number;
+}
+
+export interface EpochWorkReport {
+  epochId: string;
+  startsAt: number;
+  endsAt: number;
+  /** Open epoch → projection against the paced pool; settled → the recorded epoch. */
+  state: "open" | "closed-unsettled" | "settled";
+  poolLamports: number;
+  networkVerifiedCompute: number;
+  nodes: EpochWorkRow[];
+  /** Per wallet: what the engine would (open) or did (settled) allocate. */
+  wallets: { wallet: string; nodes: string[]; verifiedCompute: number; share: number; lamports: number; eligible: boolean; multiplier: number; capped: boolean }[];
+  unlinked: { nodes: number; verifiedCompute: number };
+}
+
+/**
+ * Operator view of one epoch: every node that did work, whether it is linked, and how the pool
+ * splits. Reads the same aggregates settlement uses, so it cannot disagree with what gets paid.
+ */
+export async function epochWorkReport(epochStart: number, now = Date.now()): Promise<EpochWorkReport> {
+  const store = getStore();
+  const len = epochLengthMs();
+  const e = epochAt(epochStart);
+  const to = Math.min(now, e.endsAt);
+  const bucketMs = networkConfig.rewards.availabilityBucketMs;
+  const rows = await store.aggregateWork(e.startsAt, to, bucketMs);
+  const done = rows.filter((r) => r.status !== "assigned");
+  const nodes = await store.getNodes([...new Set(done.map((r) => r.nodeId))]);
+  const totalBuckets = Math.max(1, Math.ceil((to - e.startsAt) / bucketMs));
+
+  const byNode = new Map<string, EpochWorkRow & { buckets: Set<number> }>();
+  let networkVerifiedCompute = 0;
+  for (const r of done) {
+    const n = nodes.get(r.nodeId);
+    let row = byNode.get(r.nodeId);
+    if (!row) {
+      row = {
+        nodeId: r.nodeId,
+        deviceClass: n?.deviceClass ?? "UNKNOWN",
+        reputation: n?.reputation ?? 0,
+        status: n?.status ?? "unknown",
+        wallet: n?.walletAddress ?? null,
+        walletVerified: Boolean(n?.walletVerified && n?.walletAddress),
+        jobs: 0,
+        verifiedJobs: 0,
+        verifiedCompute: 0,
+        availability: 0,
+        buckets: new Set(),
+      };
+      byNode.set(r.nodeId, row);
+    }
+    row.jobs += r.jobs;
+    for (const b of r.buckets) row.buckets.add(b);
+    if (r.verified) {
+      row.verifiedJobs += r.jobs;
+      row.verifiedCompute += r.computeUnits;
+      networkVerifiedCompute += r.computeUnits;
+    }
+  }
+  const nodeRows: EpochWorkRow[] = [...byNode.values()]
+    .map(({ buckets, ...r }) => ({ ...r, availability: Math.min(1, buckets.size / totalBuckets) }))
+    .sort((a, b) => b.verifiedCompute - a.verifiedCompute);
+  const unlinkedRows = nodeRows.filter((r) => !r.walletVerified);
+
+  const settled = e.endsAt <= now ? await store.getEpoch(e.id) : null;
+  if (settled) {
+    const allocs = await store.allocationsForEpoch(e.id);
+    return {
+      epochId: e.id,
+      startsAt: e.startsAt,
+      endsAt: e.endsAt,
+      state: "settled",
+      poolLamports: settled.poolLamports,
+      networkVerifiedCompute,
+      nodes: nodeRows,
+      wallets: allocs
+        .map((a) => ({
+          wallet: a.wallet,
+          nodes: nodeRows.filter((r) => r.wallet === a.wallet && r.walletVerified).map((r) => r.nodeId),
+          verifiedCompute: a.verifiedCompute,
+          share: a.computeShare,
+          lamports: a.lamports,
+          eligible: true,
+          multiplier: a.multiplier,
+          capped: a.capped,
+        }))
+        .sort((a, b) => b.lamports - a.lamports),
+      unlinked: { nodes: unlinkedRows.length, verifiedCompute: unlinkedRows.reduce((s, r) => s + r.verifiedCompute, 0) },
+    };
+  }
+
+  // Open or closed-but-unsettled: dry-run the engine exactly as settlement would, against the paced pool.
+  const { wallets } = await measureWork(e.startsAt, to);
+  const fullPool = (await treasuryPoolLamports(len)) || configuredPoolLamports() || 0;
+  const pool = Math.floor(fullPool * ((to - e.startsAt) / len));
+  const inputs = wallets.map((w) => toInput(w, Math.max(0, ...w.nodes.map((n) => n.tokenAmount)), totalBuckets));
+  const result = computeEpoch(inputs, pool, defaultRewardConfig);
+  return {
+    epochId: e.id,
+    startsAt: e.startsAt,
+    endsAt: e.endsAt,
+    state: e.endsAt <= now ? "closed-unsettled" : "open",
+    poolLamports: pool,
+    networkVerifiedCompute,
+    nodes: nodeRows,
+    wallets: result.rewards
+      .map((r, i) => ({
+        wallet: r.id,
+        nodes: wallets[i].nodes.map((n) => n.id),
+        verifiedCompute: inputs[i].verifiedCompute,
+        share: r.computeShare,
+        lamports: Math.floor(r.payout),
+        eligible: r.eligible,
+        multiplier: r.multiplier,
+        capped: r.capped,
+      }))
+      .sort((a, b) => b.lamports - a.lamports),
+    unlinked: { nodes: unlinkedRows.length, verifiedCompute: unlinkedRows.reduce((s, r) => s + r.verifiedCompute, 0) },
+  };
+}
+
 function toInput(w: WalletWork, tokenAmount: number, totalBuckets: number): ContributorInput {
   const reliability = w.nodes.reduce((s, n) => s + n.reputation, 0) / Math.max(1, w.nodes.length);
   return {

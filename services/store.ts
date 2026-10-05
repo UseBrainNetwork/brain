@@ -89,6 +89,7 @@ export interface NetworkStore {
   saveSettlement(epoch: RewardEpoch, allocations: RewardAllocation[]): Promise<boolean>;
   listEpochs(limit: number): Promise<RewardEpoch[]>;
   allocationsForWallet(wallet: string): Promise<RewardAllocation[]>;
+  allocationsForEpoch(epochId: string): Promise<RewardAllocation[]>;
   /** Inserts a pending claim. Returns false if the id was used or the wallet already has a pending claim. */
   insertClaim(c: RewardClaim): Promise<boolean>;
   updateClaim(c: RewardClaim): Promise<void>;
@@ -258,6 +259,9 @@ export class MemoryStore implements NetworkStore {
   async allocationsForWallet(wallet: string) {
     return this.allocations.filter((a) => a.wallet === wallet);
   }
+  async allocationsForEpoch(epochId: string) {
+    return this.allocations.filter((a) => a.epochId === epochId);
+  }
   async insertClaim(c: RewardClaim) {
     if (this.claims.has(c.id)) return false;
     for (const x of this.claims.values()) if (x.wallet === c.wallet && x.status === "pending") return false;
@@ -330,7 +334,7 @@ export class MemoryStore implements NetworkStore {
 const g = globalThis as typeof globalThis & { __brainStore?: NetworkStore };
 
 /** Dev HMR keeps the globalThis singleton across module reloads; replace it if its shape is stale. */
-const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode", "countNodesJoined", "aggregateWork", "listOpenJobs", "getNodes"];
+const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode", "countNodesJoined", "aggregateWork", "listOpenJobs", "getNodes", "allocationsForEpoch"];
 
 export function getStore(): NetworkStore {
   if (g.__brainStore && REQUIRED.some((k) => typeof g.__brainStore?.[k] !== "function")) g.__brainStore = undefined;

@@ -380,6 +380,14 @@ describe("end to end: verified work → linked wallet → auto-settle from creat
       // Idempotent and throttled.
       expect(await settleDueEpochs(Date.now())).toHaveLength(0);
 
+      // Operator report agrees with what was paid: A001 linked and paid, A002 worked but unlinked.
+      const { epochWorkReport } = await import("./settlement");
+      const report = await epochWorkReport(last.startsAt);
+      expect(report.state).toBe("settled");
+      expect(report.wallets).toEqual([expect.objectContaining({ wallet: w.address, nodes: ["A001"], lamports: e.distributedLamports, capped: true })]);
+      expect(report.unlinked).toEqual({ nodes: 1, verifiedCompute: 1200 });
+      expect(report.nodes.map((n) => [n.nodeId, n.walletVerified])).toEqual(expect.arrayContaining([["A001", true], ["A002", false]]));
+
       // Claim: linked wallet gets exactly its allocation; the unlinked node gets nothing.
       const bal = await balanceOf(w.address);
       expect(bal.claimable).toBe(e.distributedLamports);
