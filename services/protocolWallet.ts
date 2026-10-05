@@ -1,4 +1,4 @@
-import { protocolWallet } from "@/lib/site";
+import { protocolWallet, token } from "@/lib/site";
 
 /**
  * Read-only view of the protocol wallet, straight from a Solana RPC. Everything here is REAL
@@ -13,6 +13,16 @@ export interface WalletTransfer {
   deltaSol: number;
 }
 
+export interface TokenStatus {
+  symbol: string;
+  mint: string;
+  /** true once the mint account exists on-chain. null = RPC unavailable. */
+  live: boolean | null;
+  supply: number | null;
+  decimals: number | null;
+  fetchedAt: number;
+}
+
 export interface ProtocolWalletView {
   address: string;
   cluster: string;
@@ -22,6 +32,7 @@ export interface ProtocolWalletView {
   recent: WalletTransfer[];
   fetchedAt: number;
   rpc: "configured" | "public" | "unavailable";
+  token: TokenStatus;
 }
 
 const LAMPORTS = 1e9;
@@ -52,14 +63,40 @@ async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T
   return j.result as T;
 }
 
-const g = globalThis as typeof globalThis & { __brainProtocolWallet?: { at: number; view: ProtocolWalletView } };
+const g = globalThis as typeof globalThis & { __brainProtocolWallet?: { at: number; view: ProtocolWalletView }; __brainTokenStatus?: { at: number; status: TokenStatus } };
+
+/** Does the mint exist yet? Read from chain; never assumed. */
+export async function getTokenStatus(): Promise<TokenStatus> {
+  const cached = g.__brainTokenStatus;
+  if (cached && Date.now() - cached.at < TTL_MS) return cached.status;
+  const { url } = rpcUrl();
+  const base: TokenStatus = { symbol: token.symbol, mint: token.mint, live: null, supply: null, decimals: null, fetchedAt: Date.now() };
+  try {
+    const info = await rpc<{ value: { owner: string } | null }>(url, "getAccountInfo", [token.mint, { encoding: "base64", commitment: "confirmed" }]);
+    let status: TokenStatus = { ...base, live: Boolean(info.value) };
+    if (info.value) {
+      try {
+        const s = await rpc<{ value: { uiAmount: number | null; decimals: number } }>(url, "getTokenSupply", [token.mint]);
+        status = { ...status, supply: s.value.uiAmount, decimals: s.value.decimals };
+      } catch {
+        /* exists but not a mint we can read; still "live" as an account */
+      }
+    }
+    g.__brainTokenStatus = { at: Date.now(), status };
+    return status;
+  } catch {
+    if (cached && Date.now() - cached.at < 10 * TTL_MS) return cached.status;
+    return base;
+  }
+}
 
 export async function getProtocolWallet(limit = 8): Promise<ProtocolWalletView> {
   const cached = g.__brainProtocolWallet;
   if (cached && Date.now() - cached.at < TTL_MS) return cached.view;
   const { url, kind } = rpcUrl();
   const address = protocolWallet.address;
-  const base: ProtocolWalletView = { address, cluster: protocolWallet.cluster, source: "REAL", balanceSol: null, recent: [], fetchedAt: Date.now(), rpc: "unavailable" };
+  const tokenStatus = await getTokenStatus();
+  const base: ProtocolWalletView = { address, cluster: protocolWallet.cluster, source: "REAL", balanceSol: null, recent: [], fetchedAt: Date.now(), rpc: "unavailable", token: tokenStatus };
   try {
     const bal = await rpc<{ value: number }>(url, "getBalance", [address, { commitment: "confirmed" }]);
     const sigs = await rpc<{ signature: string; blockTime: number | null; err: unknown }[]>(url, "getSignaturesForAddress", [address, { limit }]);

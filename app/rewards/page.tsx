@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { EarningsCalculator } from "@/components/economics/EarningsCalculator";
 import { FlowChain } from "@/components/economics/FlowChain";
-import { ProtocolWalletCard } from "@/components/economics/ProtocolWallet";
+import { ProtocolWalletCard, TokenCard } from "@/components/economics/ProtocolWallet";
 import { Flywheel } from "@/components/economics/Flywheel";
 import { HolderAccess } from "@/components/economics/HolderAccess";
 import { MoneyFlow } from "@/components/economics/MoneyFlow";
@@ -90,7 +90,10 @@ export default function RewardsPage() {
               The contributor pool is funded by creator fees and inference sales, split by published percentages each epoch. The protocol wallet is published below and read from chain; API billing is not connected yet. Modelled values are available under “Show simulated data” in the footer, labelled SIM.
             </p>
           </div>
-          <ProtocolWalletCard className="mb-10" />
+          <div className="mb-10 grid gap-5 lg:grid-cols-2">
+            <TokenCard />
+            <ProtocolWalletCard />
+          </div>
           <MoneyFlow className="mb-20 hidden md:block" />
           <FlowChain />
         </Container>

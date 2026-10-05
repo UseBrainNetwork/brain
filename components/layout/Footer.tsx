@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Button, Container } from "@/components/ui";
 import { FooterStatus } from "@/components/layout/FooterStatus";
+import { ContractLine } from "@/components/economics/ProtocolWallet";
 import { StupifiedLink } from "@/components/layout/Stupified";
 import { SimOnly } from "@/components/layout/SimOnly";
 import { SimToggle } from "@/components/layout/SimToggle";
@@ -42,6 +43,9 @@ export function Footer() {
               A distributed AI compute network. Browsers contribute verified GPU compute; creator fees and inference sales pay the people powering it.
             </p>
             <FooterStatus />
+            <div className="mt-3">
+              <ContractLine />
+            </div>
           </div>
           <nav className="grid grid-cols-2 gap-10 sm:grid-cols-3">
             {cols.map((c) => (

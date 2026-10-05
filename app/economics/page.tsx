@@ -1,4 +1,4 @@
-import { ProtocolWalletCard } from "@/components/economics/ProtocolWallet";
+import { ProtocolWalletCard, TokenCard } from "@/components/economics/ProtocolWallet";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Hash, Metric, NO_DATA, Panel, PageHead, Shell, SourceBadge, UNKNOWN, pct, sol, usd, when } from "@/components/economy/parts";
@@ -96,7 +96,8 @@ export default async function EconomicsPage() {
         <YourNode />
       </div>
 
-      <div className="mt-5">
+      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+        <TokenCard />
         <ProtocolWalletCard />
       </div>
 

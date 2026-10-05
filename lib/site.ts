@@ -21,6 +21,20 @@ export const protocolWallet = {
   cluster: (process.env.BRAIN_SOLANA_CLUSTER ?? process.env.NEXT_PUBLIC_SOLANA_CLUSTER ?? "mainnet-beta") as "mainnet-beta" | "devnet" | "testnet",
 } as const;
 
+/**
+ * The token. The mint is fixed ahead of launch; whether it exists on-chain is checked live
+ * (services/protocolWallet.ts → getTokenStatus) and the site says NOT LIVE until it does.
+ * No price is ever shown unless it comes from a real source.
+ */
+export const token = {
+  symbol: "BRAIN",
+  mint: process.env.NEXT_PUBLIC_BRAIN_TOKEN_MINT ?? "FiJ4gnd4dhqNeBKfS4E8wnERMEpjMPdUfJhu8foipump",
+  launchpad: "pump.fun",
+} as const;
+
+export const pumpUrl = (mint: string = token.mint) => `https://pump.fun/coin/${mint}`;
+export const tokenUrl = (mint: string = token.mint, cluster: string = protocolWallet.cluster) => `https://solscan.io/token/${mint}${cluster === "mainnet-beta" ? "" : `?cluster=${cluster}`}`;
+
 export const accountUrl = (address: string, cluster: string = protocolWallet.cluster) => `https://solscan.io/account/${address}${cluster === "mainnet-beta" ? "" : `?cluster=${cluster}`}`;
 export const txUrl = (sig: string, cluster: string = protocolWallet.cluster) => `https://solscan.io/tx/${sig}${cluster === "mainnet-beta" ? "" : `?cluster=${cluster}`}`;
 

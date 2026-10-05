@@ -123,10 +123,12 @@ export async function getHoldings(address: string): Promise<TokenHolding> {
       if (j.error) throw new Error(j.error.message);
       return j.result;
     };
+    // Before the mint exists on-chain, holdings are genuinely zero. Do not fall back to demo numbers.
     const [accounts, supply] = await Promise.all([
-      call("getTokenAccountsByOwner", [address, { mint }, { encoding: "jsonParsed" }]),
-      call("getTokenSupply", [mint]),
+      call("getTokenAccountsByOwner", [address, { mint }, { encoding: "jsonParsed" }]).catch(() => ({ value: [] })),
+      call("getTokenSupply", [mint]).catch(() => null),
     ]);
+    if (!supply) return { address, amount: 0, supplyShare: 0, provenance: "live" };
     const amount = (accounts.value as { account: { data: { parsed: { info: { tokenAmount: { uiAmount: number } } } } } }[])
       .reduce((s, a) => s + (a.account.data.parsed.info.tokenAmount.uiAmount ?? 0), 0);
     const total = Number(supply.value.uiAmount) || mockToken.circulatingSupply;
