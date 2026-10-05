@@ -58,7 +58,7 @@ function paceDays(): number {
  * nothing is due, so callers can run it opportunistically (dashboard reads) as well as from cron.
  * Throttled per process so a busy dashboard does not hammer the database.
  */
-export async function settleDueEpochs(now = Date.now(), maxEpochs = 24): Promise<RewardEpoch[]> {
+export async function settleDueEpochs(now = Date.now(), maxEpochs = 6): Promise<RewardEpoch[]> {
   const g = globalThis as typeof globalThis & { __brainSettleAt?: number; __brainSettling?: boolean };
   if (g.__brainSettling || now - (g.__brainSettleAt ?? 0) < 30_000) return [];
   g.__brainSettleAt = now;
@@ -83,8 +83,8 @@ async function settleDueUnlocked(store: ReturnType<typeof getStore>, now: number
   // Only epochs after the first verified job need settling; before that there is nothing to pay.
   for (let i = 0, start = last.startsAt; i < maxEpochs && start >= 0; i++, start -= len) {
     if (await store.getEpoch(epochAt(start).id)) break; // everything older is settled already
-    const jobs = await store.listJobsBetween(start, start + len);
-    if (jobs.length === 0) continue;
+    const work = await store.aggregateWork(start, start + len, networkConfig.rewards.availabilityBucketMs);
+    if (work.length === 0) continue;
     try {
       const r = await settleEpoch({ epochStart: start, now });
       if (r.created) settled.push(r.epoch);
@@ -114,17 +114,19 @@ interface WalletWork {
  */
 export async function measureWork(from: number, to: number) {
   const store = getStore();
-  const jobs = await store.listJobsBetween(from, to);
+  const bucketMs = networkConfig.rewards.availabilityBucketMs;
+  // Aggregated in the store: one row per (node, status, verified). Never loads job rows, so an epoch
+  // with a hundred thousand jobs costs one indexed range scan.
+  const rows = await store.aggregateWork(from, to, bucketMs);
   const nodes = new Map<string, StoredNode | null>();
   const byWallet = new Map<string, WalletWork>();
-  const bucketMs = networkConfig.rewards.availabilityBucketMs;
   let networkVerifiedCompute = 0;
 
-  for (const j of jobs) {
-    if (j.verified) networkVerifiedCompute += j.computeUnits;
-    if (j.status === "assigned") continue; // still in flight
-    if (!nodes.has(j.assignedTo)) nodes.set(j.assignedTo, await store.getNode(j.assignedTo));
-    const node = nodes.get(j.assignedTo);
+  for (const r of rows) {
+    if (r.verified) networkVerifiedCompute += r.computeUnits;
+    if (r.status === "assigned") continue; // still in flight
+    if (!nodes.has(r.nodeId)) nodes.set(r.nodeId, await store.getNode(r.nodeId));
+    const node = nodes.get(r.nodeId);
     if (!node?.walletVerified || !node.walletAddress) continue;
     let w = byWallet.get(node.walletAddress);
     if (!w) {
@@ -133,13 +135,13 @@ export async function measureWork(from: number, to: number) {
     }
     if (!w.nodes.includes(node)) w.nodes.push(node);
     if (node.status === "banned") w.banned = true;
-    w.jobsAssigned++;
-    w.checked++;
-    w.buckets.add(Math.floor(j.submittedAt / bucketMs));
-    if (j.verified) {
-      w.jobsCompleted++;
-      w.passed++;
-      w.verifiedCompute += j.computeUnits;
+    w.jobsAssigned += r.jobs;
+    w.checked += r.jobs;
+    for (const b of r.buckets) w.buckets.add(b);
+    if (r.verified) {
+      w.jobsCompleted += r.jobs;
+      w.passed += r.jobs;
+      w.verifiedCompute += r.computeUnits;
     }
   }
   const totalBuckets = Math.max(1, Math.ceil((to - from) / bucketMs));

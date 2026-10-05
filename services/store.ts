@@ -17,6 +17,17 @@ export interface StoredNode extends ComputeNode {
   identityHash?: string;
   /** First registration of this identity. Survives rejoin; `joinedAt` is per session. */
   firstSeenAt?: number;
+  /** When this node was last issued a synthetic (self-generated) job. Used to pace the demo loop. */
+  lastSyntheticAt?: number;
+}
+
+export interface WorkAggregate {
+  nodeId: string;
+  status: string;
+  verified: boolean;
+  jobs: number;
+  computeUnits: number;
+  buckets: number[];
 }
 
 export interface StoredJob extends ComputeJob {
@@ -64,6 +75,13 @@ export interface NetworkStore {
 
   /** Jobs submitted in [from, to). Settlement reads verified work from here, never from node counters. */
   listJobsBetween(from: number, to: number): Promise<StoredJob[]>;
+  /**
+   * Per-node work in [from, to) aggregated in the store (never loads job rows). One row per
+   * (node, status, verified) with counts, verified compute units and the distinct availability buckets.
+   */
+  aggregateWork(from: number, to: number, bucketMs: number): Promise<WorkAggregate[]>;
+  /** Jobs still in flight (not completed/failed) among the most recent `limit`. */
+  listOpenJobs(limit: number): Promise<StoredJob[]>;
   getEpoch(id: string): Promise<RewardEpoch | null>;
   /** Writes the epoch and its allocations atomically. Returns false if the epoch already exists. */
   saveSettlement(epoch: RewardEpoch, allocations: RewardAllocation[]): Promise<boolean>;
@@ -200,6 +218,21 @@ export class MemoryStore implements NetworkStore {
   async listJobsBetween(from: number, to: number) {
     return [...this.jobs.values()].filter((j) => j.submittedAt >= from && j.submittedAt < to);
   }
+  async aggregateWork(from: number, to: number, bucketMs: number) {
+    const m = new Map<string, WorkAggregate & { b: Set<number> }>();
+    for (const j of await this.listJobsBetween(from, to)) {
+      const k = `${j.assignedTo}|${j.status}|${Boolean(j.verified)}`;
+      let a = m.get(k);
+      if (!a) m.set(k, (a = { nodeId: j.assignedTo, status: j.status, verified: Boolean(j.verified), jobs: 0, computeUnits: 0, buckets: [], b: new Set() }));
+      a.jobs++;
+      a.computeUnits += j.computeUnits;
+      a.b.add(Math.floor(j.submittedAt / bucketMs));
+    }
+    return [...m.values()].map(({ b, ...a }) => ({ ...a, buckets: [...b] }));
+  }
+  async listOpenJobs(limit: number) {
+    return (await this.listRecentJobs(limit)).filter((j) => j.status !== "completed" && j.status !== "failed");
+  }
   async getEpoch(id: string) {
     return this.epochs.get(id) ?? null;
   }
@@ -287,7 +320,7 @@ export class MemoryStore implements NetworkStore {
 const g = globalThis as typeof globalThis & { __brainStore?: NetworkStore };
 
 /** Dev HMR keeps the globalThis singleton across module reloads; replace it if its shape is stale. */
-const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode", "countNodesJoined"];
+const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode", "countNodesJoined", "aggregateWork", "listOpenJobs"];
 
 export function getStore(): NetworkStore {
   if (g.__brainStore && REQUIRED.some((k) => typeof g.__brainStore?.[k] !== "function")) g.__brainStore = undefined;

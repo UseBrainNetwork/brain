@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Pool } from "pg";
 import type { DistributedJob, RewardAllocation, RewardClaim, RewardEpoch } from "@/domain/types";
-import { KeyedMutex, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode } from "./store";
+import { KeyedMutex, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode, type WorkAggregate } from "./store";
 
 /** Postgres implementation of NetworkStore. Schema: db/schema.sql. */
 export class PgStore implements NetworkStore {
@@ -170,6 +170,21 @@ export class PgStore implements NetworkStore {
   async getChallenge(id: string) {
     const r = await this.q(`SELECT data FROM brain_challenges WHERE id = $1`, [id]);
     return (r.rows[0]?.data as StoredChallenge) ?? null;
+  }
+  async aggregateWork(from: number, to: number, bucketMs: number) {
+    const r = await this.q<{ node_id: string; status: string; verified: boolean | null; jobs: number; units: string; buckets: number[] }>(
+      `SELECT assigned_to AS node_id, status, (data->>'verified')::boolean AS verified, count(*)::int AS jobs,
+              coalesce(sum((data->>'computeUnits')::numeric), 0)::text AS units,
+              array_agg(DISTINCT floor(submitted_at / $3)::bigint) AS buckets
+         FROM brain_jobs WHERE submitted_at >= $1 AND submitted_at < $2
+        GROUP BY 1, 2, 3`,
+      [from, to, bucketMs],
+    );
+    return r.rows.map<WorkAggregate>((x) => ({ nodeId: x.node_id, status: x.status, verified: Boolean(x.verified), jobs: Number(x.jobs), computeUnits: Number(x.units), buckets: x.buckets.map(Number) }));
+  }
+  async listOpenJobs(limit: number) {
+    const r = await this.q(`SELECT data FROM brain_jobs WHERE status NOT IN ('completed', 'failed') ORDER BY submitted_at DESC LIMIT $1`, [limit]);
+    return r.rows.map((x) => x.data as StoredJob);
   }
   async listJobsBetween(from: number, to: number) {
     const r = await this.q(`SELECT data FROM brain_jobs WHERE submitted_at >= $1 AND submitted_at < $2`, [from, to]);

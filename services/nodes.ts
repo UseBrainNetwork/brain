@@ -197,8 +197,8 @@ export async function sweepOffline() {
       await nodeLost(n.id);
     }
   }
-  for (const j of await store.listRecentJobs(200)) {
-    if (j.status !== "completed" && j.status !== "failed" && now > j.deadline) {
+  for (const j of await store.listOpenJobs(200)) {
+    if (now > j.deadline) {
       await store.saveJob({ ...j, status: "failed", failReason: "deadline", lifecycle: [...j.lifecycle, { stage: "failed", at: now, detail: "deadline exceeded" }] });
       if (j.parentId) await unitLost(j, "deadline");
     }
@@ -283,6 +283,14 @@ function pickTemplate(): JobTemplate {
  * Next job for a node. Pending distributed work units always come first. With
  * `distributedOnly`, a node waits for real work instead of taking filler verification jobs.
  */
+/** Minimum gap between synthetic jobs per node. BRAIN_SYNTHETIC_JOB_MS, default 3000; 0 disables pacing. */
+function syntheticPaceMs(): number {
+  const v = process.env.BRAIN_SYNTHETIC_JOB_MS;
+  if (v == null || v === "") return 3_000;
+  const n = Number(v);
+  return n >= 0 ? n : 3_000;
+}
+
 export async function nextJob(node: StoredNode, opts: { distributedOnly?: boolean } = {}): Promise<StoredJob | null> {
   if (!isLive(node)) throw new NodeError("not_joined", 409);
   const store = getStore();
@@ -290,6 +298,13 @@ export async function nextJob(node: StoredNode, opts: { distributedOnly?: boolea
   if (pending && pending.deadline > Date.now()) return pending;
   if (pending) await expireJob(pending, node);
   if (opts.distributedOnly) {
+    if (node.status === "computing") await store.saveNode({ ...node, status: "idle" });
+    return null;
+  }
+  // Pace self-generated (synthetic) work per node. Real distributed units are never paced; this only
+  // keeps the embedded demo loop from writing a job every few hundred milliseconds per visitor.
+  const paceMs = syntheticPaceMs();
+  if (paceMs > 0 && node.lastSyntheticAt && Date.now() - node.lastSyntheticAt < paceMs) {
     if (node.status === "computing") await store.saveNode({ ...node, status: "idle" });
     return null;
   }
@@ -323,7 +338,7 @@ export async function nextJob(node: StoredNode, opts: { distributedOnly?: boolea
     expected: t.canary ? referenceResult(spec).hashes : undefined,
   };
   await store.saveJob(job);
-  await store.saveNode({ ...node, status: "computing" });
+  await store.saveNode({ ...node, status: "computing", lastSyntheticAt: now });
   return job;
 }
 
