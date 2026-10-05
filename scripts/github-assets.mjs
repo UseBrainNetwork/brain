@@ -26,7 +26,7 @@ const mkRnd = (seed) => { let s = seed; return () => (s = (s * 16807) % 21474836
   const mark = (x, y, s, lit) => Array.from({ length: 9 }, (_, i) => `<rect x="${x + (i % 3) * 8 * s}" y="${y + Math.floor(i / 3) * 8 * s}" width="${6 * s}" height="${6 * s}" rx="${1.2 * s}" class="${i === lit ? "mk-lit" : "mk"}" style="animation-delay:${(i * 0.35).toFixed(2)}s"/>`).join("");
   const chips = ["WEBGPU", "SERVER-VERIFIED COMPUTE", "OPENAI-COMPATIBLE API", "PROOF-OF-COMPUTE RECEIPTS", "SOLANA SETTLEMENT"];
   let cx = 56; const chipEls = chips.map((t, i) => { const w = t.length * 7.6 + 26; const el = `<g style="animation-delay:${(0.9 + i * 0.12).toFixed(2)}s" class="chip"><rect x="${cx}" y="330" width="${w}" height="26" rx="13" fill="none" stroke="${CHALK}" stroke-opacity="0.16"/><text x="${cx + w / 2}" y="347" text-anchor="middle" font-family="${MONO}" font-size="10.5" letter-spacing="1" fill="${CHALK}" fill-opacity="0.65">${t}</text></g>`; cx += w + 10; return el; }).join("");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="brain — the crowd is the GPU">
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="brain — compute from everywhere">
 <defs>
   <linearGradient id="fade" x1="0" x2="1"><stop offset="0" stop-color="${INK}" stop-opacity="1"/><stop offset="0.25" stop-color="${INK}" stop-opacity="0"/></linearGradient>
   <linearGradient id="fadeB" x1="0" y1="0" x2="0" y2="1"><stop offset="0.6" stop-color="${INK}" stop-opacity="0"/><stop offset="1" stop-color="${INK}" stop-opacity="1"/></linearGradient>
@@ -56,7 +56,7 @@ const mkRnd = (seed) => { let s = seed; return () => (s = (s * 16807) % 21474836
 <rect x="600" y="0" width="600" height="${H}" fill="url(#fadeB)"/>
 <g class="scan"><rect x="640" y="0" width="${cols * (cw + gap)}" height="1" fill="${SIG}" fill-opacity="0.35"/></g>
 <g class="rise" style="animation-delay:.05s">${mark(56, 58, 1.6, 4)}<text x="100" y="86" font-family="${SANS}" font-weight="600" font-size="30" letter-spacing="-1.2" fill="${CHALK}">brain</text></g>
-<g class="rise" style="animation-delay:.2s"><text x="54" y="190" font-family="${SANS}" font-weight="600" font-size="78" letter-spacing="-3.5" fill="${CHALK}">The crowd</text><text x="54" y="268" font-family="${SANS}" font-weight="600" font-size="78" letter-spacing="-3.5" fill="${CHALK}">is the GPU.</text></g>
+<g class="rise" style="animation-delay:.2s"><text x="54" y="190" font-family="${SANS}" font-weight="600" font-size="78" letter-spacing="-3.5" fill="${CHALK}">Compute</text><text x="54" y="268" font-family="${SANS}" font-weight="600" font-size="78" letter-spacing="-3.5" fill="${CHALK}">from everywhere.</text></g>
 <g class="rise" style="animation-delay:.45s"><text x="56" y="304" font-family="${MONO}" font-size="13" fill="${FOG}">distributed AI compute · browsers contribute verified work · paid from real revenue<tspan class="cur" fill="${SIG}">▍</tspan></text></g>
 ${chipEls}
 <text x="${W - 56}" y="${H - 28}" text-anchor="end" font-family="${MONO}" font-size="11" letter-spacing="1.5" fill="${FOG}" fill-opacity="0.8">brainnetwork.app</text>

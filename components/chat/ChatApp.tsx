@@ -377,9 +377,9 @@ function Empty({ onPick }: { onPick: (t: string) => void }) {
     <div className="flex min-h-[55vh] flex-col items-start justify-end">
       <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-chalk/40">BRAIN</div>
       <h1 className="display mt-3 text-[34px] leading-[1.02] text-chalk sm:text-[46px]">
-        The crowd
+        Compute
         <br />
-        <span className="text-chalk/40">is the GPU.</span>
+        <span className="text-chalk/40">from everywhere.</span>
       </h1>
       <p className="mt-4 max-w-[560px] text-[14px] leading-relaxed text-chalk/55">
         BRAIN AUTO estimates every execution target, picks one for your mode and privacy setting, runs it, and attaches a receipt. Today chat runs on a configured model provider; the browser network runs verified parallel compute. Each answer says exactly which.

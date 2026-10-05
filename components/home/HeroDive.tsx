@@ -55,9 +55,9 @@ export function HeroDive() {
               {realNodes > 0 ? `${realNodes} real node${realNodes === 1 ? "" : "s"} online` : "No real nodes online right now"} <span className="rounded-sm px-1 text-[9.5px] text-ok ring-1 ring-ok/40">REAL</span>
             </div>
             <h1 className="display text-[52px] sm:text-[84px] lg:text-[92px] xl:text-[104px]">
-              The crowd
+              Compute
               <br />
-              is the GPU.
+              from everywhere.
             </h1>
             <p className="mt-7 max-w-[460px] text-[16px] leading-[1.5] text-ink/75 md:mt-8 md:text-[19px]">
               BRAIN routes every request to the cheapest path that can run it, browser compute, cloud GPUs or external models, and attaches a receipt. Your computer can power it.

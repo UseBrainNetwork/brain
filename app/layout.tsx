@@ -11,10 +11,10 @@ const description =
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: { default: "BRAIN — The crowd is the GPU", template: "%s · BRAIN" },
+  title: { default: "BRAIN — Compute from everywhere", template: "%s · BRAIN" },
   description,
-  openGraph: { type: "website", siteName: "BRAIN", title: "BRAIN — The crowd is the GPU", description },
-  twitter: { card: "summary_large_image", site: `@${social.xHandle}`, creator: `@${social.xHandle}`, title: "BRAIN — The crowd is the GPU", description },
+  openGraph: { type: "website", siteName: "BRAIN", title: "BRAIN — Compute from everywhere", description },
+  twitter: { card: "summary_large_image", site: `@${social.xHandle}`, creator: `@${social.xHandle}`, title: "BRAIN — Compute from everywhere", description },
 };
 
 export const viewport: Viewport = {

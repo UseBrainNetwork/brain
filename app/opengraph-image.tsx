@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 
-export const alt = "BRAIN — The crowd is the GPU";
+export const alt = "BRAIN — Compute from everywhere";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -17,8 +17,8 @@ export default function OpengraphImage() {
         <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", width: 620 }}>
           <div style={{ display: "flex", fontSize: 22, letterSpacing: 4, color: "#3d5afe" }}>DISTRIBUTED AI COMPUTE</div>
           <div style={{ display: "flex", flexDirection: "column", fontSize: 96, fontWeight: 800, lineHeight: 0.95, letterSpacing: -4 }}>
-            <span>The crowd</span>
-            <span style={{ color: "rgba(230,233,238,0.45)" }}>is the GPU.</span>
+            <span>Compute</span>
+            <span style={{ color: "rgba(230,233,238,0.45)" }}>from everywhere.</span>
           </div>
           <div style={{ display: "flex", fontSize: 26, color: "rgba(230,233,238,0.6)" }}>Contribute WebGPU compute. Earn from verified work.</div>
         </div>

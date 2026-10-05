@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://brainnetwork.app"><img src=".github/assets/hero.svg" alt="BRAIN — the crowd is the GPU" width="100%"></a>
+  <a href="https://brainnetwork.app"><img src=".github/assets/hero.svg" alt="BRAIN — compute from everywhere" width="100%"></a>
 </p>
 
 <p align="center">
