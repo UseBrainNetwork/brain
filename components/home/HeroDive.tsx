@@ -5,7 +5,6 @@ import { useRef, useState } from "react";
 import { Ticker } from "@/components/home/Ticker";
 import { ComputeDie } from "@/components/network/ComputeDie";
 import { Button } from "@/components/ui";
-import { useReal } from "@/network/realtime/real";
 
 /**
  * Pinned hero. Scrolling scrubs one camera move: the copy falls away, the die turns top-down,
@@ -17,7 +16,6 @@ export function HeroDive() {
   const { scrollYProgress: p } = useScroll({ target: ref, offset: ["start start", "end end"] });
   const [dark, setDark] = useState(false);
   useMotionValueEvent(p, "change", (v) => setDark(v > 0.6));
-  const realNodes = useReal((r) => Object.keys(r.nodes).length);
 
   const copyOpacity = useTransform(p, [0, 0.16], [1, 0]);
   const copyY = useTransform(p, [0, 0.22], [0, -90]);
@@ -50,10 +48,6 @@ export function HeroDive() {
 
         <motion.div style={{ opacity: copyOpacity, y: copyY }} className="pointer-events-none relative z-10 mx-auto max-w-[1600px] px-5 pt-[104px] md:px-10 lg:pt-[150px]">
           <div className="lg:max-w-[780px]">
-            <div className="label mb-7 flex items-center gap-2.5 text-ink/60">
-              <span className={realNodes > 0 ? "size-[7px] bg-ok" : "size-[7px] bg-ink/25"} />
-              {realNodes > 0 ? `${realNodes} real node${realNodes === 1 ? "" : "s"} online` : "No real nodes online right now"} <span className="rounded-sm px-1 text-[9.5px] text-ok ring-1 ring-ok/40">REAL</span>
-            </div>
             <h1 className="display text-[52px] sm:text-[84px] lg:text-[92px] xl:text-[104px]">
               Compute
               <br />
