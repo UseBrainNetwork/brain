@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { AutoConsole } from "@/components/economy/AutoConsole";
 import { PageHead, Shell, SourceBadge } from "@/components/economy/parts";
 
-export const metadata: Metadata = { title: "BRAIN AUTO", description: "One request. The cheapest valid execution path, chosen from measured estimates." };
+export const metadata: Metadata = { title: "BRAIN AUTO", description: "BRAIN AUTO: the cheapest valid execution path, chosen from measured estimates." };
 
 export default function AutoPage() {
   return (
@@ -15,9 +15,9 @@ export default function AutoPage() {
         }
         title={
           <>
-            One request.
+            Routing.
             <br />
-            <span className="text-chalk/40">The cheapest intelligence available.</span>
+            <span className="text-chalk/40">Measured, not guessed.</span>
           </>
         }
       >

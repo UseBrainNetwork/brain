@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://brainnetwork.app"><img src=".github/assets/hero.svg" alt="BRAIN — one request, the best available intelligence" width="100%"></a>
+  <a href="https://brainnetwork.app"><img src=".github/assets/hero.svg" alt="BRAIN — the crowd is the GPU" width="100%"></a>
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
 
 <img src=".github/assets/divider.svg" width="100%" alt="">
 
-**BRAIN** is an intelligence network. One request goes in; BRAIN AUTO estimates every resource class that could run it (browser compute, native GPUs, operator cloud, external models), executes the cheapest path that meets the request's constraints, and returns the answer with a receipt that shows exactly how it ran. The same network is powered by ordinary computers: open a tab, the server measures and verifies your WebGPU compute, and verified work offsets what you use. Developers get the same engine through an OpenAI-compatible API.
+**BRAIN** is a distributed AI compute network. Requests are routed by BRAIN AUTO across browser compute, native GPUs, operator cloud and external models to the cheapest path that meets their constraints, and every response carries a receipt showing how it ran. The same network is powered by ordinary computers: open a tab, the server measures and verifies your WebGPU compute, and verified work offsets what you use. Developers get the same engine through an OpenAI-compatible API.
 
 Live at [brainnetwork.app](https://brainnetwork.app). Every figure on the site and in this README carries its provenance; the design rules are in [REAL_VS_SIMULATED.md](REAL_VS_SIMULATED.md).
 

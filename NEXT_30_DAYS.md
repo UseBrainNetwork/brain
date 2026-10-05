@@ -38,7 +38,7 @@ Token emissions, staking, governance, NFTs, licenses, quests, points, a model ma
 
 | Claim | Measurement that would make it true |
 | --- | --- |
-| "BRAIN routes to the best available intelligence" | Routing observation table shows estimate error and fallback rate; weights unchanged or changed with a written reason |
+| "BRAIN AUTO picks the right route" | Routing observation table shows estimate error and fallback rate; weights unchanged or changed with a written reason |
 | "Your computer can power BRAIN" | ≥ 1 production receipt where a customer-requested job ran on a contributor's browser and `COMPUTE_OFFSET` reduced that contributor's usage |
 | "Every answer has a receipt" | 100 % of chat requests in the window have a receipt id; none have `source: SIMULATED` |
 | "Pay for intelligence, not for a model" | A Pro or Max plan that can actually be purchased, or the PLACEHOLDER label still on |
