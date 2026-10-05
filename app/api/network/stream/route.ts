@@ -1,7 +1,6 @@
 import type { ComputeOrder } from "@/domain/economy";
 import type { NetworkEvent } from "@/domain/types";
 import { eventBus } from "@/services/eventBus";
-import { sweepOffline } from "@/services/nodes";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,10 +30,9 @@ export async function GET(req: Request) {
       };
       send(`retry: 3000\n\n`);
       const unsubscribe = eventBus.subscribe((e) => send(`data: ${JSON.stringify(redact(e))}\n\n`));
-      const ping = setInterval(() => {
-        send(`: ping\n\n`);
-        void sweepOffline();
-      }, 10_000);
+      // Keep-alive only. The offline sweep runs on request paths that read nodes; running it here
+      // multiplied one database sweep per viewer per 10 s across every long-lived stream instance.
+      const ping = setInterval(() => send(`: ping\n\n`), 10_000);
       cleanup = () => {
         unsubscribe();
         clearInterval(ping);

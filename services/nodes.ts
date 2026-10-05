@@ -182,9 +182,14 @@ export async function authNode(sessionToken: string | null): Promise<StoredNode>
 
 const isLive = (n: StoredNode) => n.status === "idle" || n.status === "computing";
 
+const sweepState = globalThis as typeof globalThis & { __brainSweepAt?: number };
+
+/** Marks silent nodes offline and expires overdue jobs. Throttled per instance: at most one sweep per 5 s. */
 export async function sweepOffline() {
-  const store = getStore();
   const now = Date.now();
+  if (now - (sweepState.__brainSweepAt ?? 0) < 5_000) return;
+  sweepState.__brainSweepAt = now;
+  const store = getStore();
   for (const n of await store.listNodes()) {
     if (isLive(n) && now - n.lastHeartbeatAt > networkConfig.nodes.offlineAfterMs) {
       await store.saveNode({ ...n, status: "offline" });
@@ -233,7 +238,11 @@ export async function leave(node: StoredNode) {
 
 export async function liveNodes(): Promise<ComputeNode[]> {
   await sweepOffline();
-  return (await getStore().listNodes()).filter((n) => n.status === "idle" || n.status === "computing").map(publicNode);
+  const now = Date.now();
+  // Filter by heartbeat age as well as status, so a throttled sweep never shows a silent node as online.
+  return (await getStore().listNodes())
+    .filter((n) => (n.status === "idle" || n.status === "computing") && now - n.lastHeartbeatAt <= networkConfig.nodes.offlineAfterMs)
+    .map(publicNode);
 }
 
 /* ---------------------------------------------------------------- dispatch */
