@@ -11,13 +11,15 @@ export const dynamic = "force-dynamic";
  * REAL values only, measured by this server. Nothing simulated is ever reported here.
  */
 export const GET = nodeRoute(async () => {
-  const [nodes, summary] = await Promise.all([liveNodes(), realSummary()]);
-  const store = getStore() as { kind?: () => string };
+  const store = getStore() as ReturnType<typeof getStore> & { kind?: () => string };
+  const [nodes, summary, nodesJoined] = await Promise.all([liveNodes(), realSummary(), store.countNodesJoined().catch(() => null)]);
   const backend = typeof store.kind === "function" ? store.kind() : "memory";
   return json(
     {
       source: "REAL",
       nodesOnline: nodes.length,
+      /** Distinct GPUs that have registered since launch. null if the store cannot count. */
+      nodesJoined,
       jobsCompleted: summary.jobsCompleted,
       workUnitsVerified: summary.workUnitsVerified,
       verifiedComputeUnits: summary.verifiedComputeUnits,

@@ -115,6 +115,10 @@ export class PgStore implements NetworkStore {
     const r = await this.q(`SELECT data FROM brain_nodes WHERE updated_at > now() - interval '1 day'`);
     return r.rows.map((x) => x.data as StoredNode);
   }
+  async countNodesJoined() {
+    const r = await this.q(`SELECT count(DISTINCT coalesce(data->>'identityHash', id))::int AS n FROM brain_nodes`);
+    return Number(r.rows[0]?.n ?? 0);
+  }
   async saveJob(j: StoredJob) {
     await this.q(
       `INSERT INTO brain_jobs (id, assigned_to, status, submitted_at, data)

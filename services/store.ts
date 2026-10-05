@@ -52,6 +52,8 @@ export interface NetworkStore {
   getNode(id: string): Promise<StoredNode | null>;
   getNodeBySession(sessionHash: string): Promise<StoredNode | null>;
   listNodes(): Promise<StoredNode[]>;
+  /** Distinct GPU identities that have ever registered. Cumulative; never pruned. */
+  countNodesJoined(): Promise<number>;
   saveJob(j: StoredJob): Promise<void>;
   getJob(id: string): Promise<StoredJob | null>;
   listRecentJobs(limit: number): Promise<StoredJob[]>;
@@ -159,6 +161,9 @@ export class MemoryStore implements NetworkStore {
   }
   async listNodes() {
     return [...this.nodes.values()];
+  }
+  async countNodesJoined() {
+    return new Set([...this.nodes.values()].map((n) => n.identityHash ?? n.id)).size;
   }
   async saveJob(j: StoredJob) {
     this.jobs.set(j.id, { ...j });
@@ -282,7 +287,7 @@ export class MemoryStore implements NetworkStore {
 const g = globalThis as typeof globalThis & { __brainStore?: NetworkStore };
 
 /** Dev HMR keeps the globalThis singleton across module reloads; replace it if its shape is stale. */
-const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode"];
+const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode", "countNodesJoined"];
 
 export function getStore(): NetworkStore {
   if (g.__brainStore && REQUIRED.some((k) => typeof g.__brainStore?.[k] !== "function")) g.__brainStore = undefined;
