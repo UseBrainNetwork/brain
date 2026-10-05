@@ -96,14 +96,6 @@ export function ChatApp() {
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [railOpen, setRailOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
-  const [narrow, setNarrow] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 639px)");
-    const on = () => setNarrow(mq.matches);
-    on();
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -280,45 +272,14 @@ Route <span className="text-chalk/70">{mode}</span>
           </div>
 
           {/* Composer */}
-          <div className="shrink-0 border-t border-chalk/10 bg-ink/80 backdrop-blur">
-            <div className="mx-auto w-full max-w-[760px] px-4 pb-4 pt-3 md:px-6">
-              <div className="mb-2 flex flex-wrap items-center gap-1.5 font-mono text-[10.5px] tracking-[0.08em]">
-                <span className="mr-1 text-chalk/35">ROUTE</span>
-                {MODES.filter((m) => modeAllowed(m.id)).map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    title={m.hint}
-                    onClick={() => setMode(m.id)}
-                    className={cx("rounded-full px-2.5 py-1 transition-colors", mode === m.id ? "bg-chalk text-ink" : "text-chalk/55 ring-1 ring-inset ring-chalk/15 hover:text-chalk")}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-                {privateAllowed && (
-                  <>
-                    <span className="mx-1 h-4 w-px bg-chalk/15" />
-                    {(["STANDARD", "PRIVATE"] as const).map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        title={p === "STANDARD" ? "Plaintext never goes to untrusted distributed nodes" : "Operator infrastructure only"}
-                        onClick={() => setPrivacy(p)}
-                        className={cx("rounded-full px-2.5 py-1 transition-colors", privacy === p ? "bg-signal text-white" : "text-chalk/55 ring-1 ring-inset ring-chalk/15 hover:text-chalk")}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </>
-                )}
-                <span className="ml-auto hidden text-chalk/35 sm:inline">{credits == null ? "" : `${Math.max(0, Math.floor(credits)).toLocaleString("en-US")} credits`}</span>
-              </div>
+          <div className="shrink-0 bg-gradient-to-t from-ink via-ink/95 to-transparent">
+            <div className="mx-auto w-full max-w-[760px] px-4 pb-5 pt-2 md:px-6">
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   void send(input);
                 }}
-                className="flex items-end gap-2 rounded-[14px] bg-ink-2 p-2 ring-1 ring-inset ring-chalk/12 focus-within:ring-chalk/30"
+                className="rounded-[20px] bg-ink-2 shadow-[0_24px_60px_-28px_rgba(0,0,0,0.9)] ring-1 ring-inset ring-chalk/12 transition-shadow focus-within:ring-chalk/30"
               >
                 <textarea
                   ref={taRef}
@@ -331,25 +292,64 @@ Route <span className="text-chalk/70">{mode}</span>
                     }
                   }}
                   rows={Math.min(8, Math.max(1, input.split("\n").length))}
-                  placeholder={narrow ? "Ask BRAIN anything." : "Ask BRAIN anything. Every answer tells you where it ran."}
-                  className="max-h-[220px] min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-[15px] leading-[1.5] text-chalk outline-none placeholder:text-chalk/30"
+                  placeholder="Ask BRAIN anything."
+                  className="max-h-[240px] w-full resize-none bg-transparent px-4 pb-1 pt-4 text-[15.5px] leading-[1.5] text-chalk outline-none placeholder:text-chalk/30"
                 />
-                {busy ? (
-                  <button type="button" onClick={stop} className="h-10 shrink-0 rounded-[10px] bg-chalk/10 px-4 font-mono text-[11px] uppercase tracking-[0.1em] text-chalk hover:bg-chalk/15">
-                    Stop
-                  </button>
-                ) : (
-                  <button type="submit" disabled={!input.trim()} className="h-10 shrink-0 rounded-[10px] bg-signal px-4 text-[13.5px] font-semibold text-white hover:bg-signal-2 disabled:opacity-35">
-                    Send
-                  </button>
-                )}
+                <div className="flex items-center justify-between gap-3 px-2.5 pb-2.5">
+                  <div className="flex flex-wrap items-center gap-1 font-mono text-[10.5px] tracking-[0.08em]">
+                    {MODES.filter((m) => modeAllowed(m.id)).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        title={m.hint}
+                        onClick={() => setMode(m.id)}
+                        className={cx("rounded-full px-2.5 py-1 transition-colors", mode === m.id ? "bg-chalk/[0.12] text-chalk" : "text-chalk/45 hover:bg-chalk/[0.06] hover:text-chalk")}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                    {privateAllowed && (
+                      <>
+                        <span className="mx-1 h-3.5 w-px bg-chalk/15" />
+                        {(["STANDARD", "PRIVATE"] as const).map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            title={p === "STANDARD" ? "Plaintext never goes to untrusted distributed nodes" : "Operator infrastructure only"}
+                            onClick={() => setPrivacy(p)}
+                            className={cx("rounded-full px-2.5 py-1 transition-colors", privacy === p ? "bg-signal/20 text-signal-2" : "text-chalk/45 hover:bg-chalk/[0.06] hover:text-chalk")}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className="hidden font-mono text-[10.5px] text-chalk/35 sm:inline">
+                      {credits == null ? "" : `${Math.max(0, Math.floor(credits)).toLocaleString("en-US")} credits`}
+                      {planName ? ` · ${planName}` : ""}
+                    </span>
+                    {busy ? (
+                      <button type="button" onClick={stop} aria-label="Stop" className="grid size-9 place-items-center rounded-full bg-chalk/10 text-chalk hover:bg-chalk/15">
+                        <span className="block size-3 rounded-[2px] bg-chalk" />
+                      </button>
+                    ) : (
+                      <button type="submit" disabled={!input.trim()} aria-label="Send" className="grid size-9 place-items-center rounded-full bg-chalk text-ink transition-colors hover:bg-white disabled:bg-chalk/15 disabled:text-chalk/40">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </div>
               </form>
-              <div className="mt-2 flex items-center justify-between font-mono text-[10px] text-chalk/30">
-                <span className="hidden sm:inline">Enter to send · Shift+Enter for a new line</span>
-                <span className="sm:hidden">Conversations stay in this browser</span>
-                <span>
-                  {planName ? `${planName} plan` : ""} · <Link href="/account" className="hover:text-chalk/60">Account</Link>
-                </span>
+              <div className="mt-2.5 flex items-center justify-center gap-1.5 font-mono text-[10px] text-chalk/30">
+                <span>Every answer tells you where it ran and what it cost.</span>
+                <span className="hidden sm:inline">·</span>
+                <Link href="/account" className="hidden hover:text-chalk/60 sm:inline">
+                  Account
+                </Link>
               </div>
             </div>
           </div>
@@ -371,26 +371,61 @@ function StatusLine({ busy }: { busy: null | "routing" | "streaming" }) {
   );
 }
 
+const PICKS: { k: string; t: string }[] = [
+  { k: "Explain", t: "Explain what a compute receipt proves and what it does not." },
+  { k: "Compare", t: "Summarise the trade-offs between routing for cost and routing for latency." },
+  { k: "Code", t: "Write a Python function that verifies a sha256 hash of a file." },
+  { k: "Learn", t: "What is a verified work unit?" },
+];
+
 function Empty({ onPick }: { onPick: (t: string) => void }) {
-  const picks = ["Explain what a compute receipt proves and what it does not.", "Summarise the trade-offs between routing for cost and routing for latency.", "Write a Python function that verifies a sha256 hash of a file.", "What is a verified work unit?"];
   return (
-    <div className="flex min-h-[55vh] flex-col items-start justify-end">
-      <div className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-chalk/40">BRAIN</div>
-      <h1 className="display mt-3 text-[34px] leading-[1.02] text-chalk sm:text-[46px]">
-        Compute
-        <br />
-        <span className="text-chalk/40">from everywhere.</span>
+    <div className="flex flex-col items-center pt-6 text-center sm:min-h-[calc(100dvh-72px-44px-170px)] sm:justify-center sm:pt-0">
+      <CellField />
+      <h1 className="display mt-7 text-[36px] leading-[1.0] text-chalk sm:mt-9 sm:text-[56px]">
+        Compute <span className="text-chalk/35">from everywhere.</span>
       </h1>
-      <p className="mt-4 max-w-[560px] text-[14px] leading-relaxed text-chalk/55">
-        BRAIN AUTO estimates every execution target, picks one for your mode and privacy setting, runs it, and attaches a receipt. Today chat runs on a configured model provider; the browser network runs verified parallel compute. Each answer says exactly which.
-      </p>
-      <div className="mt-7 grid w-full gap-2 sm:grid-cols-2">
-        {picks.map((p) => (
-          <button key={p} type="button" onClick={() => onPick(p)} className="rounded-[10px] border border-chalk/10 bg-chalk/[0.025] px-4 py-3 text-left text-[13.5px] leading-snug text-chalk/75 hover:border-chalk/25 hover:text-chalk">
-            {p}
+      <p className="mt-5 max-w-[440px] text-[14.5px] leading-relaxed text-chalk/55">Ask anything. BRAIN picks the cheapest path that can run it and attaches a receipt showing where it ran and what it cost.</p>
+      <div className="mt-9 grid w-full max-w-[680px] gap-2 sm:grid-cols-2">
+        {PICKS.map((p) => (
+          <button
+            key={p.t}
+            type="button"
+            onClick={() => onPick(p.t)}
+            className="group flex items-start gap-3 rounded-[12px] border border-chalk/10 bg-chalk/[0.02] px-4 py-3.5 text-left transition-colors hover:border-chalk/25 hover:bg-chalk/[0.045]"
+          >
+            <span className="mt-[3px] shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-chalk/35 group-hover:text-signal-2">{p.k}</span>
+            <span className="flex-1 text-[13.5px] leading-snug text-chalk/75 group-hover:text-chalk">{p.t}</span>
+            <span className="mt-[2px] shrink-0 text-chalk/0 transition-colors group-hover:text-chalk/60">→</span>
           </button>
         ))}
       </div>
+      <p className="mt-8 max-w-[520px] font-mono text-[10.5px] leading-relaxed text-chalk/30">Chat currently runs on a configured model provider. Browser nodes run verified parallel compute. The receipt on each answer says which.</p>
+    </div>
+  );
+}
+
+/** Decorative cell field in the brand's grid motif. Carries no data; purely visual. */
+function CellField() {
+  const cols = 28;
+  const rows = 5;
+  const [lit, setLit] = useState<Record<number, 1 | 2>>({});
+  useEffect(() => {
+    const total = cols * rows;
+    const tick = () => {
+      const next: Record<number, 1 | 2> = {};
+      for (let i = 0; i < 14; i++) next[Math.floor(Math.random() * total)] = Math.random() < 0.3 ? 2 : 1;
+      setLit(next);
+    };
+    tick();
+    const id = setInterval(tick, 900);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="grid gap-[3px]" style={{ gridTemplateColumns: `repeat(${cols}, 8px)` }} aria-hidden>
+      {Array.from({ length: cols * rows }, (_, i) => (
+        <span key={i} className={cx("block size-2 rounded-[1.5px] transition-colors duration-700", lit[i] === 2 ? "bg-signal" : lit[i] === 1 ? "bg-chalk/55" : "bg-chalk/[0.07]")} />
+      ))}
     </div>
   );
 }

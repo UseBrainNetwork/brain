@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { chatEventStream, sseHeaders } from "@/api/chatStream";
 import { validateChat } from "@/api/gateway";
+import { CHAT_SYSTEM_PROMPT } from "@/lib/chatSystem";
 import { body, nodeRoute } from "@/api/http";
 import type { PrivacyRequirement } from "@/domain/economy";
 import { normalizeMode } from "@/domain/economy";
@@ -38,7 +39,8 @@ export const POST = nodeRoute(async (req) => {
 
   const t0 = Date.now();
   const chatId = `chatcmpl-${randomBytes(10).toString("hex")}`;
-  const request = { kind: "chat" as const, model: chat.model, messages: chat.messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy };
+  const messages = chat.messages[0]?.role === "system" ? chat.messages : [{ role: "system" as const, content: CHAT_SYSTEM_PROMPT }, ...chat.messages];
+  const request = { kind: "chat" as const, model: chat.model, messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy };
   const customerId = `acct:${account.accountId}`;
 
   const stream = await chatEventStream({
