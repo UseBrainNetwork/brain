@@ -15,8 +15,8 @@ import { json, rateLimit } from "@/services/security";
 export const dynamic = "force-dynamic";
 
 const PRIVACY = new Set<PrivacyRequirement>(["PUBLIC", "STANDARD", "PRIVATE"]);
-/** Max store time spent on account/credit bookkeeping before the request proceeds without it. */
-const STORE_BUDGET_MS = 4_000;
+/** Max store time spent on account + credit bookkeeping, in total, before the request proceeds without it. */
+const STORE_BUDGET_MS = 3_500;
 
 /**
  * Consumer chat endpoint for /chat. Authenticated by the account session cookie (created on first
@@ -26,9 +26,13 @@ const STORE_BUDGET_MS = 4_000;
 export const POST = nodeRoute(async (req, { ip }) => {
   // Account and credit bookkeeping are bounded: if the store is slow the answer still streams,
   // with no credit charged and no plan upgrade granted (free-plan limits apply).
+  // One budget covers the whole chain (account → monthly grant → balance) so a slow store costs at
+  // most STORE_BUDGET_MS before the first token, not one budget per step.
+  const budgetStart = Date.now();
+  const remaining = () => Math.max(250, STORE_BUDGET_MS - (Date.now() - budgetStart));
   const session = await withTimeout(
     ensureAccount(req).catch(() => null),
-    STORE_BUDGET_MS,
+    remaining(),
     null,
   );
   const degraded = session == null;
@@ -52,7 +56,7 @@ export const POST = nodeRoute(async (req, { ip }) => {
       ensureMonthlyGrant(account)
         .then(() => balance(account.accountId))
         .catch(() => null),
-      STORE_BUDGET_MS,
+      remaining(),
       null,
     );
     if (bal && !mayConsume(bal)) return json({ error: { code: "out_of_credits", message: "You have used this month's included credits." }, balance: bal.balance }, 402);
