@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useNetwork } from "@/network/realtime/store";
+import { useSim } from "@/network/realtime/mode";
 import { getRevenue, getToken } from "@/services/data";
 import { cx, fmtCompact, fmtInt, fmtUsd } from "@/lib/format";
 
@@ -16,6 +17,7 @@ interface Quote {
 
 /** Tape of network quotes. Arrows compare against the previous store value, so they move with real drift. */
 export function Ticker({ className }: { className?: string }) {
+  const sim = useSim();
   const m = useNetwork((s) => s.metrics);
   const pools = useNetwork((s) => s.pools);
   const prev = useRef(new Map<string, number>());
@@ -38,6 +40,7 @@ export function Ticker({ className }: { className?: string }) {
   useEffect(() => {
     for (const q of quotes) prev.current.set(q.k, q.v);
   });
+  if (!sim) return null;
 
   const strip = (
     <div className="flex shrink-0 items-center">

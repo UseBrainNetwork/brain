@@ -252,7 +252,7 @@ BRAIN_EXTERNAL_BASE_URL=http://localhost:3999/v1 BRAIN_EXTERNAL_API_KEY=test BRA
 
 - Nothing client-reported is trusted. Only server-verified compute earns.
 - Unknown is a valid value. Prices, latencies and hardware are measured or configured, never estimated.
-- Real and simulated records never share a total. Demo data lives in `services/mock/` and is labelled.
+- Real and simulated records never share a total. The site is real-only by default; demo data lives in `services/mock/`, appears only behind the footer's "Show simulated data" button, and is labelled SIM.
 - No token emissions, staking yield, points, quests, licenses, NFTs, projected returns or "cheaper than X" claims.
 
 ## Community

@@ -7,6 +7,7 @@ import type { RewardClaim, RewardsSummary } from "@/domain/types";
 import { Button, Prov } from "@/components/ui";
 import { WalletButton } from "@/components/wallet/WalletButton";
 import { useWallet, walletStore } from "@/lib/wallet/store";
+import { useSim } from "@/network/realtime/mode";
 import { cx, fmtCompact, fmtDuration, fmtSol, shortAddr } from "@/lib/format";
 
 type ClaimState = { step: "idle" } | { step: "preparing" | "signing" | "sending" } | { step: "done"; claim: RewardClaim } | { step: "error"; message: string };
@@ -34,10 +35,11 @@ const txUrl = (sig: string, cluster: string) => `https://solscan.io/tx/${sig}${c
 export function RewardsDashboard() {
   const w = useWallet();
   const address = w.status === "connected" ? w.address : null;
-  const [data, setData] = useState<RewardsSummary | null>(null);
+  const [raw, setData] = useState<RewardsSummary | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [claim, setClaim] = useState<ClaimState>({ step: "idle" });
   const [now, setNow] = useState(() => Date.now());
+  const sim = useSim();
 
   const load = useCallback(async () => {
     if (!address) return;
@@ -66,7 +68,9 @@ export function RewardsDashboard() {
   }, []);
 
   if (!address) return <ConnectPrompt />;
-  if (!data) return <Skeleton error={loadError} />;
+  if (!raw) return <Skeleton error={loadError} />;
+  // Real-only mode: drop the demo history the server attaches to wallets with no settled epochs.
+  const data: RewardsSummary = sim || !raw.demo ? raw : { ...raw, demo: false, demoLamports: 0, epochs: raw.epochs.filter((e) => e.provenance === "live") };
 
   const canSign = w.verified;
   const blocked = !data.payouts.enabled

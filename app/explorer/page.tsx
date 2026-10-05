@@ -3,6 +3,7 @@ import { ExplorerStats, JobSearch, LiveJobsTable, LiveNodesTable, TopContributor
 import { JobChain } from "@/components/explorer/JobChain";
 import { UnfoldSection } from "@/components/layout/UnfoldSection";
 import { Container, Dot, Prov, Section } from "@/components/ui";
+import { SimOnly } from "@/components/layout/SimOnly";
 
 export const metadata: Metadata = { title: "Explorer" };
 
@@ -53,7 +54,9 @@ export default function ExplorerPage() {
           <div className="flex items-end justify-between">
             <h2 className="display-md text-[28px] md:text-[40px]">Live jobs</h2>
             <span className="flex items-center gap-2 font-mono text-[11px] text-fog">
-              simulated stream <Prov p="simulated" /> · real jobs tagged <Prov p="live" />
+              <SimOnly fallback={<>real jobs only <Prov p="live" /></>}>
+                simulated stream <Prov p="simulated" /> · real jobs tagged <Prov p="live" />
+              </SimOnly>
             </span>
           </div>
           <div className="mt-5">
@@ -63,7 +66,7 @@ export default function ExplorerPage() {
           <div className="mt-24 flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div>
               <h2 className="display-md flex items-center gap-3 text-[28px] md:text-[40px]">
-                Top contributors <Prov p="simulated" />
+                Top contributors <SimOnly fallback={<Prov p="live" />}><Prov p="simulated" /></SimOnly>
               </h2>
               <p className="mt-3 max-w-[520px] text-[14px] leading-relaxed text-ink/60">
                 Ranked by verified compute this epoch. Nodes are anonymous 4-hex ids. No wallets, IPs or device names are ever shown.

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { notify, requestNotifyPermission } from "@/lib/notify";
 import { EventFeed } from "@/components/network/EventFeed";
 import { GpuCounter, LiveNodeCount } from "@/components/network/Metrics";
+import { SimOnly } from "@/components/layout/SimOnly";
 import { ComputeDie } from "@/components/network/ComputeDie";
 import { Button, Dot, Prov } from "@/components/ui";
 import { WalletModal } from "@/components/wallet/WalletButton";
@@ -149,11 +150,13 @@ export function ContributeFlow() {
                 <span className="text-chalk/50">real nodes</span>
                 <Prov p="live" />
               </span>
-              <span className="hidden items-center gap-2 text-chalk/40 sm:flex">
-                <GpuCounter className="text-[13px]" />
-                <span>demo</span>
-                <Prov p="simulated" />
-              </span>
+              <SimOnly>
+                <span className="hidden items-center gap-2 text-chalk/40 sm:flex">
+                  <GpuCounter className="text-[13px]" />
+                  <span>demo</span>
+                  <Prov p="simulated" />
+                </span>
+              </SimOnly>
             </div>
           </div>
           <div className="relative">

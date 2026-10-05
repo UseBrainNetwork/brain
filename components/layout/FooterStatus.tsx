@@ -1,11 +1,23 @@
 "use client";
 
 import { Prov } from "@/components/ui";
+import { useSim } from "@/network/realtime/mode";
 import { useNetwork } from "@/network/realtime/store";
 import { fmtCompact, fmtInt } from "@/lib/format";
 
 export function FooterStatus() {
   const m = useNetwork((s) => s.metrics);
+  const sim = useSim();
+  if (!sim) {
+    const n = m.liveNodes;
+    return (
+      <div className="mt-8 inline-flex items-center gap-3 rounded-full border border-chalk/10 bg-chalk/[0.03] px-4 py-2 font-mono text-[11.5px] text-chalk/60">
+        <span className={n > 0 ? "inline-block size-[6px] bg-ok" : "inline-block size-[6px] bg-chalk/25"} />
+        <span suppressHydrationWarning>{n > 0 ? `${fmtInt(n)} real node${n === 1 ? "" : "s"} online` : "No nodes online right now"}</span>
+        <Prov p="live" />
+      </div>
+    );
+  }
   return (
     <div className="mt-8 inline-flex items-center gap-3 rounded-full border border-chalk/10 bg-chalk/[0.03] px-4 py-2 font-mono text-[11.5px] text-chalk/60">
       <span className="inline-block size-[6px] bg-ok" />

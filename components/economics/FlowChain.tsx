@@ -2,6 +2,8 @@
 
 import { motion } from "motion/react";
 import { Prov } from "@/components/ui";
+import { useSim } from "@/network/realtime/mode";
+import { SimFallback } from "@/components/layout/SimOnly";
 import { defaultRevenueSplit } from "@/rewards/config";
 import { getBaselineMetrics, getRevenue } from "@/services/data";
 import { fmtInt, fmtUsd } from "@/lib/format";
@@ -23,7 +25,15 @@ const STATIONS = [
 
 /** The value chain as a rail. A pulse runs end to end; each station lights as it passes. */
 export function FlowChain() {
+  const sim = useSim();
   const n = STATIONS.length;
+  if (!sim)
+    return (
+      <SimFallback
+        title="No real money has moved through this chain yet."
+        body="Creator fees need a live token and inference sales need API billing. Until both are connected, every dollar value in this chain is modelled. The split percentages (contributors, buyback, infrastructure, treasury) are the published config and are real."
+      />
+    );
   const dur = 7;
   return (
     <div className="relative">

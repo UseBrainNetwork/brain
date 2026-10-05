@@ -235,12 +235,19 @@ class NetworkStoreImpl {
       });
       return;
     }
+    // DEMO: blend the simulated baseline back in. Counters that real mode zeroed restart from the baseline.
+    const m = this.state.metrics;
     this.set({
       metrics: {
-        ...this.state.metrics,
+        ...m,
         gpusOnline: baseline.gpusOnline + this.simNodeDelta + live.length,
         availableMemoryTb: baseline.availableMemoryTb + (this.simMemDelta + liveMem) / 1000,
         liveNodes: live.length,
+        inferencesToday: m.inferencesToday || baseline.inferencesToday,
+        requestsPerSec: m.requestsPerSec || baseline.requestsPerSec,
+        creatorRewardsTodayUsd: m.creatorRewardsTodayUsd || baseline.creatorRewardsTodayUsd,
+        paidToProvidersTodayUsd: m.paidToProvidersTodayUsd || baseline.paidToProvidersTodayUsd,
+        capacityScore: baseline.capacityScore,
         provenance: baseline.provenance,
       },
     });

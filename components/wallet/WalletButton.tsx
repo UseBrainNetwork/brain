@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Prov } from "@/components/ui";
 import { walletAdapters } from "@/lib/wallet/adapters";
 import { useWallet, walletStore } from "@/lib/wallet/store";
+import { useSim } from "@/network/realtime/mode";
 import { cx, fmtInt, shortAddr } from "@/lib/format";
 
 export function WalletButton({ dark, className }: { dark?: boolean; className?: string }) {
@@ -66,6 +67,7 @@ export function WalletButton({ dark, className }: { dark?: boolean; className?: 
 }
 
 export function WalletModal({ onClose }: { onClose: () => void }) {
+  const sim = useSim();
   const w = useWallet();
   const [installed, setInstalled] = useState<Record<string, boolean>>({});
   useEffect(() => {
@@ -96,7 +98,7 @@ export function WalletModal({ onClose }: { onClose: () => void }) {
           Holdings raise your reward weighting only while you run verified compute. Signing a message proves ownership; it moves no funds.
         </p>
         <div className="space-y-1">
-          {walletAdapters.map((a) => {
+          {walletAdapters.filter((a) => a.kind !== "demo" || sim).map((a) => {
             const ok = installed[a.id];
             return (
               <button

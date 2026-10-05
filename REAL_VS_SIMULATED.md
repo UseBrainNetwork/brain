@@ -6,7 +6,9 @@ This prototype mixes genuine system behavior with demo data. The UI badges every
 - **SIM**: demo data.
 - **EST**: an illustrative estimate.
 
-This file is the source of truth for which is which. All demo values live in `services/mock/` and are served through `services/data.ts`. Components never hardcode them.
+**Default is real only.** Out of the box the site shows nothing simulated: counts, feeds, metrics and rankings come only from this server, and sections whose figures exist only in the model (reward estimates, money flow) say so instead of showing a number. The footer button **Show simulated data** switches to demo mode, where a simulated network is blended in and every such figure is labelled SIM. The choice is stored in the browser (`brain.mode.v1`); `?mode=demo` or `?mode=real` in the URL overrides it. `/demo` and `/node` are always real.
+
+This file is the source of truth for which is which. All demo values live in `services/mock/` and are served through `services/data.ts`. Components never hardcode them. Mode gating lives in `network/realtime/mode.ts` (`useSim`) and `components/layout/SimOnly.tsx`.
 
 ## Real
 

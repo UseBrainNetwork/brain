@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Prov } from "@/components/ui";
+import { useSim } from "@/network/realtime/mode";
 import type { ContributorState } from "@/network/client/contributor";
 import { cx, fmtBytes, fmtInt } from "@/lib/format";
 import type { DetectedField, DeviceDetection, FieldSource } from "@/webgpu/detect";
@@ -161,6 +162,7 @@ export function BenchViz({ s }: { s: ContributorState }) {
 
 export function BenchResult({ s }: { s: ContributorState }) {
   const b = s.benchmark!;
+  const sim = useSim();
   const top = Math.max(1, Math.round((1 - b.percentile) * 100));
   return (
     <div>
@@ -173,9 +175,9 @@ export function BenchResult({ s }: { s: ContributorState }) {
         </div>
         <div className="bg-paper p-4">
           <div className="label flex items-center gap-2 text-ink/50">
-            Est. network class <Prov p="estimated" />
+            {sim ? "Est. network class" : "Verified"} <Prov p={sim ? "estimated" : "live"} />
           </div>
-          <div className="num mt-2 text-[40px] font-medium leading-none md:text-[48px]">TOP {top}%</div>
+          <div className="num mt-2 text-[40px] font-medium leading-none md:text-[48px]">{sim ? `TOP ${top}%` : b.verified ? "YES" : "NO"}</div>
         </div>
       </div>
       <div className="mt-3 border-t border-ink/10 font-mono text-[11.5px]">
@@ -184,7 +186,7 @@ export function BenchResult({ s }: { s: ContributorState }) {
           ["server-timed", `${fmtInt(b.serverElapsedMs ?? 0)} ms (trusted)`],
           ["client GPU time", `${fmtInt(b.clientElapsedMs)} ms (reported)`],
           ["verification", "secret blocks recomputed on server ✓"],
-          ["class percentile", "vs. simulated network distribution"],
+          ...(sim ? [["class percentile", "vs. simulated network distribution"]] : []),
         ].map(([k, v]) => (
           <div key={k} className="flex justify-between gap-4 border-b border-ink/10 py-2">
             <span className="text-ink/50">{k}</span>

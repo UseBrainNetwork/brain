@@ -3,6 +3,8 @@
 import { Counter, Prov } from "@/components/ui";
 import type { Provenance } from "@/domain/types";
 import { useNetwork } from "@/network/realtime/store";
+import { useSim } from "@/network/realtime/mode";
+import { useReal } from "@/network/realtime/real";
 import { cx, fmtCompact, fmtInt, fmtUsd } from "@/lib/format";
 
 interface MetricDef {
@@ -16,6 +18,20 @@ interface MetricDef {
 
 export function useMetricDefs(): MetricDef[] {
   const m = useNetwork((s) => s.metrics);
+  const sim = useSim();
+  const real = useReal((r) => r.summary);
+  if (!sim) {
+    // Real only: every figure here comes from this server's registry and verified jobs.
+    return [
+      { label: "Nodes online", value: m.liveNodes, format: fmtInt, prov: "live", accent: true },
+      { label: "Available memory", value: m.availableMemoryTb, format: (n) => `${n.toFixed(2)} TB`, prov: "live" },
+      { label: "Capacity score", value: real?.capacityScore ?? m.capacityScore, format: fmtInt, prov: "live" },
+      { label: "Jobs completed", value: real?.jobsCompleted ?? 0, format: fmtInt, prov: "live" },
+      { label: "Work units verified", value: real?.workUnitsVerified ?? 0, format: fmtInt, prov: "live" },
+      { label: "Verified compute", value: real?.verifiedComputeUnits ?? 0, format: (n) => fmtCompact(n, 2), prov: "live" },
+      { label: "Success rate", value: real?.successRate ?? null, format: (n) => `${(n * 100).toFixed(0)}%`, prov: "live", placeholder: "no jobs yet" },
+    ];
+  }
   return [
     { label: "GPUs online", value: m.gpusOnline, format: fmtInt, prov: "simulated", accent: true },
     { label: "Available memory", value: m.availableMemoryTb, format: (n) => `${n.toFixed(1)} TB`, prov: "simulated" },
@@ -49,7 +65,7 @@ export function MetricsStrip({ className, tone = "dark" }: { className?: string;
           </div>
           <div className={cx("num truncate text-[22px] font-medium md:text-[26px]", d.accent && "text-signal")}>
             {d.value == null ? (
-              <span title="Pending real pricing benchmarks" className="opacity-50">
+              <span title={d.prov === "live" ? "No data yet" : "Pending real pricing benchmarks"} className="opacity-50">
                 {d.placeholder}
               </span>
             ) : (

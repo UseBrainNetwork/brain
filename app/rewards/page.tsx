@@ -48,7 +48,7 @@ export default function RewardsPage() {
             <div>
               <h2 className="display-md text-[36px] md:text-[56px]">Estimate your earnings</h2>
               <p className="mt-5 max-w-[520px] text-[15.5px] leading-relaxed text-chalk/60">
-                Pick your hardware, how long it stays online and what you hold. The estimate runs the production reward formula against today&apos;s network.
+                Pick your hardware, how long it stays online and what you hold. The estimate runs the production reward formula; it needs a funded pool to mean anything.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -86,7 +86,7 @@ export default function RewardsPage() {
           <div className="mb-14 flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <h2 className="display-md text-[36px] md:text-[56px]">Where rewards come from</h2>
             <p className="max-w-[440px] text-[14.5px] leading-relaxed text-chalk/55">
-              The contributor pool is funded by creator fees and inference sales, split by published percentages each epoch. Values are simulated until the protocol wallet and API billing are connected.
+              The contributor pool is funded by creator fees and inference sales, split by published percentages each epoch. No real money has flowed yet; the protocol wallet and API billing are not connected. Modelled values are available under “Show simulated data” in the footer, labelled SIM.
             </p>
           </div>
           <MoneyFlow className="mb-20 hidden md:block" />

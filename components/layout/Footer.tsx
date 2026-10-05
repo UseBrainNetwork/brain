@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Button, Container } from "@/components/ui";
 import { FooterStatus } from "@/components/layout/FooterStatus";
 import { StupifiedLink } from "@/components/layout/Stupified";
+import { SimOnly } from "@/components/layout/SimOnly";
+import { SimToggle } from "@/components/layout/SimToggle";
 import { SocialLinks } from "@/components/layout/SocialLinks";
 import { social } from "@/lib/site";
 
@@ -79,8 +81,11 @@ export function Footer() {
             </span>
             <span>© {new Date().getFullYear()} BRAIN (working name) · Experimental software · Not an investment; rewards are not guaranteed</span>
           </span>
-          <span className="flex items-center gap-4">
-            <span>SIM = demo data · EST = illustrative estimate</span>
+          <span className="flex flex-wrap items-center gap-4">
+            <SimToggle />
+            <SimOnly>
+              <span>SIM = simulated · EST = illustrative estimate</span>
+            </SimOnly>
             <SocialLinks dark />
           </span>
         </div>

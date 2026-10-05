@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import type { ComputeJob, JobStatus } from "@/domain/types";
 import { Dot, Prov } from "@/components/ui";
 import { useNetwork } from "@/network/realtime/store";
+import { useSim } from "@/network/realtime/mode";
 import { deviceLabel } from "@/services/mock/mockData";
 import { getTopContributors } from "@/services/data";
 import { cx, fmtCompact, fmtInt, fmtMs, fmtUsd } from "@/lib/format";
@@ -115,7 +116,7 @@ export function LiveJobsTable({ limit = 18 }: { limit?: number }) {
           {!rows.length && (
             <tr>
               <td colSpan={7} className="py-10 text-center text-fog">
-                Connecting to network stream…
+                {now ? "No real jobs yet. Every job a node verifies is listed here with its receipt." : "Connecting to network stream…"}
               </td>
             </tr>
           )}
@@ -174,6 +175,18 @@ export function LiveNodesTable() {
 const contributors = getTopContributors(20);
 
 export function TopContributorsTable() {
+  const sim = useSim();
+  const live = useNetwork((s) => s.liveNodes);
+  if (!sim) {
+    const n = Object.keys(live).length;
+    return (
+      <div className="rounded-[16px] bg-paper p-6 font-mono text-[12.5px] leading-relaxed text-ink/60 ring-1 ring-ink/10">
+        {n > 0
+          ? `Rankings start once more than one node has verified work this epoch. ${n} real node${n === 1 ? " is" : "s are"} online; see the table above.`
+          : "No verified contributors yet. The first node to verify work on this server appears here, ranked by verified compute."}
+      </div>
+    );
+  }
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] font-mono text-[12.5px]">
@@ -210,12 +223,21 @@ export function ExplorerStats() {
   const live = useNetwork((s) => s.liveNodes);
   const lat = jobs.filter((j) => j.latencyMs).slice(0, 40);
   const avg = lat.length ? lat.reduce((s, j) => s + (j.latencyMs ?? 0), 0) / lat.length : 0;
-  const stats = [
-    { k: "Inferences today", v: fmtCompact(m.inferencesToday), p: "simulated" as const },
-    { k: "Requests / sec", v: fmtInt(m.requestsPerSec), p: "simulated" as const },
-    { k: "Avg latency (recent)", v: avg ? fmtMs(avg) : "—", p: "simulated" as const },
-    { k: "Real nodes on this server", v: fmtInt(Object.keys(live).length), p: "live" as const },
-  ];
+  const sim = useSim();
+  const liveJobs = jobs.filter((j) => j.provenance === "live");
+  const stats = sim
+    ? [
+        { k: "Inferences today", v: fmtCompact(m.inferencesToday), p: "simulated" as const },
+        { k: "Requests / sec", v: fmtInt(m.requestsPerSec), p: "simulated" as const },
+        { k: "Avg latency (recent)", v: avg ? fmtMs(avg) : "—", p: "simulated" as const },
+        { k: "Real nodes on this server", v: fmtInt(Object.keys(live).length), p: "live" as const },
+      ]
+    : [
+        { k: "Real jobs (recent)", v: fmtInt(liveJobs.length), p: "live" as const },
+        { k: "Verified", v: fmtInt(liveJobs.filter((j) => j.lifecycle.some((e) => e.stage === "completed")).length), p: "live" as const },
+        { k: "Avg latency (recent)", v: avg ? fmtMs(avg) : "—", p: "live" as const },
+        { k: "Real nodes on this server", v: fmtInt(Object.keys(live).length), p: "live" as const },
+      ];
   return (
     <div className="grid grid-cols-2 border-y border-ink/12 lg:grid-cols-4">
       {stats.map((s, i) => (

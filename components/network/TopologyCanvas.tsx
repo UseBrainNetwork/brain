@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ComputeJob, DeviceClass, NetworkEvent } from "@/domain/types";
 import { contributor } from "@/network/client/contributor";
 import { networkStore } from "@/network/realtime/store";
+import { getMode, useSim } from "@/network/realtime/mode";
 import { getDeviceClasses } from "@/services/data";
 import { cx, fmtInt } from "@/lib/format";
 
@@ -89,6 +90,7 @@ export function TopologyCanvas({ className, labels = true, dense = false }: { cl
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<{ c: Cluster; x: number; y: number; active: number } | null>(null);
+  const sim = useSim();
 
   useEffect(() => {
     const el = canvas.current!;
@@ -593,7 +595,7 @@ export function TopologyCanvas({ className, labels = true, dense = false }: { cl
           ctx.fillText(cl.label, x, y);
           const w = ctx.measureText(cl.label + "  ").width;
           ctx.fillStyle = `rgba(${C.chalk},0.32)`;
-          ctx.fillText(fmtInt(cl.nodes + (liveByClass.get(cl.id) ?? 0)), x + w, y);
+          ctx.fillText(fmtInt((getMode() === "demo" ? cl.nodes : 0) + (liveByClass.get(cl.id) ?? 0)), x + w, y);
         }
         ctx.fillStyle = `rgba(${C.chalk},0.38)`;
         ctx.textAlign = "center";
@@ -664,12 +666,12 @@ export function TopologyCanvas({ className, labels = true, dense = false }: { cl
       el.removeEventListener("mousemove", onMove);
       el.removeEventListener("mouseleave", onLeave);
     };
-  }, [labels, dense]);
+  }, [labels, dense, sim]);
 
   return (
     <div ref={wrap} className={cx("relative overflow-hidden", className)}>
       <canvas ref={canvas} className="absolute inset-0 block" aria-label="Live visualization of compute nodes and jobs in the BRAIN network" role="img" />
-      {hover && (
+      {hover && sim && (
         <div
           className="pointer-events-none absolute z-10 w-[210px] -translate-x-1/2 -translate-y-full rounded-lg bg-chalk p-3 text-ink shadow-xl"
           style={{ left: hover.x, top: hover.y - 26 }}

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Button, Prov } from "@/components/ui";
 import { contributor, useContributor } from "@/network/client/contributor";
+import { useSim } from "@/network/realtime/mode";
+import { SimFallback } from "@/components/layout/SimOnly";
 import { defaultRewardConfig } from "@/rewards/config";
 import { estimateReward } from "@/rewards/simulate";
 import { getDeviceClasses } from "@/services/data";
@@ -156,6 +158,15 @@ export function EarningsCalculator({ compact = false }: { compact?: boolean }) {
   const computePart = est.dailyUsd > 0 ? (base.dailyUsd / est.dailyUsd) * 100 : 100;
   const multPct = Math.min(1, Math.max(0, (est.multiplier - 1) / (cfg.maxMultiplier - 1))) * 100;
   const preset = PRESETS.find((p) => p.medianScore === score);
+  const sim = useSim();
+
+  if (!sim)
+    return (
+      <SimFallback
+        title="No reward estimate yet."
+        body={`The contributor pool is funded by creator fees and inference sales. Neither is connected, so the real pool today is $0 and any dollar figure here would be made up.${measured != null ? ` Your measured score of ${fmtInt(measured)} is real and recorded.` : " Measuring your GPU on /earn is real and takes about a minute."} The estimator can run against a modelled network, clearly labelled SIM.`}
+      />
+    );
 
   return (
     <div className="overflow-hidden rounded-[24px] bg-ink-2 ring-1 ring-chalk/[0.08]">

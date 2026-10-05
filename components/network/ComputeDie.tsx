@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import type { ComputeJob, DeviceClass, NetworkEvent } from "@/domain/types";
 import { contributor } from "@/network/client/contributor";
 import { networkStore } from "@/network/realtime/store";
+import { getMode, useSim } from "@/network/realtime/mode";
 import { getDeviceClasses } from "@/services/data";
 import { cx, fmtInt } from "@/lib/format";
 
@@ -88,6 +89,7 @@ export function ComputeDie({
   const host = useRef<HTMLDivElement>(null);
   const labelsRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
+  const sim = useSim();
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -284,15 +286,17 @@ export function ComputeDie({
         g.font = `600 ${0.13 * k}px ui-monospace, "JetBrains Mono", monospace`;
         g.fillText(d.label, sx(d.x0), sz(d.z0) - 0.07 * k);
         const lw = g.measureText(d.label).width;
-        g.fillStyle = "rgba(230,233,238,0.32)";
-        g.font = `500 ${0.11 * k}px ui-monospace, "JetBrains Mono", monospace`;
-        g.fillText(fmtInt(d.nodes), sx(d.x0) + lw + 0.08 * k, sz(d.z0) - 0.07 * k);
+        if (getMode() === "demo") {
+          g.fillStyle = "rgba(230,233,238,0.32)";
+          g.font = `500 ${0.11 * k}px ui-monospace, "JetBrains Mono", monospace`;
+          g.fillText(fmtInt(d.nodes), sx(d.x0) + lw + 0.08 * k, sz(d.z0) - 0.07 * k);
+        }
       }
-      // part marking
+      // part marking. Real mode: the grid is a device-class map, not a node count; only real nodes light up.
       g.fillStyle = "rgba(230,233,238,0.3)";
       g.font = `600 ${0.07 * k}px ui-monospace, "JetBrains Mono", monospace`;
       g.textAlign = "right";
-      g.fillText(`BRAIN·N1  ${fmtInt(TOTAL)} NODES  1 CELL = 1 NODE`, sx(W / 2 - 0.3), sz(D / 2 - 0.16));
+      g.fillText(getMode() === "demo" ? `BRAIN·N1  ${fmtInt(TOTAL)} NODES  1 CELL = 1 NODE  SIM` : "BRAIN·N1  DEVICE-CLASS MAP  REAL NODES LIGHT UP", sx(W / 2 - 0.3), sz(D / 2 - 0.16));
       const topTex = new THREE.CanvasTexture(cv);
       topTex.colorSpace = THREE.SRGBColorSpace;
       topTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -920,13 +924,13 @@ export function ComputeDie({
       disposed = true;
       cleanup();
     };
-  }, [interactive, focusLocal, dive]);
+  }, [interactive, focusLocal, dive, sim]);
 
   return (
     <div ref={host} className={cx("relative select-none", className)}>
       <div ref={labelsRef} className="pointer-events-none absolute inset-0 overflow-hidden" />
       {failed && <div className="absolute inset-0 grid place-items-center font-mono text-[12px] text-fog">3D view unavailable (WebGL disabled)</div>}
-      {hover && (
+      {hover && sim && (
         <div
           className="pointer-events-none absolute z-10 w-[210px] rounded-xl bg-ink/95 p-3.5 font-mono text-[11.5px] text-chalk shadow-2xl ring-1 ring-chalk/10 backdrop-blur"
           style={{ left: hover.x > hover.w - 240 ? hover.x - 226 : hover.x + 16, top: hover.y + 16 }}

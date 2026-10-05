@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import type { ComputeJob, JobStatus } from "@/domain/types";
 import { Prov } from "@/components/ui";
 import { useNetwork } from "@/network/realtime/store";
+import { useSim } from "@/network/realtime/mode";
 import { cx, fmtMs } from "@/lib/format";
 import { stageAt, useNow } from "./Explorer";
 
@@ -99,12 +100,13 @@ function Block({ j, now }: { j: ComputeJob; now: number }) {
 export function JobChain({ className }: { className?: string }) {
   const jobs = useNetwork((s) => s.jobs).slice(0, SHOWN);
   const now = useNow(200);
+  const sim = useSim();
 
   return (
     <div className={cx("relative", className)}>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3 font-mono text-[11px] text-chalk/45">
         <span className="flex items-center gap-2 uppercase tracking-[0.08em]">
-          Job chain <Prov p="simulated" />
+          Job chain <Prov p={sim ? "simulated" : "live"} />
         </span>
         <span className="flex flex-wrap items-center gap-4">
           <span className="flex items-center gap-1.5"><i className="size-2 rounded-[2px] bg-chalk/20" />assigned</span>
@@ -118,6 +120,11 @@ export function JobChain({ className }: { className?: string }) {
         <div className="absolute inset-x-0 top-1/2 h-px bg-chalk/10" />
         <div className="relative flex h-[188px] gap-3">
           {!now && <div className="font-mono text-[12px] text-chalk/40">Connecting to the job stream…</div>}
+          {now > 0 && !jobs.length && (
+            <div className="font-mono text-[12px] leading-relaxed text-chalk/40">
+              No real jobs in the last window. Jobs appear here the moment a node verifies one.
+            </div>
+          )}
           <AnimatePresence initial={false} mode="popLayout">
             {now > 0 &&
               jobs.map((j) => (

@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { Prov } from "@/components/ui";
 import { useNetwork } from "@/network/realtime/store";
+import { useSim } from "@/network/realtime/mode";
 import { contributorPoolToday, networkUnitsPerDay } from "@/rewards/simulate";
 import { defaultRevenueSplit } from "@/rewards/config";
 import { getRevenue } from "@/services/data";
@@ -54,6 +55,7 @@ export function Flywheel({ className }: { className?: string }) {
   const [auto, setAuto] = useState<StageId>("trading");
   const active = hover ?? auto;
   const m = useNetwork((s) => s.metrics);
+  const sim = useSim();
 
   useEffect(() => {
     if (hover) return;
@@ -194,7 +196,7 @@ export function Flywheel({ className }: { className?: string }) {
               <div className="label text-signal">{String(order.indexOf(active) + 1).padStart(2, "0")} · {copy[active].title}</div>
               <p className="mt-3 hidden text-[14px] leading-snug opacity-80 sm:block md:text-[15px]">{copy[active].body}</p>
               <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 font-mono text-[10px] opacity-60 sm:text-[11px]">
-                {metric[active]} <Prov p="simulated" />
+                {sim ? <>{metric[active]} <Prov p="simulated" /></> : <>no real figures yet <Prov p="live" /></>}
               </div>
             </motion.div>
           </AnimatePresence>

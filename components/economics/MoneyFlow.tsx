@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Prov } from "@/components/ui";
 import { defaultRevenueSplit } from "@/rewards/config";
 import { useNetwork } from "@/network/realtime/store";
+import { useSim } from "@/network/realtime/mode";
 import { getRevenue } from "@/services/data";
 import { cx, fmtUsd } from "@/lib/format";
 
@@ -36,6 +37,12 @@ function stack(values: number[], scale: number) {
 
 /** Today's revenue as a Sankey: ribbon widths are dollars, splits come from rewards/config.ts. */
 export function MoneyFlow({ className }: { className?: string }) {
+  const sim = useSim();
+  if (!sim) return null;
+  return <MoneyFlowSim className={className} />;
+}
+
+function MoneyFlowSim({ className }: { className?: string }) {
   const creator = useNetwork((s) => s.metrics.creatorRewardsTodayUsd);
   const [hover, setHover] = useState<Dest | null>(null);
 

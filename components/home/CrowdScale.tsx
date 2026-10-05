@@ -4,6 +4,7 @@ import { motion, useMotionValueEvent, useScroll, useTransform } from "motion/rea
 import { useEffect, useRef, useState } from "react";
 import { Container, Odometer, Prov } from "@/components/ui";
 import { networkStore, useNetwork } from "@/network/realtime/store";
+import { useSim } from "@/network/realtime/mode";
 import { getDeviceClasses } from "@/services/data";
 import { cx, fmtInt } from "@/lib/format";
 
@@ -39,6 +40,7 @@ export function CrowdScale() {
     setStep(v < 0.3 ? 0 : v < 0.66 ? 1 : 2);
   });
   const m = useNetwork((s) => s.metrics);
+  const sim = useSim();
   const grow = smooth(0.18, 0.55, t);
   const gpus = Math.round(1 + (m.gpusOnline - 1) * grow);
   const memGb = DC_GPU_MEMORY_GB + (m.availableMemoryTb * 1000 - DC_GPU_MEMORY_GB) * grow;
@@ -272,16 +274,16 @@ export function CrowdScale() {
             </div>
             <div className="mt-8 grid grid-cols-2 gap-6 border-t border-chalk/10 pt-6 md:mt-10">
               <div>
-                <div className="label flex items-center gap-2 text-chalk/45">GPUs {grow > 0 && <Prov p="simulated" />}</div>
+                <div className="label flex items-center gap-2 text-chalk/45">{sim ? "GPUs" : "Real nodes"} {grow > 0 && <Prov p={sim ? "simulated" : "live"} />}</div>
                 <Odometer fast text={fmtInt(gpus)} className="mt-2 text-[34px] font-medium md:text-[44px]" />
               </div>
               <div>
-                <div className="label flex items-center gap-2 text-chalk/45">Memory {grow > 0 && <Prov p="simulated" />}</div>
+                <div className="label flex items-center gap-2 text-chalk/45">Memory {grow > 0 && <Prov p={sim ? "simulated" : "live"} />}</div>
                 <Odometer fast text={memText} className="mt-2 text-[34px] font-medium md:text-[44px]" />
               </div>
             </div>
             <motion.p style={{ opacity: legend }} className="mt-6 font-mono text-[11px] text-chalk/40">
-              1 point = 1 node · orange = serving a request now
+              {sim ? "1 point = 1 node · orange = serving a request now" : "Illustration of the device-class floorplan · counters above are real"}
             </motion.p>
           </div>
         </Container>

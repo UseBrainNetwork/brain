@@ -3,10 +3,9 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Site data mode.
- *  demo → simulated network activity is blended in (and labeled SIM) so the product reads as busy.
- *  real → nothing simulated anywhere: counts, feeds and metrics come only from this server.
- * /demo and /node are always real regardless of this setting.
+ * Site data mode. Default is REAL: nothing simulated anywhere; counts, feeds and metrics come only
+ * from this server. "Show simulated data" (footer) switches to DEMO, where a simulated network is
+ * blended in and every such number is labeled SIM. /demo and /node are always real.
  */
 export type DataMode = "demo" | "real";
 
@@ -16,14 +15,14 @@ let mode: DataMode | null = null;
 
 function read(): DataMode {
   if (mode) return mode;
-  if (typeof window === "undefined") return "demo";
+  if (typeof window === "undefined") return "real";
   const q = new URLSearchParams(window.location.search).get("mode");
   if (q === "real" || q === "demo") {
     localStorage.setItem(KEY, q);
     return (mode = q);
   }
   const v = localStorage.getItem(KEY);
-  return (mode = v === "real" ? "real" : "demo");
+  return (mode = v === "demo" ? "demo" : "real");
 }
 
 export function getMode(): DataMode {
@@ -44,5 +43,10 @@ export function onModeChange(l: () => void) {
 }
 
 export function useMode(): DataMode {
-  return useSyncExternalStore(onModeChange, read, () => "demo");
+  return useSyncExternalStore(onModeChange, read, () => "real");
+}
+
+/** True when simulated data may be shown. */
+export function useSim(): boolean {
+  return useMode() === "demo";
 }
