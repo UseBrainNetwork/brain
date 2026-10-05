@@ -7,6 +7,12 @@ import { KeyedMutex, type DocKind, type DocQuery, type NetworkStore, type Stored
 /** Postgres implementation of NetworkStore. Schema: db/schema.sql. */
 export class PgStore implements NetworkStore {
   private pool: Pool;
+  /**
+   * Separate, smaller pool for advisory-lock clients. A lock holder pins one client for the whole
+   * critical section while the work inside it queries through `pool`; sharing one pool lets N lock
+   * holders exhaust it and every query on the instance (including read-only routes) waits forever.
+   */
+  private lockPool: Pool;
   private ready: Promise<void>;
   constructor(connectionString: string) {
     // Hosted Postgres (Supabase, Neon, Prisma) requires TLS; local docker usually has none.
@@ -22,7 +28,12 @@ export class PgStore implements NetworkStore {
     } catch {
       /* not a URL-shaped string; pass through */
     }
-    this.pool = new Pool({ connectionString: cs, max: 5, ssl: local ? undefined : { rejectUnauthorized: false } });
+    const ssl = local ? undefined : { rejectUnauthorized: false };
+    // Fail fast rather than hang: a serverless instance that cannot get a connection in 8s or finish
+    // a statement in 15s should return an error, not hold the request open until the platform kills it.
+    const common = { connectionString: cs, ssl, connectionTimeoutMillis: 8_000, idleTimeoutMillis: 10_000, statement_timeout: 15_000, query_timeout: 15_000 };
+    this.pool = new Pool({ ...common, max: 5 });
+    this.lockPool = new Pool({ ...common, max: 3 });
     this.ready = this.migrate();
   }
 
@@ -70,7 +81,7 @@ export class PgStore implements NetworkStore {
       // behind transaction-mode poolers (Supabase/pgbouncer): lock and unlock can land on different
       // backends and the lock leaks forever. A transaction is pinned to one backend and the lock
       // is released at COMMIT no matter what.
-      const c = await this.pool.connect();
+      const c = await this.lockPool.connect();
       let locked = false;
       try {
         await c.query("BEGIN");
