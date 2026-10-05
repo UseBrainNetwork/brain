@@ -50,8 +50,8 @@ export function ProtocolWalletCard({ className, tone = "dark" }: { className?: s
             </a>
           </div>
           <p className={cx("mt-3 max-w-[560px] text-[13.5px] leading-relaxed", muted)}>
-            Creator fees from the token are claimed to this address and fund the contributor pool. The server never holds its key. Transfers below are raw on-chain activity; a transfer only counts as creator revenue
-            once its signature is recorded in the ledger.
+            Creator fees from the token are claimed to this address. The server never holds its key. Each recorded fee receipt funds the contributor pool at the published split, and claims are paid from a separate
+            payout wallet. Transfers below are raw on-chain activity; a transfer only counts as creator revenue once its signature is recorded in the ledger.
           </p>
         </div>
         <div className="text-right">
@@ -62,6 +62,19 @@ export function ProtocolWalletCard({ className, tone = "dark" }: { className?: s
           <div className={cx("mt-1.5 font-mono text-[10.5px]", muted)}>{v?.balanceSol == null ? (v ? "RPC unreachable" : "") : `on-chain · ${v.cluster}`}</div>
         </div>
       </div>
+      {v?.payout && (
+        <div className={cx("mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-4 font-mono text-[12px]", dark ? "border-chalk/10" : "border-ink/10")}>
+          <span className="flex flex-wrap items-center gap-2">
+            <span className={muted}>Payout wallet</span>
+            <a href={accountUrl(v.payout.address, v.cluster)} target="_blank" rel="noreferrer" className="hover:underline" title={v.payout.address}>
+              {shortAddr(v.payout.address)}
+            </a>
+            <CopyButton text={v.payout.address} dark={dark} />
+            <span className={cx("rounded-sm px-1 text-[9.5px] uppercase tracking-[0.08em] ring-1", v.payout.enabled ? "text-ok ring-ok/40" : "text-warn ring-warn/40")}>{v.payout.enabled ? "claims open" : "claims off"}</span>
+          </span>
+          <span>{v.payout.balanceSol == null ? <span className={muted}>UNKNOWN</span> : sol(v.payout.balanceSol)}</span>
+        </div>
+      )}
       {v && v.balanceSol != null && (
         <div className={cx("mt-5 border-t pt-4 font-mono text-[12px]", dark ? "border-chalk/10" : "border-ink/10")}>
           {inbound.length === 0 ? (

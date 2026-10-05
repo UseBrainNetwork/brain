@@ -1,4 +1,5 @@
 import { protocolWallet, token } from "@/lib/site";
+import { payoutStatus } from "./claims";
 
 /**
  * Read-only view of the protocol wallet, straight from a Solana RPC. Everything here is REAL
@@ -33,6 +34,8 @@ export interface ProtocolWalletView {
   fetchedAt: number;
   rpc: "configured" | "public" | "unavailable";
   token: TokenStatus;
+  /** Hot wallet claims are paid from. null when payouts are not configured. */
+  payout: { address: string; balanceSol: number | null; enabled: boolean } | null;
 }
 
 const LAMPORTS = 1e9;
@@ -96,7 +99,9 @@ export async function getProtocolWallet(limit = 8): Promise<ProtocolWalletView> 
   const { url, kind } = rpcUrl();
   const address = protocolWallet.address;
   const tokenStatus = await getTokenStatus();
-  const base: ProtocolWalletView = { address, cluster: protocolWallet.cluster, source: "REAL", balanceSol: null, recent: [], fetchedAt: Date.now(), rpc: "unavailable", token: tokenStatus };
+  const ps = payoutStatus();
+  const payout = ps.wallet ? { address: ps.wallet, balanceSol: null as number | null, enabled: ps.enabled } : null;
+  const base: ProtocolWalletView = { address, cluster: protocolWallet.cluster, source: "REAL", balanceSol: null, recent: [], fetchedAt: Date.now(), rpc: "unavailable", token: tokenStatus, payout };
   try {
     const bal = await rpc<{ value: number }>(url, "getBalance", [address, { commitment: "confirmed" }]);
     const sigs = await rpc<{ signature: string; blockTime: number | null; err: unknown }[]>(url, "getSignaturesForAddress", [address, { limit }]);
@@ -117,7 +122,15 @@ export async function getProtocolWallet(limit = 8): Promise<ProtocolWalletView> 
         /* skip a single unreadable tx; the balance above is still authoritative */
       }
     }
-    const view: ProtocolWalletView = { ...base, balanceSol: bal.value / LAMPORTS, recent, rpc: kind };
+    if (payout) {
+      try {
+        const pb = await rpc<{ value: number }>(url, "getBalance", [payout.address, { commitment: "confirmed" }]);
+        payout.balanceSol = pb.value / LAMPORTS;
+      } catch {
+        /* leave null → UNKNOWN */
+      }
+    }
+    const view: ProtocolWalletView = { ...base, balanceSol: bal.value / LAMPORTS, recent, rpc: kind, payout };
     g.__brainProtocolWallet = { at: Date.now(), view };
     return view;
   } catch {

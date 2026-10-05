@@ -1,11 +1,12 @@
 import type { CurrentEpochProgress, Provenance, RewardAllocation, RewardEpoch } from "@/domain/types";
 import { networkConfig } from "@/lib/config";
-import { defaultRewardConfig } from "@/rewards/config";
+import { defaultRevenueSplit, defaultRewardConfig } from "@/rewards/config";
 import { computeEpoch, type ContributorInput } from "@/rewards/formula";
 import { contributorPoolToday } from "@/rewards/simulate";
 import { demoSolPriceUsd } from "@/services/mock/mockData";
 import { NodeError } from "./nodes";
 import { getStore, type StoredNode } from "./store";
+import { allocateFromTreasury, getTreasury } from "./treasury";
 import { getHoldings } from "./wallet";
 
 export const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -31,6 +32,16 @@ export function demoPoolLamports(lengthMs = epochLengthMs()): number {
 export function configuredPoolLamports(): number | null {
   const sol = Number(process.env.BRAIN_EPOCH_POOL_SOL);
   return sol > 0 ? Math.floor(sol * LAMPORTS_PER_SOL) : null;
+}
+
+/**
+ * Pool funded by real creator fees: the contributors' share (published split) of the REAL
+ * treasury balance that has been received and not yet allocated. Zero until an operator records
+ * a creator-fee receipt by transaction signature. Never includes anything simulated.
+ */
+export async function treasuryPoolLamports(): Promise<number> {
+  const t = await getTreasury("REAL");
+  return Math.max(0, Math.floor(t.balance * defaultRevenueSplit.creatorRewards.contributors * LAMPORTS_PER_SOL));
 }
 
 interface WalletWork {
@@ -115,7 +126,10 @@ export async function settleEpoch(opts: SettleOptions): Promise<{ epoch: RewardE
   const existing = await store.getEpoch(e.id);
   if (existing) return { epoch: existing, created: false };
 
-  const operatorPool = opts.poolLamports ?? configuredPoolLamports();
+  // Pool precedence: explicit > creator-fee treasury (real) + configured subsidy > simulated demo.
+  const treasuryPool = opts.poolLamports == null ? await treasuryPoolLamports() : 0;
+  const configured = configuredPoolLamports();
+  const operatorPool = opts.poolLamports ?? (treasuryPool > 0 || configured != null ? treasuryPool + (configured ?? 0) : null);
   const pool = Math.floor(operatorPool ?? demoPoolLamports(e.endsAt - e.startsAt));
   if (!(pool >= 0)) throw new NodeError("invalid_pool");
 
@@ -158,6 +172,11 @@ export async function settleEpoch(opts: SettleOptions): Promise<{ epoch: RewardE
     provenance,
   };
   const created = await store.saveSettlement(epoch, allocations);
+  // Move the treasury's part of what was actually distributed from "balance" to "allocated".
+  if (created && provenance === "live" && treasuryPool > 0 && epoch.distributedLamports > 0) {
+    const fromTreasury = Math.min(treasuryPool, epoch.distributedLamports) / LAMPORTS_PER_SOL;
+    await allocateFromTreasury(fromTreasury, e.id);
+  }
   return { epoch: created ? epoch : ((await store.getEpoch(e.id)) ?? epoch), created };
 }
 

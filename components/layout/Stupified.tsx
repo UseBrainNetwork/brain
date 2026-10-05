@@ -106,7 +106,7 @@ export function Stupified() {
                 Power it
               </Link>
             </div>
-            <p className="mt-5 text-center font-mono text-[10.5px] text-chalk/30">Payouts aren&apos;t on yet. Nothing here promises a return.</p>
+            <p className="mt-5 text-center font-mono text-[10.5px] text-chalk/30">Only verified work earns. Nothing here promises a return.</p>
           </motion.div>
         </motion.div>
       )}

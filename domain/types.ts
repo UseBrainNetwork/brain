@@ -184,6 +184,8 @@ export interface PayoutStatus {
   minLamports: number;
   maxLamports: number;
   cluster: string;
+  /** Public address claims are paid from, when configured. The key never leaves the server. */
+  wallet?: string;
 }
 
 export interface CurrentEpochProgress {

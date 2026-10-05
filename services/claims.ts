@@ -28,8 +28,9 @@ export function payoutStatus(): PayoutStatus {
   };
   if (process.env.BRAIN_PAYOUTS_ENABLED !== "true") return { ...base, enabled: false, reason: "Payouts open once the protocol payout wallet is connected." };
   if (!process.env.SOLANA_RPC_URL || !process.env.BRAIN_PAYOUT_SECRET_KEY) return { ...base, enabled: false, reason: "Payout wallet is not configured." };
-  if (!getSender()) return { ...base, enabled: false, reason: "Payout wallet key is invalid." };
-  return { ...base, enabled: true };
+  const sender = getSender();
+  if (!sender) return { ...base, enabled: false, reason: "Payout wallet key is invalid." };
+  return { ...base, enabled: true, wallet: sender.address };
 }
 
 function getSender(): PayoutSender | null {
