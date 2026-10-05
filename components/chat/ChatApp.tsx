@@ -37,6 +37,29 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: "FAST", label: "FAST", hint: "Lowest measured latency" },
   { id: "QUALITY", label: "QUALITY", hint: "Highest configured quality tier" },
 ];
+/** Error codes from the engine → what the user should read. Codes are safe (no vendor bodies). */
+function friendlyError(code: string | undefined): string {
+  const c = (code ?? "").toLowerCase();
+  if (c.startsWith("upstream 402")) return "The model provider rejected the request: provider balance exhausted (402). This is on BRAIN's side, not yours. Try again in a bit.";
+  if (c.startsWith("upstream 401") || c.startsWith("upstream 403")) return "The model provider rejected BRAIN's credentials. This is on BRAIN's side. Try again later.";
+  if (c.startsWith("upstream 429")) return "The model provider is rate-limiting right now. Wait a few seconds and retry.";
+  if (c.startsWith("upstream 404") || c.startsWith("upstream 400")) return "The model provider refused this request shape. Retry; if it persists, try another mode.";
+  if (c.startsWith("upstream 5")) return "The model provider returned an error. Retry; BRAIN will route to another provider if one is available.";
+  if (c === "timeout") return "The model did not start answering within 45 s. Retry.";
+  if (c === "unreachable") return "Could not reach the model provider. Retry.";
+  if (c === "no_provider_available" || c.includes("no provider")) return "No model provider can take this request right now.";
+  if (c === "internal") return "BRAIN hit an internal error while recording this request. The model may still have answered; retry if not.";
+  if (c === "out_of_credits") return "Out of credits for this month.";
+  if (c === "connection lost.") return "Connection lost mid-stream. Retry.";
+  return code || "Execution failed.";
+}
+
+interface ModelMap {
+  configured: boolean;
+  models: Partial<Record<Mode, string | null>>;
+  filters: "none";
+}
+
 const TARGET_LABEL: Record<string, string> = { BROWSER_NETWORK: "BROWSER COMPUTE", NATIVE_NETWORK: "NATIVE GPU", CLOUD_GPU: "CLOUD GPU", EXTERNAL_MODEL: "EXTERNAL MODEL", EXTERNAL_PROVIDER: "EXTERNAL MODEL" };
 
 const STORAGE = "brain.chat.v1";
@@ -94,6 +117,8 @@ export function ChatApp() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState<null | "routing" | "streaming">(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
+  const [accountErr, setAccountErr] = useState(false);
+  const [models, setModels] = useState<ModelMap | null>(null);
   const [railOpen, setRailOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -111,12 +136,24 @@ export function ChatApp() {
   }, [convs, hydrated]);
 
   const refreshAccount = useCallback(() => {
-    fetch("/api/account")
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 12_000);
+    fetch("/api/account", { signal: ac.signal })
       .then((r) => r.json())
-      .then((j) => setAccount(j.summary ?? null))
-      .catch(() => {});
+      .then((j) => {
+        setAccount(j.summary ?? null);
+        setAccountErr(!j.summary);
+      })
+      .catch(() => setAccountErr(true))
+      .finally(() => clearTimeout(t));
   }, []);
   useEffect(refreshAccount, [refreshAccount]);
+  useEffect(() => {
+    fetch("/api/chat/models")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: ModelMap | null) => j && setModels(j))
+      .catch(() => {});
+  }, []);
 
   const active = useMemo(() => convs.find((c) => c.id === activeId) ?? null, [convs, activeId]);
 
@@ -136,9 +173,10 @@ export function ChatApp() {
   }, []);
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, opts: { dropIds?: string[] } = {}) => {
       const prompt = text.trim();
       if (!prompt || busy) return;
+      const drop = new Set(opts.dropIds ?? []);
       setInput("");
       let convId = activeId;
       const userMsg: Msg = { id: uid(), role: "user", content: prompt };
@@ -151,7 +189,7 @@ export function ChatApp() {
       } else {
         update(convId, (c) => ({ ...c, updatedAt: Date.now(), messages: [...c.messages, userMsg, asstMsg] }));
       }
-      const history = (convs.find((c) => c.id === convId)?.messages ?? []).filter((m) => !m.error && m.content).slice(-12);
+      const history = (convs.find((c) => c.id === convId)?.messages ?? []).filter((m) => !m.error && m.content && !drop.has(m.id)).slice(-20);
       const messages = [...history.map((m) => ({ role: m.role, content: m.content })), { role: "user" as const, content: prompt }];
 
       setBusy("routing");
@@ -160,10 +198,10 @@ export function ChatApp() {
       const id = convId;
       const patch = (fn: (m: Msg) => Msg) => update(id, (c) => ({ ...c, updatedAt: Date.now(), messages: c.messages.map((m) => (m.id === asstMsg.id ? fn(m) : m)) }));
       try {
-        const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "brain/auto", messages, mode, privacy, max_tokens: 1024 }), signal: ac.signal });
+        const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "brain/auto", messages, mode, privacy, max_tokens: 4096 }), signal: ac.signal });
         if (!r.ok || !r.body) {
           const j = await r.json().catch(() => ({}));
-          const msg = j?.error?.message ?? (r.status === 402 ? "Out of credits." : `Request failed (${r.status}).`);
+          const msg = friendlyError(j?.error?.code ?? j?.error?.message ?? (r.status === 402 ? "out_of_credits" : `Request failed (${r.status}).`));
           patch((m) => ({ ...m, streaming: false, error: msg }));
           return;
         }
@@ -177,8 +215,8 @@ export function ChatApp() {
             continue;
           }
           if (ev.event === "error") {
-            const j = JSON.parse(ev.data) as { error?: { message?: string }; brain?: BrainRunSummary };
-            patch((m) => ({ ...m, streaming: false, error: j.error?.message ?? "Execution failed.", brain: j.brain }));
+            const j = JSON.parse(ev.data) as { error?: { code?: string; message?: string }; brain?: BrainRunSummary };
+            patch((m) => ({ ...m, streaming: false, error: friendlyError(j.error?.message ?? j.error?.code), brain: j.brain }));
             continue;
           }
           try {
@@ -199,7 +237,7 @@ export function ChatApp() {
         }
         patch((m) => ({ ...m, streaming: false }));
       } catch (e) {
-        if ((e as Error).name !== "AbortError") patch((m) => ({ ...m, streaming: false, error: "Connection lost." }));
+        if ((e as Error).name !== "AbortError") patch((m) => ({ ...m, streaming: false, error: friendlyError("connection lost.") }));
         else patch((m) => ({ ...m, streaming: false }));
       } finally {
         setBusy(null);
@@ -211,6 +249,20 @@ export function ChatApp() {
   );
 
   const stop = () => abortRef.current?.abort();
+
+  /** Re-asks the user prompt that precedes a failed assistant turn, dropping the failed turn. */
+  const retry = useCallback(
+    (asstId: string) => {
+      if (!active || busy) return;
+      const idx = active.messages.findIndex((m) => m.id === asstId);
+      const userMsg = idx > 0 ? active.messages[idx - 1] : null;
+      if (!userMsg || userMsg.role !== "user") return;
+      update(active.id, (c) => ({ ...c, messages: c.messages.filter((m) => m.id !== asstId && m.id !== userMsg.id) }));
+      // Let the state settle so the resend builds history without the failed pair.
+      setTimeout(() => void send(userMsg.content, { dropIds: [asstId, userMsg.id] }), 0);
+    },
+    [active, busy, send, update],
+  );
 
   const planName = account?.plan.name ?? null;
   const credits = account?.credits.balance ?? null;
@@ -245,7 +297,7 @@ export function ChatApp() {
               </button>
             ))}
           </div>
-          <AccountCard account={account} />
+          <AccountCard account={account} error={accountErr} onRetry={refreshAccount} />
         </aside>
         {railOpen && <button aria-label="Close" onClick={() => setRailOpen(false)} className="absolute inset-0 z-10 bg-ink/60 md:hidden" />}
 
@@ -267,7 +319,7 @@ Route <span className="text-chalk/70">{mode}</span>
 
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-[760px] px-4 pb-8 pt-6 md:px-6">
-              {!active || active.messages.length === 0 ? <Empty onPick={(t) => void send(t)} /> : active.messages.map((m) => <Message key={m.id} m={m} />)}
+              {!active || active.messages.length === 0 ? <Empty onPick={(t) => void send(t)} models={models} /> : active.messages.map((m) => <Message key={m.id} m={m} onRetry={m.error && !busy ? () => retry(m.id) : undefined} />)}
             </div>
           </div>
 
@@ -292,7 +344,7 @@ Route <span className="text-chalk/70">{mode}</span>
                     }
                   }}
                   rows={Math.min(8, Math.max(1, input.split("\n").length))}
-                  placeholder="Ask BRAIN anything."
+                  placeholder="Paste code, a tx, an idea. Ask anything."
                   className="max-h-[240px] w-full resize-none bg-transparent px-4 pb-1 pt-4 text-[15.5px] leading-[1.5] text-chalk outline-none placeholder:text-chalk/30"
                 />
                 <div className="flex items-center justify-between gap-3 px-2.5 pb-2.5">
@@ -301,7 +353,7 @@ Route <span className="text-chalk/70">{mode}</span>
                       <button
                         key={m.id}
                         type="button"
-                        title={m.hint}
+                        title={models?.models[m.id] ? `${m.hint} · ${models.models[m.id]}` : m.hint}
                         onClick={() => setMode(m.id)}
                         className={cx("rounded-full px-2.5 py-1 transition-colors", mode === m.id ? "bg-chalk/[0.12] text-chalk" : "text-chalk/45 hover:bg-chalk/[0.06] hover:text-chalk")}
                       >
@@ -345,7 +397,7 @@ Route <span className="text-chalk/70">{mode}</span>
                 </div>
               </form>
               <div className="mt-2.5 flex items-center justify-center gap-1.5 font-mono text-[10px] text-chalk/30">
-                <span>Every answer tells you where it ran and what it cost.</span>
+                <span>No added filters. Every answer tells you where it ran and what it cost.</span>
                 <span className="hidden sm:inline">·</span>
                 <Link href="/account" className="hidden hover:text-chalk/60 sm:inline">
                   Account
@@ -371,36 +423,63 @@ function StatusLine({ busy }: { busy: null | "routing" | "streaming" }) {
   );
 }
 
-const PICKS: { k: string; t: string }[] = [
-  { k: "Explain", t: "Explain what a compute receipt proves and what it does not." },
-  { k: "Compare", t: "Summarise the trade-offs between routing for cost and routing for latency." },
-  { k: "Code", t: "Write a Python function that verifies a sha256 hash of a file." },
-  { k: "Learn", t: "What is a verified work unit?" },
+const PICKS: { k: string; label: string; t: string }[] = [
+  { k: "Solana", label: "Anchor escrow with a 24h deadline, constraints and a test", t: "Write an Anchor escrow program: maker deposits SPL tokens, taker can fill before a 24h deadline, maker can cancel after. Include the account constraints and a test." },
+  { k: "Audit", label: "Find every way to drain this Solidity vault, worst first", t: "Review this Solidity vault for ways to drain it, worst first. Quote the line, show the attack, give the fix. I will paste the contract next." },
+  { k: "Bots", label: "Solana sniper bot: landing txs, priority fees, Jito, slippage", t: "Design a Solana sniper/limit-order bot: how to get a transaction landed fast (priority fees, Jito bundles, RPC choice), how to size slippage, and what gets people rekt." },
+  { k: "DeFi", label: "Impermanent loss with real numbers, ETH 2x, fees included", t: "Explain impermanent loss with real numbers: $10k into a 50/50 ETH/USDC pool, ETH doubles. Compare to holding, then add 0.3% fees at $50k daily volume on $2M TVL." },
+  { k: "EVM", label: "Foundry fuzz test for ERC-20 permit, expiry and replay", t: "Foundry test for an ERC-20 with permit: fuzz the permit flow, test deadline expiry and signature replay." },
+  { k: "Script", label: "Stream a wallet's SPL transfers live with @solana/web3.js", t: "TypeScript with @solana/web3.js: stream all SPL token transfers in and out of a wallet in real time and print them as a table." },
 ];
 
-function Empty({ onPick }: { onPick: (t: string) => void }) {
+function Empty({ onPick, models }: { onPick: (t: string) => void; models: ModelMap | null }) {
+  const auto = models?.models.AUTO ?? null;
+  const quality = models?.models.QUALITY ?? null;
   return (
-    <div className="flex flex-col items-center pt-6 text-center sm:min-h-[calc(100dvh-72px-44px-170px)] sm:justify-center sm:pt-0">
+    <div className="flex flex-col items-center pt-4 text-center sm:pt-6">
       <CellField />
-      <h1 className="display mt-7 text-[36px] leading-[1.0] text-chalk sm:mt-9 sm:text-[56px]">
-        Compute <span className="text-chalk/35">from everywhere.</span>
+      <h1 className="display mt-6 text-[36px] leading-[1.0] text-chalk sm:mt-7 sm:text-[52px]">
+        Built for <span className="text-chalk/35">builders.</span>
       </h1>
-      <p className="mt-5 max-w-[440px] text-[14.5px] leading-relaxed text-chalk/55">Ask anything. BRAIN picks the cheapest path that can run it and attaches a receipt showing where it ran and what it cost.</p>
-      <div className="mt-9 grid w-full max-w-[680px] gap-2 sm:grid-cols-2">
+      <p className="mt-5 max-w-[500px] text-[14.5px] leading-relaxed text-chalk/55">
+        Code, contracts, protocols, markets. Open-weights models with no filter layer added by BRAIN: it answers the question you asked. Every answer carries a receipt showing where it ran and what it cost.
+      </p>
+      {models && (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 font-mono text-[10.5px] text-chalk/40">
+          {auto ? (
+            <span>
+              AUTO <span className="text-chalk/70">{auto}</span>
+            </span>
+          ) : (
+            <span className="text-warn">No model provider configured</span>
+          )}
+          {quality && quality !== auto && (
+            <>
+              <span className="text-chalk/20">·</span>
+              <span>
+                QUALITY <span className="text-chalk/70">{quality}</span>
+              </span>
+            </>
+          )}
+        </div>
+      )}
+      <div className="mt-7 grid w-full max-w-[680px] gap-2 sm:grid-cols-2">
         {PICKS.map((p) => (
           <button
             key={p.t}
             type="button"
             onClick={() => onPick(p.t)}
-            className="group flex items-start gap-3 rounded-[12px] border border-chalk/10 bg-chalk/[0.02] px-4 py-3.5 text-left transition-colors hover:border-chalk/25 hover:bg-chalk/[0.045]"
+            className="group flex items-start gap-3 rounded-[12px] border border-chalk/10 bg-chalk/[0.02] px-4 py-3 text-left transition-colors hover:border-chalk/25 hover:bg-chalk/[0.045]"
           >
             <span className="mt-[3px] shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-chalk/35 group-hover:text-signal-2">{p.k}</span>
-            <span className="flex-1 text-[13.5px] leading-snug text-chalk/75 group-hover:text-chalk">{p.t}</span>
+            <span className="flex-1 text-[13.5px] leading-snug text-chalk/75 group-hover:text-chalk">{p.label}</span>
             <span className="mt-[2px] shrink-0 text-chalk/0 transition-colors group-hover:text-chalk/60">→</span>
           </button>
         ))}
       </div>
-      <p className="mt-8 max-w-[520px] font-mono text-[10.5px] leading-relaxed text-chalk/30">Chat currently runs on a configured model provider. Browser nodes run verified parallel compute. The receipt on each answer says which.</p>
+      <p className="mt-6 max-w-[560px] font-mono text-[10.5px] leading-relaxed text-chalk/30">
+        No live market data: it will not quote you a price, and it will tell you how to fetch one. Answers run on an external model provider; each one also sends a verification workload to browser GPU nodes, which the receipt shows.
+      </p>
     </div>
   );
 }
@@ -430,7 +509,7 @@ function CellField() {
   );
 }
 
-function Message({ m }: { m: Msg }) {
+function Message({ m, onRetry }: { m: Msg; onRetry?: () => void }) {
   if (m.role === "user") {
     return (
       <div className="my-5 flex justify-end">
@@ -446,8 +525,15 @@ function Message({ m }: { m: Msg }) {
         {!m.content && !m.streaming && !m.error && <span className="text-chalk/40">No content returned.</span>}
       </div>
       {m.error && (
-        <div className="mt-3 rounded-[10px] border border-signal/30 bg-signal/[0.06] px-4 py-3 font-mono text-[12px] text-chalk/80">
-          <span className="text-signal">BRAIN could not complete this request.</span> {m.error}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-[10px] border border-signal/30 bg-signal/[0.06] px-4 py-3 font-mono text-[12px] text-chalk/80">
+          <span>
+            <span className="text-signal">BRAIN could not complete this request.</span> {m.error}
+          </span>
+          {onRetry && (
+            <button type="button" onClick={onRetry} className="rounded-full bg-chalk px-3 py-1 font-sans text-[12px] font-semibold text-ink hover:bg-white">
+              Retry
+            </button>
+          )}
         </div>
       )}
       {m.brain && <PoweredBy b={m.brain} />}
@@ -543,7 +629,7 @@ function Cell({ k, v, sub, tone }: { k: string; v: ReactNode; sub?: string; tone
   );
 }
 
-function AccountCard({ account }: { account: AccountSummary | null }) {
+function AccountCard({ account, error, onRetry }: { account: AccountSummary | null; error: boolean; onRetry: () => void }) {
   return (
     <div className="border-t border-chalk/10 p-4">
       {account ? (
@@ -573,7 +659,19 @@ function AccountCard({ account }: { account: AccountSummary | null }) {
           </div>
         </>
       ) : (
-        <div className="font-mono text-[11px] text-chalk/35">Connecting account…</div>
+        <div className="font-mono text-[11px] text-chalk/35">
+          {error ? (
+            <>
+              Account unavailable right now ·{" "}
+              <button type="button" onClick={onRetry} className="text-chalk/70 hover:text-chalk">
+                retry
+              </button>
+              <div className="mt-1 text-chalk/30">You can still chat.</div>
+            </>
+          ) : (
+            "Connecting account…"
+          )}
+        </div>
       )}
     </div>
   );

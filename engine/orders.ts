@@ -7,6 +7,7 @@ import { eventBus } from "@/services/eventBus";
 import { getStore } from "@/services/store";
 import { observeRoute } from "./learning";
 import { carriesPlaintext, classify, plan as makePlan, planTotalCost, topologicalOrder, withContext } from "./plan";
+import { logProviderError, safeProviderError } from "./errors";
 import { executionProviders, type IntelligenceProvider } from "./providers";
 import { modeWeights, scoreEstimates } from "./router";
 
@@ -120,9 +121,10 @@ export async function executeStep(step: ExecutionStep, request: ExecutionRequest
     if (!p) continue;
     try {
       const custom = onAttempt?.(p, decision);
-      last = custom ? await custom : await p.execute(request, { orderId: ctx.orderId, decisionId: decision.decisionId, customerId: ctx.customerId, planId: ctx.planId, stepId: step.stepId });
+      last = custom ? await custom : await p.execute(request, { orderId: ctx.orderId, decisionId: decision.decisionId, customerId: ctx.customerId, planId: ctx.planId, stepId: step.stepId, mode: step.constraints.mode });
     } catch (e) {
-      last = { ok: false, provider: p.id, target: p.type, jobId: "", receiptId: "", executionTimeMs: 0, error: e instanceof NodeError ? e.code : "provider error" };
+      logProviderError(p.id, e);
+      last = { ok: false, provider: p.id, target: p.type, jobId: "", receiptId: "", executionTimeMs: 0, error: e instanceof NodeError ? e.code : safeProviderError(e) };
     }
     attempts.push(last);
     if (last.ok) break;
@@ -224,22 +226,33 @@ export async function placeStreamingOrder(input: PlaceOrderInput & { request: Ex
   let handed = false;
 
   const run = (async () => {
-    const { final, executions } = await executePlan(p, { customerId }, ps, (prov, decision) => {
-      if (handed || !prov.executeStream) return undefined;
-      const req = input.request;
-      return (async () => {
-        const { upstream, done } = await prov.executeStream!(req, { orderId: order.orderId, decisionId: decision.decisionId, customerId, planId: p.planId, stepId: p.steps[0].stepId });
-        handed = true;
-        resolveStream({ stream: upstream, decision, provider: prov });
-        return done;
-      })();
-    });
-    await savePlan(p);
-    const ex = executions.get(final.stepId);
-    finish(order, p, final, ex);
-    await save(order);
-    if (!handed) resolveStream({ stream: null, decision: ex!.decision, provider: ps.find((x) => x.id === ex?.result?.provider) ?? ps[0] });
-    return order;
+    try {
+      const { final, executions } = await executePlan(p, { customerId }, ps, (prov, decision) => {
+        if (handed || !prov.executeStream) return undefined;
+        const req = input.request;
+        return (async () => {
+          const { upstream, done } = await prov.executeStream!(req, { orderId: order.orderId, decisionId: decision.decisionId, customerId, planId: p.planId, stepId: p.steps[0].stepId, mode: p.steps[0].constraints.mode });
+          handed = true;
+          resolveStream({ stream: upstream, decision, provider: prov });
+          return done;
+        })();
+      });
+      await savePlan(p);
+      const ex = executions.get(final.stepId);
+      finish(order, p, final, ex);
+      await save(order);
+      if (!handed) resolveStream({ stream: null, decision: ex!.decision, provider: ps.find((x) => x.id === ex?.result?.provider) ?? ps[0] });
+      return order;
+    } catch (e) {
+      // Never leave an order parked in ROUTING/EXECUTING because a store write or planner call threw.
+      console.error("[orders] streaming order failed", order.orderId, e instanceof Error ? `${e.name}: ${e.message}` : e);
+      order.status = "FAILED";
+      order.error = "internal";
+      order.completedAt = Date.now();
+      await save(order).catch(() => {});
+      if (!handed) resolveStream({ stream: null, decision: { decisionId: "", estimates: [], selected: null, reason: "internal error" } as unknown as RouteDecision, provider: ps[0] });
+      return order;
+    }
   })();
 
   return { order, firstByte, done: run };

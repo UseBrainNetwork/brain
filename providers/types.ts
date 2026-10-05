@@ -5,6 +5,8 @@ export type { ChatMessage, ToolCall } from "@/domain/chat";
 
 export interface ChatRequest extends ChatOptions {
   model: string;
+  /** Concrete upstream model id to run (per-mode choice). Falls back to the provider's configured default. */
+  upstreamModel?: string;
   messages: ChatMessage[];
   max_tokens?: number;
   temperature?: number;

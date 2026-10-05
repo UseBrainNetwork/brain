@@ -39,7 +39,7 @@ Unset means `UNKNOWN` on receipts, estimates and dashboards. Nothing interpolate
 ### Current production list prices (set 2026-10-04)
 
 - Compute: `BRAIN_PRICE_USD_PER_1K_COMPUTE_UNITS=0.00000005` ($0.05 per 1B units). Derivation: 1k units ≈ 2.1 GFLOP. A browser GPU sustaining ~2 TFLOPS in WebGPU does ~3.4M k-units/hour, so this price values a contributor device at ≈ $0.17 gross per GPU-hour before the split — the floor of the consumer-GPU rental market, and roughly 10× datacenter cost per FLOP, which is the honest overhead of redundant, verified browser execution. A typical demo job (4,096 units) prices at $0.0000002.
-- Chat: `BRAIN_PRICE_USD_PER_1M_TOKENS=0.20`, routed through OpenRouter (`meta-llama/llama-3.1-8b-instruct`), whose published completion price is `BRAIN_EXTERNAL_PRICE_USD_PER_1M=0.08` (prompt $0.05). Margin on routed chat is therefore list minus upstream, recorded per request.
+- Chat: `BRAIN_PRICE_USD_PER_1M_TOKENS=0.20`, routed through OpenRouter. Models are per mode (`BRAIN_EXTERNAL_MODEL`, `_CHEAP`, `_FAST`, `_QUALITY`; see `.env.example` and `/api/chat/models`). OpenRouter reports the real USD charge per request (`usage.cost`), which the receipt records as upstream cost; `BRAIN_EXTERNAL_PRICE_USD_PER_1M` is only the fallback estimate. Margin on routed chat is list minus upstream, recorded per request, and can be negative on QUALITY models: that is an operator pricing decision, not something the ledger hides.
 - Embeddings remain unconfigured (OpenRouter does not list embedding models), so `/v1/embeddings` keeps returning `no_provider_available`.
 
 ## Plans and BRAIN Credits (`lib/plans.ts`, `services/credits.ts`)

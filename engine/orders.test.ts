@@ -4,6 +4,7 @@ import { MemoryStore } from "@/services/store";
 import { executePlan, getPlan, placeOrder, placeStreamingOrder } from "./orders";
 import { compoundPlan, makeStep } from "./plan";
 import type { IntelligenceProvider } from "./providers";
+import { UpstreamHttpError } from "@/providers/openaiCompatible";
 
 vi.mock("server-only", () => ({}));
 // providers.ts pulls in the live node registry; orders tests inject fakes instead.
@@ -84,13 +85,22 @@ describe("orders", () => {
     expect(o.error).toMatch(/no eligible target/);
   });
 
-  it("fails (not rejects) when every eligible provider errors", async () => {
+  it("fails (not rejects) when every eligible provider errors, with a safe code and no vendor text", async () => {
     const a = fake("a", "CLOUD_GPU", {}, async () => {
-      throw new Error("boom");
+      throw new Error("boom: secret vendor body");
     });
     const o = await placeOrder({ request: chat }, "cust", [a]);
     expect(o.status).toBe("FAILED");
-    expect(o.error).toBe("provider error");
+    expect(o.error).toBe("unreachable");
+  });
+
+  it("surfaces the upstream HTTP status as the error code (402 = provider balance)", async () => {
+    const a = fake("a", "CLOUD_GPU", {}, async () => {
+      throw new UpstreamHttpError(402, '{"error":"Insufficient credits"}');
+    });
+    const o = await placeOrder({ request: chat }, "cust", [a]);
+    expect(o.status).toBe("FAILED");
+    expect(o.error).toBe("upstream 402");
   });
 
   it("PRIVATE chat never reaches a third-party model, even when it is the only option", async () => {

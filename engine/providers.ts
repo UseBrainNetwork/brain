@@ -1,10 +1,11 @@
 import "server-only";
 import { chatChars, wantsTools, type ToolCall } from "@/domain/chat";
-import type { Capability, ComputeReceipt, ExecutionEstimate, ExecutionRequest, ExecutionResult, ExecutionTarget, Money, ProviderHealth, ProviderTrust } from "@/domain/economy";
+import type { Capability, ComputeReceipt, ExecutionEstimate, ExecutionRequest, ExecutionResult, ExecutionTarget, Money, ProviderHealth, ProviderTrust, RoutingMode } from "@/domain/economy";
 import { networkConfig } from "@/lib/config";
 import { priceForComputeUnits, priceForTokens, tokenListPricePer1MUsd, upstreamPricePer1MUsd } from "@/lib/pricing";
 import { workloadUnits } from "@/network/workloads";
 import { OpenAICompatibleProvider } from "@/providers/openaiCompatible";
+import { logProviderError, safeProviderError } from "./errors";
 import { accrueReceipt } from "@/services/accounting";
 import { createJob, getJob, listJobs } from "@/services/distributed";
 import { eventBus } from "@/services/eventBus";
@@ -44,7 +45,10 @@ export interface ExecutionContext {
   customerId: string;
   planId?: string;
   stepId?: string;
+  /** Routing mode of the step; upstream providers may pick a different model per mode. */
+  mode?: RoutingMode;
 }
+
 
 const cfg = networkConfig.distributed;
 
@@ -175,6 +179,10 @@ interface UpstreamEnv {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  /** Optional per-mode overrides. Unset modes use `model`. */
+  modelCheap?: string;
+  modelFast?: string;
+  modelQuality?: string;
   qualityTier?: string;
   /** "0" disables tool calling / structured output for this upstream. Default on: every OpenAI-compatible host we target supports it. */
   tools?: string;
@@ -195,6 +203,7 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
   private inner: OpenAICompatibleProvider;
   private configured: boolean;
   private model: string | null;
+  private modelByMode: Partial<Record<RoutingMode, string>>;
   private tier: number | null;
 
   constructor(id: "cloud-fallback" | "external", type: ExecutionTarget, env: UpstreamEnv) {
@@ -203,10 +212,16 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
     this.trust = type === "CLOUD_GPU" ? "operator" : "third-party";
     this.configured = Boolean(env.baseUrl && env.apiKey && env.model);
     this.model = env.model ?? null;
+    this.modelByMode = { CHEAP: env.modelCheap || undefined, FAST: env.modelFast || undefined, QUALITY: env.modelQuality || undefined };
     this.tier = qualityTier(env.qualityTier);
     this.supportsTools = env.tools !== "0" && env.tools?.toLowerCase() !== "false";
     this.capabilities = this.supportsTools ? ["chat", "tools"] : ["chat"];
     this.inner = new OpenAICompatibleProvider({ id, baseUrl: env.baseUrl, apiKey: env.apiKey, model: env.model });
+  }
+
+  /** Concrete upstream model for a routing mode. Exposed (ids only, never credentials) through /api/chat/models. */
+  modelFor(mode?: RoutingMode): string | null {
+    return (mode && this.modelByMode[mode]) || this.model;
   }
 
   private tokensFor(req: Extract<ExecutionRequest, { kind: "chat" }>) {
@@ -247,6 +262,7 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
 
   /** Issues the receipt and accounting lines for a completed chat turn. Shared by execute and executeStream. */
   private async issueReceipt(req: Extract<ExecutionRequest, { kind: "chat" }>, ctx: ExecutionContext, t0: number, jobId: string, content: string, usage: { prompt: number; completion: number; total: number; basis: "provider-reported" | "estimated-from-chars"; costUsd?: number | null }) {
+    const ranModel = this.modelFor(ctx.mode) ?? req.model;
     const ms = Date.now() - t0;
     await recordSample({ providerId: this.id, at: Date.now(), latencyMs: ms, ok: true, units: usage.total });
     const listPrice = priceForTokens(usage.total, tokenListPricePer1MUsd());
@@ -257,7 +273,7 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
       receiptId: `r-${jobId}`,
       jobId,
       workloadType: "chat",
-      model: this.model ?? req.model,
+      model: ranModel,
       createdAt: t0,
       completedAt: Date.now(),
       nodesUsed: [],
@@ -292,8 +308,8 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
   }
 
   private failure(t0: number, jobId: string, e: unknown): ExecutionResult {
-    const msg = e instanceof Error ? e.message : "error";
-    const safe = /^upstream \d{3}$/.test(msg) ? msg : e instanceof Error && e.name === "AbortError" ? "timeout" : "unreachable";
+    const safe = safeProviderError(e);
+    logProviderError(this.id, e);
     void recordSample({ providerId: this.id, at: Date.now(), latencyMs: Date.now() - t0, ok: false, units: 0, error: safe });
     return { ok: false, provider: this.id, target: this.type, jobId, receiptId: "", executionTimeMs: Date.now() - t0, error: safe };
   }
@@ -303,7 +319,7 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
     const t0 = Date.now();
     const jobId = `c-${t0.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     try {
-      const out = await this.inner.complete({ model: req.model, messages: req.messages, max_tokens: req.maxTokens, temperature: req.temperature, ...chatOptions(req) });
+      const out = await this.inner.complete({ model: req.model, upstreamModel: this.modelFor(ctx.mode) ?? undefined, messages: req.messages, max_tokens: req.maxTokens, temperature: req.temperature, ...chatOptions(req) });
       const res = await this.issueReceipt(req, ctx, t0, jobId, receiptText(out.content, out.toolCalls), { prompt: out.usage.prompt_tokens, completion: out.usage.completion_tokens, total: out.usage.total_tokens, basis: "provider-reported", costUsd: out.usage.cost ?? null });
       return { ...res, content: out.content, toolCalls: out.toolCalls, finishReason: out.finishReason };
     } catch (e) {
@@ -320,7 +336,7 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
   async executeStream(req: Extract<ExecutionRequest, { kind: "chat" }>, ctx: ExecutionContext) {
     const t0 = Date.now();
     const jobId = `c-${t0.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    const upstream = await this.inner.stream({ model: req.model, messages: req.messages, max_tokens: req.maxTokens, temperature: req.temperature, ...chatOptions(req), stream: true });
+    const upstream = await this.inner.stream({ model: req.model, upstreamModel: this.modelFor(ctx.mode) ?? undefined, messages: req.messages, max_tokens: req.maxTokens, temperature: req.temperature, ...chatOptions(req), stream: true });
     let resolveDone!: (r: ExecutionResult) => void;
     const done = new Promise<ExecutionResult>((r) => (resolveDone = r));
     const dec = new TextDecoder();
@@ -378,6 +394,15 @@ export function executionProviders(): IntelligenceProvider[] {
     new BrowserNetworkExecutionProvider(),
     new NativeNetworkExecutionProvider(),
     new UpstreamExecutionProvider("cloud-fallback", "CLOUD_GPU", { baseUrl: env.BRAIN_FALLBACK_BASE_URL, apiKey: env.BRAIN_FALLBACK_API_KEY, model: env.BRAIN_FALLBACK_MODEL, qualityTier: env.BRAIN_FALLBACK_QUALITY_TIER, tools: env.BRAIN_FALLBACK_TOOLS }),
-    new UpstreamExecutionProvider("external", "EXTERNAL_MODEL", { baseUrl: env.BRAIN_EXTERNAL_BASE_URL, apiKey: env.BRAIN_EXTERNAL_API_KEY, model: env.BRAIN_EXTERNAL_MODEL, qualityTier: env.BRAIN_EXTERNAL_QUALITY_TIER, tools: env.BRAIN_EXTERNAL_TOOLS }),
+    new UpstreamExecutionProvider("external", "EXTERNAL_MODEL", {
+      baseUrl: env.BRAIN_EXTERNAL_BASE_URL,
+      apiKey: env.BRAIN_EXTERNAL_API_KEY,
+      model: env.BRAIN_EXTERNAL_MODEL,
+      modelCheap: env.BRAIN_EXTERNAL_MODEL_CHEAP,
+      modelFast: env.BRAIN_EXTERNAL_MODEL_FAST,
+      modelQuality: env.BRAIN_EXTERNAL_MODEL_QUALITY,
+      qualityTier: env.BRAIN_EXTERNAL_QUALITY_TIER,
+      tools: env.BRAIN_EXTERNAL_TOOLS,
+    }),
   ];
 }
