@@ -281,9 +281,30 @@ export interface HopPayload {
   deadline: number;
 }
 
+/**
+ * Every ready node asks "is a session running?" on every poll. With dozens of nodes that was the
+ * single biggest source of Postgres traffic, so the answer is cached per instance for 3 s (a new
+ * session is noticed within one extra poll) and a node's own shard record for 15 s.
+ */
+const ac = globalThis as typeof globalThis & { __brainActive?: { at: number; value: Promise<boolean> }; __brainShards?: Map<string, { at: number; value: Promise<ShardRecord | null> }> };
 async function isActive(now: number): Promise<boolean> {
-  const a = await getStore().getDoc<{ at: number }>("meta", "inference-active");
-  return Boolean(a && now - a.at < ACTIVE_WINDOW_MS);
+  if (ac.__brainActive && now - ac.__brainActive.at < 3_000) return ac.__brainActive.value;
+  const value = getStore()
+    .getDoc<{ at: number }>("meta", "inference-active")
+    .then((a) => Boolean(a && Date.now() - a.at < ACTIVE_WINDOW_MS));
+  ac.__brainActive = { at: now, value };
+  value.catch(() => (ac.__brainActive = undefined));
+  return value;
+}
+async function cachedShard(nodeId: string, now: number): Promise<ShardRecord | null> {
+  ac.__brainShards ??= new Map();
+  const hit = ac.__brainShards.get(nodeId);
+  if (hit && now - hit.at < 15_000) return hit.value;
+  const value = getStore().getDoc<ShardRecord>("shard", nodeId);
+  ac.__brainShards.set(nodeId, { at: now, value });
+  value.catch(() => ac.__brainShards?.delete(nodeId));
+  if (ac.__brainShards.size > 2_000) for (const [k, v] of ac.__brainShards) if (now - v.at > 15_000) ac.__brainShards.delete(k);
+  return value;
 }
 
 async function markActive(): Promise<void> {
@@ -297,7 +318,7 @@ async function markActive(): Promise<void> {
  */
 export async function nextHop(node: StoredNode, waitMs: number): Promise<{ hop: HopPayload | null; retryMs: number; active: boolean }> {
   const store = getStore();
-  const shard = await store.getDoc<ShardRecord>("shard", node.id);
+  const shard = await cachedShard(node.id, Date.now());
   if (!shard || shard.state !== "ready") return { hop: null, retryMs: 5_000, active: false };
   const until = Date.now() + Math.max(0, Math.min(waitMs, 8_000));
   let active = await isActive(Date.now());
@@ -308,7 +329,9 @@ export async function nextHop(node: StoredNode, waitMs: number): Promise<{ hop: 
     const open = hops.filter((h) => h.status === "assigned" && h.deadline > now && h.input).sort((a, b) => a.step - b.step);
     const h = open[0];
     if (h) return { hop: { id: h.id, sessionId: h.sessionId, model: h.model, stage: h.stage, step: h.step, seq: h.seq, positions: h.positions, cacheLen: h.cacheLen, input: h.input!, deadline: h.deadline }, retryMs: 0, active: true };
-    if (!active || now >= until) return { hop: null, retryMs: active ? 250 : 1_500, active };
+    // Idle network: one look for hops, then send the node away for a few seconds instead of having
+    // every node come back every second and a half.
+    if (!active || now >= until) return { hop: null, retryMs: active ? 250 : 4_000, active };
     if (now - lastActiveCheck > 3_000) {
       active = await isActive(now);
       lastActiveCheck = now;

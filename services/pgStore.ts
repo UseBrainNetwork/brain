@@ -42,9 +42,12 @@ export class PgStore implements NetworkStore {
     // serverless instance holds its idle connections, so per-instance pools stay small. But every
     // reconnect is a TLS handshake plus pooler auth, and with a 2 s idle timeout the instances were
     // reconnecting on nearly every request: `SELECT 1` measured 6 s under load. Hold sockets for 45 s.
-    const common = { connectionString: cs, ssl, connectionTimeoutMillis: 8_000, idleTimeoutMillis: 45_000, allowExitOnIdle: true, statement_timeout: 15_000, query_timeout: 15_000 };
-    this.pool = new Pool({ ...common, max: 3 });
-    this.lockPool = new Pool({ ...common, max: 2 });
+    // With ~40 nodes polling, Vercel keeps many instances warm at once; at 5 sockets × 45 s each the
+    // pooler's slots ran out and every request waited the full 8 s for a connection. Fewer sockets
+    // per instance, released sooner.
+    const common = { connectionString: cs, ssl, connectionTimeoutMillis: 8_000, idleTimeoutMillis: 20_000, allowExitOnIdle: true, statement_timeout: 15_000, query_timeout: 15_000 };
+    this.pool = new Pool({ ...common, max: 2 });
+    this.lockPool = new Pool({ ...common, max: 1 });
     // Idle-client errors (pooler closing a socket) must not become unhandled rejections that kill the instance.
     for (const pool of [this.pool, this.lockPool]) pool.on("error", (e) => console.warn("[pgStore] idle client error:", e.message));
     this.ready = this.migrate();
