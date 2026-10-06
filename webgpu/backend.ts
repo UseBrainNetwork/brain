@@ -58,6 +58,7 @@ export class WebGPUBackend implements ComputeBackend {
   }
 
   async execute(spec: WorkloadSpec): Promise<{ result: WorkloadResult; gpuMs: number }> {
+    if (spec.kernel === "llm_stage") throw new Error("llm_stage runs through webgpu/llm.ts, not the hash backend");
     return spec.kernel === "matmul_u32" ? this.matmul(spec) : this.mix(spec);
   }
 

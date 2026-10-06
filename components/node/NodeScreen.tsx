@@ -11,6 +11,7 @@ import { cx, fmtInt, fmtSol, shortAddr, ineligibleCopy } from "@/lib/format";
 import { useKeepAwake } from "@/lib/keepAwake";
 import { useWallet } from "@/lib/wallet/store";
 import { contributor, useContributor } from "@/network/client/contributor";
+import { InferenceStrip } from "./InferenceStrip";
 import { loadIdentity } from "@/network/client/identity";
 import { useReal } from "@/network/realtime/real";
 
@@ -305,6 +306,7 @@ export function NodeScreen() {
       </div>
 
       <WalletStrip connected={connected} jobs={s.jobsCompleted} />
+      <InferenceStrip connected={connected} />
 
       {/* Footer stats */}
       <div className="grid grid-cols-3 gap-px border-t border-chalk/[0.08] bg-chalk/[0.06] text-[11px] uppercase tracking-[0.1em]">

@@ -19,7 +19,7 @@ Ordered by what unblocks real revenue and real inference soonest. Each step is s
 
 ## 3. Real distributed inference (incremental)
 
-Don't start with full distributed LLM inference. Build up through the existing interfaces:
+Shipped first as NETWORK mode: SmolLM2-135M in 3 layer-stages across browser nodes, server-relayed activations, replica-tolerance verification (`services/inference.ts`). What remains, through the existing interfaces:
 
 1. **Tensor ops.** Extend `ComputeBackend` with real f16/f32 kernels (matmul, softmax, layernorm, RoPE, attention) and golden-output tests against a CPU reference with tolerance-based verification. `network/workloads.ts` stays the u32 verification path.
 2. **Embeddings first.** Small, highly parallel, and stateless. Ship `brain/embed` on the browser pool: model shards cached in the browser, batch splitting in the router, and spot-check by recomputing a sample server-side. This is the first point where `BrowserNetworkProvider.supportedModels` becomes non-empty and the router can pick `BROWSER_NETWORK`.

@@ -5,6 +5,8 @@
  * (Floating point results differ across hardware, which would make exact verification impossible.)
  */
 
+import { NETWORK_MODELS, layerMacs } from "@/inference/config";
+
 export type WorkloadSpec =
   | {
       kernel: "matmul_u32";
@@ -20,6 +22,18 @@ export type WorkloadSpec =
       rounds: number;
       threads: number;
       blockSize: number;
+    }
+  | {
+      /**
+       * A pipeline stage of a network LLM session: `tokens` tokens through layers
+       * [layerFrom, layerTo). f32 work, verified by replica tolerance (services/inference.ts),
+       * never by exact hashes; it exists as a spec so the job ledger can account for it.
+       */
+      kernel: "llm_stage";
+      model: string;
+      layerFrom: number;
+      layerTo: number;
+      tokens: number;
     };
 
 export interface WorkloadResult {
@@ -128,9 +142,12 @@ export function hashMixBlocks(out: Uint32Array, blockSize: number): number[] {
 
 /** Server-side cost model: how much useful work a spec represents. Never client-reported. */
 export function workloadOps(spec: WorkloadSpec): number {
-  return spec.kernel === "matmul_u32"
-    ? spec.m * spec.n * spec.k
-    : spec.threads * spec.rounds;
+  if (spec.kernel === "matmul_u32") return spec.m * spec.n * spec.k;
+  if (spec.kernel === "llm_stage") {
+    const m = NETWORK_MODELS[spec.model];
+    return m ? layerMacs(m.config) * (spec.layerTo - spec.layerFrom) * spec.tokens : 0;
+  }
+  return spec.threads * spec.rounds;
 }
 
 /** Compute units credited for a verified workload. 1 unit ≈ 2^20 multiply-accumulates. */
@@ -140,6 +157,7 @@ export function workloadUnits(spec: WorkloadSpec): number {
 
 /** Full CPU reference — only for small specs (tests, canaries). */
 export function referenceResult(spec: WorkloadSpec): WorkloadResult {
+  if (spec.kernel === "llm_stage") throw new Error("llm_stage has no hash reference; it is verified by replica tolerance");
   if (spec.kernel === "matmul_u32") {
     const { a, b } = matmulInputs(spec);
     const hashes: number[] = [];

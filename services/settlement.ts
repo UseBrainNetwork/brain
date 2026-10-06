@@ -113,7 +113,12 @@ interface WalletWork {
  * Per-wallet work in [from, to), measured only from server-verified job records.
  * Nodes without a signature-verified wallet do not accrue rewards.
  */
-export const isLostUnit = (failReason: string | null | undefined) => failReason === "deadline" || failReason === "node lost";
+/**
+ * Failures the node is not shown to be responsible for: units that expired or were reassigned, and
+ * network-inference work the server could not check (no replica) or could not attribute (two nodes
+ * disagreed). They lower the completion factor but never the pass rate.
+ */
+export const isLostUnit = (failReason: string | null | undefined) => failReason === "deadline" || failReason === "node lost" || failReason === "no-replica" || failReason === "replica-dispute";
 
 export async function measureWork(from: number, to: number) {
   const store = getStore();

@@ -94,4 +94,4 @@ components/account, app/pricing, app/earn
 
 ## What is deliberately not here
 
-NFTs, node licenses, governance, quests, XP, staking, APY, a model marketplace, auctions, price predictions, fabricated logos/benchmarks/savings, our own foundation model, distributed LLM inference on the browser pool, and a rebuild of anything that already worked. Items that are placeholders (Pro/Max prices, `NATIVE_NETWORK`, `PURCHASE`) are labelled as such in code and UI.
+NFTs, node licenses, governance, quests, XP, staking, APY, a model marketplace, auctions, price predictions, fabricated logos/benchmarks/savings, our own foundation model, sharding a 7B+ model across phones, and a rebuild of anything that already worked. Items that are placeholders (Pro/Max prices, `NATIVE_NETWORK`, `PURCHASE`) are labelled as such in code and UI.

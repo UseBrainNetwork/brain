@@ -4,6 +4,7 @@ import { settleBackground, withTimeout } from "@/lib/async";
 import type { ComputeOrder, ComputeReceipt, PrivacyRequirement, RoutingMode } from "@/domain/economy";
 import { placeStreamingOrder, type PlaceOrderInput } from "@/engine/orders";
 import { attachCompute, type AttachedComputeSummary } from "@/services/attachedCompute";
+import type { NetworkRunSummary } from "@/services/inference";
 import { getReceipt } from "@/services/receipts";
 import { reframeStream } from "./gateway";
 
@@ -34,6 +35,11 @@ export interface BrainRunSummary {
    * It did not produce the answer; it is verifiable work sized by this request. null = none dispatched.
    */
   attached?: AttachedComputeSummary | null;
+  /**
+   * BROWSER_ONLY mode: the answer itself was produced by contributor nodes running the model's
+   * layers (services/inference.ts). Present only on network runs.
+   */
+  network?: NetworkRunSummary | null;
   status: ComputeOrder["status"];
   error?: string;
 }

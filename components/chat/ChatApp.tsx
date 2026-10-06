@@ -24,6 +24,8 @@ interface Msg {
   finishReason?: string;
   error?: string;
   streaming?: boolean;
+  /** NETWORK mode: what the pipeline is doing before the first token. */
+  status?: string;
 }
 interface Conversation {
   id: string;
@@ -33,12 +35,13 @@ interface Conversation {
   messages: Msg[];
 }
 
-type Mode = Exclude<RoutingMode, "BROWSER_ONLY">;
+type Mode = RoutingMode;
 const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: "AUTO", label: "AUTO", hint: "Best balance of cost, latency and reliability" },
   { id: "CHEAP", label: "CHEAP", hint: "Lowest cost that meets the request" },
   { id: "FAST", label: "FAST", hint: "Lowest measured latency" },
   { id: "QUALITY", label: "QUALITY", hint: "Highest configured quality tier" },
+  { id: "BROWSER_ONLY", label: "NETWORK", hint: "SmolLM2 135M run layer-by-layer on contributor browsers. Research-grade: small model, ~1 token/s, every hop replica-checked. No charge." },
 ];
 /** Error codes from the engine → what the user should read. Codes are safe (no vendor bodies). */
 function friendlyError(code: string | undefined): string {
@@ -53,6 +56,9 @@ function friendlyError(code: string | undefined): string {
   if (c === "no_provider_available" || c.includes("no provider")) return "No model provider can take this request right now.";
   if (c === "internal") return "BRAIN hit an internal error while recording this request. The model may still have answered; retry if not.";
   if (c === "out_of_credits") return "Out of credits for this month.";
+  if (c.startsWith("the network cannot run this model")) return code!;
+  if (c === "busy") return "The network is serving its maximum number of sessions. Try again in a moment.";
+  if (c.startsWith("stage ") && c.includes("lost")) return `A node dropped out mid-answer (${code}). Retry; the pipeline is rebuilt per request.`;
   if (c === "connection lost.") return "Connection lost mid-stream. Retry.";
   return code || "Execution failed.";
 }
@@ -201,7 +207,7 @@ export function ChatApp() {
       const id = convId;
       const patch = (fn: (m: Msg) => Msg) => update(id, (c) => ({ ...c, updatedAt: Date.now(), messages: c.messages.map((m) => (m.id === asstMsg.id ? fn(m) : m)) }));
       try {
-        const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "brain/auto", messages, mode, privacy, max_tokens: 4096 }), signal: ac.signal });
+        const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "brain/auto", messages, mode, privacy, max_tokens: mode === "BROWSER_ONLY" ? 192 : 4096 }), signal: ac.signal });
         if (!r.ok || !r.body) {
           const j = await r.json().catch(() => ({}));
           const msg = friendlyError(j?.error?.code ?? j?.error?.message ?? (r.status === 402 ? "out_of_credits" : `Request failed (${r.status}).`));
@@ -216,6 +222,11 @@ export function ChatApp() {
           if (ev.event === "brain") {
             const brain = JSON.parse(ev.data) as BrainRunSummary;
             patch((m) => ({ ...m, brain, streaming: false }));
+            continue;
+          }
+          if (ev.event === "status") {
+            const st = JSON.parse(ev.data) as { detail?: string };
+            if (st.detail) patch((m) => ({ ...m, status: st.detail }));
             continue;
           }
           if (ev.event === "attached") {
@@ -335,7 +346,7 @@ export function ChatApp() {
               <span className="text-chalk/70">BRAIN</span>
               <span className="hidden sm:inline">·</span>
               <span className="hidden sm:inline">
-Route <span className="text-chalk/70">{mode}</span>
+Route <span className="text-chalk/70">{MODES.find((m) => m.id === mode)?.label ?? mode}</span>
               </span>
             </div>
             <StatusLine busy={busy} />
@@ -560,6 +571,7 @@ function Message({ m, onRetry }: { m: Msg; onRetry?: () => void }) {
   return (
     <div className="my-5">
       {m.reasoning && <Reasoning text={m.reasoning} live={Boolean(m.streaming && !m.content)} />}
+      {m.status && m.streaming && !m.content && <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.12em] text-chalk/45">network · {m.status}</div>}
       <div className="text-[15px] text-chalk/90">
         {m.content ? renderMarkdown(m.content) : null}
         {m.streaming && <span className="ml-0.5 inline-block h-[1em] w-[7px] translate-y-[2px] animate-blink bg-chalk/80 align-baseline" />}
@@ -620,7 +632,8 @@ function PoweredBy({ b }: { b: BrainRunSummary }) {
                 <Cell k="Latency" v={b.latencyMs >= 1000 ? `${(b.latencyMs / 1000).toFixed(2)}s` : `${b.latencyMs}ms`} sub="end to end, server measured" />
                 <Cell k="Verified" v={b.verified ? "YES" : "NO"} sub={b.verification ?? undefined} tone={b.verified ? "ok" : undefined} />
               </div>
-              {b.attached !== undefined && (
+              {b.network && <NetworkPanel n={b.network} />}
+              {b.attached != null && (
                 <div className="mt-4 rounded-[10px] border border-chalk/10 bg-chalk/[0.03] px-3.5 py-3 text-[12px] leading-relaxed text-chalk/60">
                   <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-chalk/45">
                     <span>Attached compute</span>
@@ -656,6 +669,42 @@ function PoweredBy({ b }: { b: BrainRunSummary }) {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/** NETWORK mode: which nodes ran which layers, and whether each one's work was replica-checked. */
+function NetworkPanel({ n }: { n: NonNullable<BrainRunSummary["network"]> }) {
+  return (
+    <div className="mt-4 rounded-[10px] border border-chalk/10 bg-chalk/[0.03] px-3.5 py-3 text-[12px] leading-relaxed text-chalk/60">
+      <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-chalk/45">
+        <span>Ran on the network</span>
+        <span>
+          {n.modelLabel} · {n.promptTokens} in / {n.outputTokens} out
+          {n.tokPerSec != null ? ` · ${n.tokPerSec} tok/s` : ""}
+          {n.firstTokenMs != null ? ` · first token ${(n.firstTokenMs / 1000).toFixed(1)}s` : ""}
+        </span>
+      </div>
+      <div className="mt-2 grid gap-1.5 font-mono text-[11px]">
+        {n.stages.map((s) => (
+          <div key={s.stage} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="w-[118px] text-chalk/45">
+              stage {s.stage + 1} · layers {s.layers}
+            </span>
+            {s.nodes.map((x) => (
+              <span key={x.id} className={cx("rounded-[3px] px-1.5 py-[1px]", x.verified === true ? "bg-ok/15 text-ok" : x.verified === false ? "bg-signal/15 text-signal" : "bg-chalk/[0.08] text-chalk/60")} title={x.dropped ? `dropped: ${x.dropped}` : x.verified === true ? "replica-checked, agreed" : x.verified === false ? "disagreed with its replica" : "not checked (no replica)"}>
+                {x.id} · {x.hops} hop{x.hops === 1 ? "" : "s"}
+                {x.dropped ? " · dropped" : ""}
+              </span>
+            ))}
+          </div>
+        ))}
+      </div>
+      <p className="mt-2.5">
+        The embedding and output projection ran on the gateway; every transformer layer ran on the nodes above. Each hop went to two nodes and their outputs were compared (relative RMS ≤ 1e-3).{" "}
+        {n.verified ? `${n.units.verified.toLocaleString()} compute units verified and credited to those nodes.` : `Not every hop could be checked, so ${n.units.verified.toLocaleString()} of ${n.units.total.toLocaleString()} units were credited.`}{" "}
+        Small model, research-grade quality; no charge.
+      </p>
     </div>
   );
 }

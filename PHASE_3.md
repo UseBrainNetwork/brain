@@ -54,7 +54,7 @@ If a device shows **NO WEBGPU ADAPTER**: that browser cannot contribute; the pag
 - **One process.** The event bus, rate limiter and challenge store are in-process; a second instance would split the network. Redis/NATS or Postgres LISTEN/NOTIFY is the fix.
 - **Durability.** Production (Vercel) now runs on Supabase Postgres, so nodes, jobs, receipts and the ledger persist. A self-hosted demo without `DATABASE_URL` falls back to memory and loses everything on restart.
 - **Verification strength.** Spot checks catch lazy nodes with probability \(1 - 0.75^{8} \approx 90\%\) per unit for a 25 % skipper; redundancy 2 is available but not default. There is no cryptographic attestation; `resultHash` is an integrity digest.
-- **Workload.** Integer matmul only on the browser network. No model inference, embeddings or tokens are produced by contributors. Chat requests go to upstream providers and are not verified.
+- **Workload.** Integer matmul verification jobs, plus NETWORK-mode inference: SmolLM2-135M pipeline-sharded over contributor nodes (`services/inference.ts`), replica-verified, ~1–2 tokens/s. AUTO/CHEAP/QUALITY chat still goes to upstream providers and is not verified.
 - **Money.** Accruals only. No payments, no invoices, no automatic creator-fee ingestion, payouts off. Prices are operator-set list prices, not market prices.
 - **Identity.** Anonymous node ids; one wallet can own many nodes (the engine caps per account, but account linking requires a verified wallet).
 - **Latency estimates** come from a handful of completed jobs on the same server and are UNKNOWN until there are any.

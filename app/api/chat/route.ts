@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { chatEventStream, sseHeaders } from "@/api/chatStream";
 import { validateChat } from "@/api/gateway";
-import { CHAT_SYSTEM_PROMPT } from "@/lib/chatSystem";
+import { networkChatStream } from "@/api/networkChatStream";
+import { CHAT_SYSTEM_PROMPT, NETWORK_SYSTEM_PROMPT } from "@/lib/chatSystem";
 import { body, nodeRoute } from "@/api/http";
 import type { PrivacyRequirement } from "@/domain/economy";
 import { normalizeMode } from "@/domain/economy";
@@ -13,6 +14,8 @@ import { recordRequest } from "@/services/customers";
 import { json, rateLimit } from "@/services/security";
 
 export const dynamic = "force-dynamic";
+/** NETWORK mode streams at roughly a token per second; a 200-token answer needs minutes, not seconds. */
+export const maxDuration = 300;
 
 const PRIVACY = new Set<PrivacyRequirement>(["PUBLIC", "STANDARD", "PRIVATE"]);
 /** Max store time spent on account + credit bookkeeping, in total, before the request proceeds without it. */
@@ -67,6 +70,41 @@ export const POST = nodeRoute(async (req, { ip }) => {
   const messages = chat.messages[0]?.role === "system" ? chat.messages : [{ role: "system" as const, content: CHAT_SYSTEM_PROMPT }, ...chat.messages];
   const request = { kind: "chat" as const, model: chat.model, messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy };
   const customerId = account ? `acct:${account.accountId}` : `anon:${ip}`;
+
+  if (mode === "BROWSER_ONLY") {
+    // The answer is produced by contributor nodes running SmolLM2's layers. No upstream provider, no
+    // charge (research-grade; there is no measured price for it), its own small system prompt.
+    const turns = [{ role: "system" as const, content: NETWORK_SYSTEM_PROMPT }, ...chat.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role as "user" | "assistant", content: typeof m.content === "string" ? m.content : String(m.content) }))];
+    const stream = networkChatStream({
+      messages: turns,
+      maxTokens: Math.min(chat.max_tokens ?? 256, 512),
+      temperature: chat.temperature ?? 0.6,
+      chatId,
+      model: "brain/network",
+      t0,
+      privacy,
+      onComplete: async (brain) => {
+        await recordRequest({
+          customerId,
+          at: t0,
+          model: brain.model ?? "brain/network",
+          endpoint: "chat.completions",
+          route: { target: "BROWSER_NETWORK", providerId: "brain-network" },
+          nodesUsed: brain.network?.stages.flatMap((s) => s.nodes.filter((n) => n.hops > 0).map((n) => n.id)) ?? [],
+          inputUnits: brain.usage?.inputUnits ?? 0,
+          outputUnits: brain.usage?.outputUnits ?? 0,
+          cost: null,
+          latencyMs: Date.now() - t0,
+          receiptId: null,
+          ok: brain.status === "COMPLETED",
+          source: "REAL",
+        });
+      },
+    });
+    const headers: Record<string, string> = { ...sseHeaders };
+    if (setCookie) headers["set-cookie"] = setCookie;
+    return new Response(stream, { headers });
+  }
 
   const stream = await chatEventStream({
     input: { request, mode, privacy },

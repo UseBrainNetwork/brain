@@ -73,6 +73,15 @@ Every completed chat request (`/chat`, `/v1/chat/completions`) dispatches one di
 - Nodes are paid for these units the same way as for every other verified unit: they count in `measureWork` for the hourly pool. Zero verified → zero.
 - Attached jobs run concurrently with each other and with the single interactive (demo / routed) job; `activeJob()` ignores them. They are skipped, not faked, when no node is live. `BRAIN_ATTACHED_COMPUTE=off` disables them.
 
+## Network inference (`services/inference.ts`)
+
+NETWORK-mode chat answers are produced by contributor nodes running SmolLM2-135M's transformer layers (3 pipeline stages of 10 layers; the gateway does embedding, output projection and sampling). Accounting:
+
+- One job row per participating node and session: `kind: inference`, spec `llm_stage {layerFrom, layerTo, tokens}`, `computeUnits = layerMacs × layers × tokens / 2^20` (same unit as matmul work).
+- Every hop is sent to two nodes holding the stage. A node's session is **verified** only if every one of its hops was compared against the sibling and all agreed (relative RMS ≤ 1e-3). Verified units add to `verifiedComputeUnits` and count in the hourly epoch like any other verified work.
+- A stage served by a single node yields `completed, verified: false, failReason: "no-replica"`: recorded, zero units credited, not counted against the node's pass rate (it is the network's shortfall). Two disagreeing nodes yield `failed, failReason: "replica-dispute"` for both, also not counted against pass rate, because the server cannot tell which one is wrong. Nothing the node reports (GPU time, success) is trusted.
+- There is no customer charge: there is no measured price for this path, so the receipt says UNKNOWN / no charge rather than inventing one.
+
 ## Scheduled work (`services/scheduledWork.ts`)
 
 Customer traffic alone leaves most of the fleet idle between requests. The operator schedules fleet-wide distributed jobs to fill that time: whenever no scheduled job is in flight, the hourly cap (`BRAIN_SCHEDULED_WORK_PER_HOUR`, default 40) is not reached and the gap since the last one (`BRAIN_SCHEDULED_WORK_GAP_MS`, default 45 s) has passed, a node poll that found nothing dispatches one job across every live node. Sizes rotate small / medium / large.

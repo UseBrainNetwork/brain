@@ -23,6 +23,7 @@ export type VerificationMethod = "canary" | "spot-check" | "redundant";
 /** Shape check — cheap rejection of malformed results before any recompute. */
 function wellFormed(spec: WorkloadSpec, result: WorkloadResult): string | null {
   if (!result || result.kernel !== spec.kernel || !Array.isArray(result.hashes)) return "malformed";
+  if (spec.kernel === "llm_stage") return "not-hash-verifiable";
   const expected = spec.kernel === "matmul_u32" ? spec.m : Math.ceil(spec.threads / spec.blockSize);
   if (result.hashes.length !== expected) return "wrong-length";
   if (!result.hashes.every((h) => Number.isInteger(h) && h >= 0 && h <= 0xffffffff)) return "malformed";
@@ -51,7 +52,7 @@ export function verifySpotCheck(spec: WorkloadSpec, result: WorkloadResult, indi
         return { ok: false, method: "spot-check", reason: `row ${r} mismatch` };
       }
     }
-  } else {
+  } else if (spec.kernel === "mix_u32") {
     for (const blk of indices) {
       if (mixBlockHashCpu(spec, blk) !== result.hashes[blk]) {
         return { ok: false, method: "spot-check", reason: `block ${blk} mismatch` };

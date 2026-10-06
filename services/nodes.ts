@@ -344,7 +344,7 @@ export async function nextJob(node: StoredNode, opts: { distributedOnly?: boolea
   const spec = t.spec();
   const now = Date.now();
   const id = String(await store.nextJobNumber());
-  const rows = spec.kernel === "matmul_u32" ? spec.m : Math.ceil(spec.threads / spec.blockSize);
+  const rows = spec.kernel === "matmul_u32" ? spec.m : spec.kernel === "mix_u32" ? Math.ceil(spec.threads / spec.blockSize) : 0;
   const job: StoredJob = {
     id,
     model: t.model,

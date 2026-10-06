@@ -32,7 +32,7 @@ Validation before interface. The product can now take a real request, route it, 
 
 ## Explicitly not in the next 30 days
 
-Token emissions, staking, governance, NFTs, licenses, quests, points, a model marketplace, auctions, price predictions, "cheaper than X" claims, our own foundation model, distributed LLM inference on the browser pool, a redesign of the site.
+Token emissions, staking, governance, NFTs, licenses, quests, points, a model marketplace, auctions, price predictions, "cheaper than X" claims, our own foundation model, a redesign of the site. (Distributed LLM inference on the browser pool shipped as NETWORK mode with a 135M model; anything larger stays out until the hop latency and verification cost are measured on the live fleet.)
 
 ## How we will know
 

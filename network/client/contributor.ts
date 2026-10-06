@@ -11,6 +11,7 @@ import { probeThroughput, runChallenge, type BenchmarkProgress } from "@/webgpu/
 import { detectDevice, type DeviceDetection } from "@/webgpu/detect";
 import { networkStore } from "../realtime/store";
 import { adoptId, loadIdentity } from "./identity";
+import { inferenceWorker } from "./inferenceWorker";
 
 /**
  * The browser node. Owns the full lifecycle:
@@ -217,6 +218,9 @@ class ContributorEngine {
     this.set({ phase: "running", startedAt: Date.now() });
     this.watchAssignments();
     void this.loop();
+    // Inference side: load a model stage and serve hops. Reads the session token lazily so it
+    // survives re-registration. Off on phones unless the user opts in.
+    void inferenceWorker.start(() => this.session, this.state.detection?.maxBufferBytes.value ?? 0);
   }
 
   /** Wake the poll loop the instant the server assigns this node a work unit. */
@@ -396,6 +400,7 @@ class ContributorEngine {
 
   private halt(reason: string) {
     this.running = false;
+    void inferenceWorker.stop("off");
     this.unwatch?.();
     this.unwatch = null;
     this.wake?.();
@@ -406,6 +411,7 @@ class ContributorEngine {
 
   async stop() {
     this.running = false;
+    void inferenceWorker.stop("off");
     this.unwatch?.();
     this.unwatch = null;
     this.wake?.();
