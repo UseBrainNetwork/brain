@@ -37,22 +37,41 @@ export function isSolanaAddress(s: string): boolean {
 
 /* ----------------------------------------------------------- sign-in nonce */
 
-const g = globalThis as typeof globalThis & { __brainNonces?: Map<string, { message: string; exp: number }> };
-const nonces = (g.__brainNonces ??= new Map());
+/**
+ * The nonce is stateless: an HMAC over the wallet, a random value and the issue time, all of which
+ * are in the signed message. `/api/wallet/nonce` and `/api/wallet/verify` land on different
+ * serverless instances under load, so nothing about it may live in instance memory.
+ */
+const NONCE_TTL_MS = 5 * 60_000;
+const nonceTag = (address: string, rand: string, issued: string) => hmac(`nonce|${address}|${rand}|${issued}`).slice(0, 16);
+const linkMessage = (address: string, nonce: string, issued: string) => `BRAIN node link\n\nWallet: ${address}\nNonce: ${nonce}\nIssued: ${issued}\n\nSigning proves you own this wallet. It costs nothing and moves no funds.`;
+const MESSAGE_RE = /^BRAIN node link\n\nWallet: ([1-9A-HJ-NP-Za-km-z]+)\nNonce: ([0-9a-f]{16})\.([0-9a-f]{16})\nIssued: (\S+)\n\n/;
 
 export function issueNonce(address: string) {
-  const nonce = token(12);
-  const message = `BRAIN node link\n\nWallet: ${address}\nNonce: ${nonce}\nIssued: ${new Date().toISOString()}\n\nSigning proves you own this wallet. It costs nothing and moves no funds.`;
-  nonces.set(address, { message, exp: Date.now() + 5 * 60_000 });
-  return message;
+  const issued = new Date().toISOString();
+  const rand = token(8);
+  return linkMessage(address, `${rand}.${nonceTag(address, rand, issued)}`, issued);
 }
+
+/** Best-effort replay guard within one instance; the TTL bounds it everywhere else. */
+const g = globalThis as typeof globalThis & { __brainUsedNonces?: Map<string, number> };
+const used = (g.__brainUsedNonces ??= new Map());
 
 /** Ed25519 verification of a Solana signMessage() signature against a nonce this server issued. */
 export function verifySignature(address: string, message: string, signatureB64: string): boolean {
-  const entry = nonces.get(address);
-  if (!entry || entry.exp < Date.now() || entry.message !== message) return false;
-  nonces.delete(address);
-  return verifyEd25519(address, message, signatureB64);
+  const m = MESSAGE_RE.exec(message);
+  if (!m || m[1] !== address) return false;
+  const [, , rand, tag, issued] = m;
+  const issuedMs = Date.parse(issued);
+  const now = Date.now();
+  if (!(issuedMs > now - NONCE_TTL_MS) || issuedMs > now + 60_000) return false;
+  if (!hmacEqual(nonceTag(address, rand, issued), tag)) return false;
+  if (message !== linkMessage(address, `${rand}.${tag}`, issued)) return false;
+  for (const [k, exp] of used) if (exp < now) used.delete(k);
+  if (used.has(message)) return false;
+  if (!verifyEd25519(address, message, signatureB64)) return false;
+  used.set(message, issuedMs + NONCE_TTL_MS);
+  return true;
 }
 
 export function base58Encode(bytes: Uint8Array): string {
