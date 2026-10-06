@@ -274,13 +274,16 @@ class ContributorEngine {
     while (this.running && this.backend && this.session) {
       try {
         const worker = this.state.workerMode;
-        const { job, retryMs } = await postJson<{
+        const { job, retryMs, build } = await postJson<{
           job: { id: string; kind: WorkloadKind; model: string; spec: WorkloadSpec; units: number; parentId?: string; unitId?: string } | null;
           retryMs?: number;
+          build?: string | null;
         }>("/api/jobs/next", { distributedOnly: worker }, this.session);
         if (!job) {
           // Nothing assigned: idle until the server announces work for us, or for as long as it told us to.
           if (this.state.current) this.set({ current: null });
+          // A newer client is deployed: keep polling, reload at this idle point once the jitter has passed.
+          if (worker && this.outdated(build) && this.upgrade()) return;
           await this.waitForWork(Math.min(30_000, Math.max(3500, retryMs ?? 0)));
           continue;
         }
@@ -351,6 +354,36 @@ class ContributorEngine {
         await sleep(3000);
       }
     }
+  }
+
+  /** The build id the server reported when this tab first polled. */
+  private build: string | null | undefined;
+
+  /**
+   * True once the server is answering from a different deployment than the one this tab loaded.
+   * The first build seen is taken as "ours": the bundle itself does not know its own id.
+   */
+  private outdated(build: string | null | undefined): boolean {
+    if (!build) return false;
+    if (this.build === undefined) {
+      this.build = build;
+      return false;
+    }
+    return build !== this.build;
+  }
+
+  /**
+   * Reload into the new client at an idle moment, as a worker that rejoins by itself. Jittered so
+   * a deploy does not make the whole fleet re-download its model stage in the same second.
+   */
+  private upgradeAt = 0;
+  private upgrade(): boolean {
+    if (!this.upgradeAt) this.upgradeAt = Date.now() + 2_000 + Math.random() * 45_000;
+    if (Date.now() < this.upgradeAt) return false;
+    const url = new URL(window.location.href);
+    url.searchParams.set("autostart", "1");
+    window.location.replace(url.toString());
+    return true;
   }
 
   /**
