@@ -1,0 +1,17 @@
+name = "brain-relay"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Secrets (set with `wrangler secret put`): RELAY_SECRET — shared with the gateway (BRAIN_RELAY_SECRET on Vercel).
+
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "ModelRelay"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ModelRelay"]
+
+[observability]
+enabled = true

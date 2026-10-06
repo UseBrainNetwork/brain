@@ -1,12 +1,12 @@
 import type { ComputeJob } from "@/domain/types";
-import { DEFAULT_NETWORK_MODEL, NETWORK_MODELS, hubUrl, stagePlan, stageUnits, type NetworkModel, type StageSpan } from "@/inference/config";
-import { decodeF32, encodeF32 } from "@/inference/codec";
-import { embed, finalLogits, mulberry32, relativeRms, sampleTopK, topK } from "@/inference/llama";
-import { fetchHeader, fetchTensors } from "@/inference/safetensors";
+import { DEFAULT_NETWORK_MODEL, MODEL_LADDER, MODEL_PREFERENCE, NETWORK_MODELS, nodeFitsStage, stagePlan, stageUnits, tokenizerUrl, type NetworkModel, type StageSpan } from "@/inference/config";
+import { mulberry32, sampleTopK } from "@/inference/llama";
+import { REPLICA_TOLERANCE, unpackTopK, type LapStage, type StageMsg } from "@/inference/protocol";
 import { StreamDecoder, Tokenizer, chatPrompt, type ChatTurn, type TokenizerJson } from "@/inference/tokenizer";
 import { networkConfig } from "@/lib/config";
 import { eventBus } from "./eventBus";
 import { NodeError, publicJob } from "./nodes";
+import { RelaySession, relayConfigured, relayPresence } from "./relay";
 import { updateReputation } from "./reputation";
 import { getStore, type StoredJob, type StoredNode } from "./store";
 
@@ -15,28 +15,29 @@ import { getStore, type StoredJob, type StoredNode } from "./store";
  *
  * A model is split into pipeline stages of consecutive transformer layers. Contributor nodes load
  * one stage each (weights by range request from the Hugging Face CDN) and hold a per-session KV
- * cache. The gateway embeds the prompt, sends the hidden state through stage 0..S-1 as "hops",
- * applies the final norm and output projection itself, samples, and repeats per token.
+ * cache. Stage 0 also embeds token ids; the last stage applies the final norm and output projection
+ * and returns top-k logits. The gateway holds no weights: it tokenizes, sends token ids through the
+ * relay (relay/), samples from the returned top-k and settles rewards.
  *
- * Verification: every hop is sent to two nodes holding the same stage when two are available. Their
- * outputs must agree within REPLICA_TOLERANCE (relative RMS). Only nodes whose hops were all
- * replica-checked and agreed get verified compute units; a stage served by a single node is
- * reported as unverified and earns nothing. Nothing a node reports (timing, success) is trusted.
+ * Speed: hidden states hop node→node through a persistent WebSocket relay, and each lap can carry
+ * several tokens (prompt-lookup drafts verified in one pass), so a token costs a fraction of a lap.
  *
- * Honest limits: SmolLM2-135M quality, roughly one token per second (each token crosses S nodes over
- * HTTP), one session per request. Reported on every receipt as such.
+ * Verification: every stage of every lap runs on two nodes when two hold it. Their outputs must
+ * agree within REPLICA_TOLERANCE (relative RMS; for the head, over the shared top-k logits). Only
+ * nodes whose hops were all replica-checked and agreed get verified compute units; a stage served
+ * by a single node is reported as unverified and earns nothing. Nothing a node reports (timing,
+ * success) is trusted. A disagreement stops the session and is reported as such.
  */
 
-export const REPLICA_TOLERANCE = 1e-3;
-const PREFILL_DEADLINE_MS = 20_000;
-const DECODE_DEADLINE_MS = 8_000;
-const HOP_POLL_MS = 120;
-const ACTIVE_WINDOW_MS = 20_000;
+export { REPLICA_TOLERANCE };
+const PREFILL_HOP_MS = 20_000;
+const DECODE_HOP_MS = 8_000;
 const MAX_PROMPT_TOKENS = 512;
-const MAX_CONCURRENT_SESSIONS = 4;
+const MAX_CONCURRENT_SESSIONS = 6;
 /** Wall-clock budget per session; generation stops with finish_reason "length" rather than hitting the function limit. */
 const SESSION_BUDGET_MS = 240_000;
-const TOP_K = 64;
+/** Speculative drafts per lap from prompt lookup. */
+const MAX_DRAFTS = 4;
 
 /* ------------------------------------------------------------------ records */
 
@@ -54,29 +55,6 @@ export interface ShardRecord {
   error?: string;
 }
 
-export interface Hop {
-  id: string;
-  sessionId: string;
-  model: string;
-  stage: number;
-  nodeId: string;
-  /** 0 = prefill, then one per generated token. */
-  step: number;
-  seq: number;
-  positions: number[];
-  /** Cache length the node must have before applying this hop (ordering guard). */
-  cacheLen: number;
-  /** base64 f32 [seq, hidden]. Stripped after the session settles. */
-  input?: string;
-  status: "assigned" | "done" | "failed";
-  issuedAt: number;
-  deadline: number;
-  output?: string;
-  gpuMs?: number;
-  doneAt?: number;
-  error?: string;
-}
-
 export interface SessionNode {
   nodeId: string;
   stage: number;
@@ -86,6 +64,8 @@ export interface SessionNode {
   checked: number;
   mismatches: number;
   gpuMs: number;
+  /** Wall ms at the relay, summed. */
+  ms: number;
   dropped?: string;
 }
 
@@ -97,6 +77,9 @@ export interface InferenceSession {
   updatedAt: number;
   promptTokens: number;
   outputTokens: number;
+  /** Tokens proposed by lookup drafting and confirmed by the model. */
+  draftedTokens: number;
+  laps: number;
   stages: { stage: number; layerFrom: number; layerTo: number; nodes: string[] }[];
   nodes: Record<string, SessionNode>;
   firstTokenMs?: number;
@@ -112,6 +95,8 @@ export interface NetworkRunSummary {
   modelLabel: string;
   promptTokens: number;
   outputTokens: number;
+  draftedTokens: number;
+  laps: number;
   firstTokenMs: number | null;
   totalMs: number;
   tokPerSec: number | null;
@@ -126,38 +111,26 @@ export interface NetworkRunSummary {
 
 export type NetworkChatEvent = { type: "token"; text: string; token: number } | { type: "status"; detail: string };
 
-/* ------------------------------------------------------------------ gateway weights */
+/* ------------------------------------------------------------------ gateway tokenizer */
 
-interface GatewayWeights {
-  tokenizer: Tokenizer;
-  embed: Float32Array;
-  norm: Float32Array;
-  bytes: number;
-  loadedAt: number;
-}
+const g = globalThis as typeof globalThis & { __brainTokenizers?: Map<string, Promise<Tokenizer>> };
 
-const g = globalThis as typeof globalThis & { __brainGateway?: Map<string, Promise<GatewayWeights>> };
-
-/** Tokenizer, embedding matrix and final norm for the gateway side. Fetched once per instance. */
-export function gatewayWeights(model: NetworkModel = DEFAULT_NETWORK_MODEL): Promise<GatewayWeights> {
-  g.__brainGateway ??= new Map();
-  let p = g.__brainGateway.get(model.id);
+/** Tokenizer for the gateway side. Fetched once per instance (~11 MB JSON for Qwen3). */
+export function gatewayTokenizer(model: NetworkModel = DEFAULT_NETWORK_MODEL): Promise<Tokenizer> {
+  g.__brainTokenizers ??= new Map();
+  let p = g.__brainTokenizers.get(model.tokenizerRepo);
   if (!p) {
     p = (async () => {
       const t0 = Date.now();
-      const [tokJson, header] = await Promise.all([
-        fetch(hubUrl(model, model.tokenizerFile)).then((r) => {
-          if (!r.ok) throw new Error(`tokenizer ${r.status}`);
-          return r.json() as Promise<TokenizerJson>;
-        }),
-        fetchHeader(hubUrl(model, model.weightsFile)),
-      ]);
-      const tensors = await fetchTensors(hubUrl(model, model.weightsFile), header, ["model.embed_tokens.weight", "model.norm.weight"]);
-      console.log(`[inference] gateway weights for ${model.id}: ${(tensors.bytesFetched / 1e6).toFixed(1)} MB in ${Date.now() - t0} ms`);
-      return { tokenizer: new Tokenizer(tokJson), embed: tensors.get("model.embed_tokens.weight"), norm: tensors.get("model.norm.weight"), bytes: tensors.bytesFetched, loadedAt: Date.now() };
+      const r = await fetch(tokenizerUrl(model));
+      if (!r.ok) throw new Error(`tokenizer ${r.status}`);
+      const json = (await r.json()) as TokenizerJson;
+      const tok = new Tokenizer(json);
+      console.log(`[inference] tokenizer for ${model.tokenizerRepo} loaded in ${Date.now() - t0} ms`);
+      return tok;
     })();
-    g.__brainGateway.set(model.id, p);
-    p.catch(() => g.__brainGateway?.delete(model.id));
+    g.__brainTokenizers.set(model.tokenizerRepo, p);
+    p.catch(() => g.__brainTokenizers?.delete(model.tokenizerRepo));
   }
   return p;
 }
@@ -168,7 +141,7 @@ const isLive = (n: StoredNode, now: number) => (n.status === "idle" || n.status 
 
 export async function listLiveShards(model: NetworkModel, now = Date.now()): Promise<{ shard: ShardRecord; node: StoredNode }[]> {
   const store = getStore();
-  const all = await store.listDocs<ShardRecord>("shard", { limit: 500 });
+  const all = await store.listDocs<ShardRecord>("shard", { limit: 1000 });
   const mine = all.filter((s) => s.model === model.id && now - s.updatedAt < 6 * 60 * 60_000);
   if (!mine.length) return [];
   const nodes = await store.getNodes(mine.map((s) => s.nodeId));
@@ -180,10 +153,20 @@ export async function listLiveShards(model: NetworkModel, now = Date.now()): Pro
   return out;
 }
 
+/** Live shards whose node is both reported ready and connected to the relay (so it can take hops now). */
+export async function servingShards(model: NetworkModel, now = Date.now()): Promise<{ shard: ShardRecord; node: StoredNode }[]> {
+  const live = await listLiveShards(model, now);
+  if (!relayConfigured()) return [];
+  const present = new Set((await relayPresence(model.id).catch(() => [])).filter((p) => p.stage !== undefined).map((p) => `${p.nodeId}:${p.stage}`));
+  return live.filter((x) => x.shard.state === "ready" && present.has(`${x.shard.nodeId}:${x.shard.stage}`));
+}
+
 export interface StageCapacity {
   stage: number;
   layerFrom: number;
   layerTo: number;
+  hasEmbed: boolean;
+  hasHead: boolean;
   ready: number;
   loading: number;
 }
@@ -191,60 +174,125 @@ export interface StageCapacity {
 export interface InferenceCapacity {
   model: string;
   modelLabel: string;
+  params: string;
+  quant: string;
   license: string;
   stages: StageCapacity[];
-  /** Every stage has at least one ready node. */
+  /** Every stage has at least one serving node. */
   available: boolean;
-  /** Every stage has at least two ready nodes, so every hop can be replica-checked. */
+  /** Every stage has at least two serving nodes, so every hop can be replica-checked. */
   verifiable: boolean;
   readyNodes: number;
+  relay: boolean;
   provenance: "live";
 }
 
 export async function inferenceCapacity(model: NetworkModel = DEFAULT_NETWORK_MODEL): Promise<InferenceCapacity> {
-  const live = await listLiveShards(model);
+  const now = Date.now();
+  const [live, serving] = await Promise.all([listLiveShards(model, now), servingShards(model, now)]);
   const stages = stagePlan(model).map((s) => ({
     ...s,
-    ready: live.filter((x) => x.shard.stage === s.stage && x.shard.state === "ready").length,
+    ready: serving.filter((x) => x.shard.stage === s.stage).length,
     loading: live.filter((x) => x.shard.stage === s.stage && x.shard.state === "loading").length,
   }));
   return {
     model: model.id,
     modelLabel: model.label,
+    params: model.params,
+    quant: model.quant,
     license: model.license,
     stages,
     available: stages.every((s) => s.ready >= 1),
     verifiable: stages.every((s) => s.ready >= 2),
     readyNodes: stages.reduce((a, s) => a + s.ready, 0),
+    relay: relayConfigured(),
     provenance: "live",
   };
 }
 
-/**
- * Which stage a node should load: keep its current assignment if it still exists, otherwise the
- * stage with the fewest live holders (ready or loading), lowest index first.
- */
-export function assignShard(node: StoredNode, model: NetworkModel = DEFAULT_NETWORK_MODEL): Promise<{ model: NetworkModel; span: StageSpan; record: ShardRecord }> {
-  // Several nodes come online together (a fleet reload); without the lock they would all see the
-  // same empty counts and pick the same stage.
-  return getStore().withLock("inference:assign", () => assignShardUnlocked(node, model));
+export async function allCapacity(): Promise<InferenceCapacity[]> {
+  return Promise.all(MODEL_PREFERENCE.map((m) => inferenceCapacity(m)));
 }
 
-async function assignShardUnlocked(node: StoredNode, model: NetworkModel): Promise<{ model: NetworkModel; span: StageSpan; record: ShardRecord }> {
+/** The model a chat runs when none is named: the largest that is verifiable, else the largest available. */
+export async function pickModel(requested?: NetworkModel): Promise<{ model: NetworkModel; capacity: InferenceCapacity } | null> {
+  if (requested) {
+    const capacity = await inferenceCapacity(requested);
+    return capacity.available ? { model: requested, capacity } : null;
+  }
+  const caps = await allCapacity();
+  const verifiable = caps.find((c) => c.verifiable);
+  const available = caps.find((c) => c.available);
+  const chosen = verifiable ?? available;
+  return chosen ? { model: NETWORK_MODELS[chosen.model], capacity: chosen } : null;
+}
+
+/**
+ * Which model and stage a node should load. Sticky: a node keeps its assignment while it exists.
+ * Otherwise the ladder is filled in order: the first model in MODEL_LADDER with a stage held by
+ * fewer than two live nodes that fits this node's GPU gets it (fewest holders first); when every
+ * stage of every model has two holders, extra replicas go to the default model's thinnest stage.
+ */
+export function assignShard(node: StoredNode, requested?: NetworkModel): Promise<{ model: NetworkModel; span: StageSpan; record: ShardRecord }> {
+  // Several nodes come online together (a fleet reload); without the lock they would all see the
+  // same empty counts and pick the same stage.
+  return getStore().withLock("inference:assign", () => assignShardUnlocked(node, requested));
+}
+
+async function assignShardUnlocked(node: StoredNode, requested?: NetworkModel): Promise<{ model: NetworkModel; span: StageSpan; record: ShardRecord }> {
   const store = getStore();
   const now = Date.now();
-  const plan = stagePlan(model);
   const existing = await store.getDoc<ShardRecord>("shard", node.id);
+  // Nodes registered before the adapter limit was reported: let them try; a stage that does not fit
+  // fails at load and is reported as such.
+  const maxBuf = node.maxBufferBytes ?? Number.POSITIVE_INFINITY;
+
+  let model: NetworkModel | undefined;
   let span: StageSpan | undefined;
-  if (existing && existing.model === model.id && existing.state !== "failed") span = plan.find((s) => s.stage === existing.stage);
-  if (!span) {
-    const live = await listLiveShards(model, now);
-    const counts = plan.map((s) => live.filter((x) => x.shard.stage === s.stage && x.shard.nodeId !== node.id).length);
-    let best = 0;
-    for (let i = 1; i < counts.length; i++) if (counts[i] < counts[best]) best = i;
-    span = plan[best];
+  if (existing && existing.state !== "failed" && (!requested || requested.id === existing.model)) {
+    const m = NETWORK_MODELS[existing.model];
+    const s = m && stagePlan(m).find((x) => x.stage === existing.stage);
+    if (m && s && nodeFitsStage(m, s, maxBuf)) {
+      model = m;
+      span = s;
+    }
   }
-  const record: ShardRecord = { nodeId: node.id, model: model.id, stage: span.stage, layerFrom: span.layerFrom, layerTo: span.layerTo, state: existing?.state === "ready" && existing.stage === span.stage ? "ready" : "loading", progress: existing?.stage === span.stage ? (existing.progress ?? 0) : 0, updatedAt: now, readyAt: existing?.stage === span.stage ? existing.readyAt : undefined };
+  if (!model || !span) {
+    const ladder = requested ? [requested] : MODEL_LADDER;
+    const counts = new Map<string, number[]>();
+    for (const m of ladder) {
+      const live = await listLiveShards(m, now);
+      counts.set(
+        m.id,
+        stagePlan(m).map((s) => live.filter((x) => x.shard.stage === s.stage && x.shard.nodeId !== node.id).length),
+      );
+    }
+    const pick = (threshold: number) => {
+      for (const m of ladder) {
+        const plan = stagePlan(m).filter((s) => nodeFitsStage(m, s, maxBuf));
+        const c = counts.get(m.id)!;
+        const under = plan.filter((s) => c[s.stage] < threshold).sort((a, b) => c[a.stage] - c[b.stage] || a.stage - b.stage);
+        if (under.length) return { m, s: under[0] };
+      }
+      return null;
+    };
+    const chosen = pick(2) ?? pick(Infinity);
+    if (!chosen) throw new NodeError("no_fit", 409);
+    model = chosen.m;
+    span = chosen.s;
+  }
+  const same = existing?.model === model.id && existing.stage === span.stage;
+  const record: ShardRecord = {
+    nodeId: node.id,
+    model: model.id,
+    stage: span.stage,
+    layerFrom: span.layerFrom,
+    layerTo: span.layerTo,
+    state: same && existing?.state === "ready" ? "ready" : "loading",
+    progress: same ? (existing?.progress ?? 0) : 0,
+    updatedAt: now,
+    readyAt: same ? existing?.readyAt : undefined,
+  };
   await store.putDoc("shard", node.id, record, { at: now, key: `${model.id}:${span.stage}` });
   return { model, span, record };
 }
@@ -266,75 +314,35 @@ export async function reportShard(node: StoredNode, patch: { state: ShardRecord[
   return next;
 }
 
-/* ------------------------------------------------------------------ hops: node side */
-
-export interface HopPayload {
-  id: string;
-  sessionId: string;
-  model: string;
-  stage: number;
-  step: number;
-  seq: number;
-  positions: number[];
-  cacheLen: number;
-  input: string;
-  deadline: number;
+export async function shardOf(node: StoredNode): Promise<ShardRecord | null> {
+  return getStore().getDoc<ShardRecord>("shard", node.id);
 }
 
-async function isActive(now: number): Promise<boolean> {
-  const a = await getStore().getDoc<{ at: number }>("meta", "inference-active");
-  return Boolean(a && now - a.at < ACTIVE_WINDOW_MS);
-}
-
-async function markActive(): Promise<void> {
-  const now = Date.now();
-  await getStore().putDoc("meta", "inference-active", { at: now }, { at: now });
-}
+/* ------------------------------------------------------------------ drafting */
 
 /**
- * Next hop for a node. Long-polls up to `waitMs` only while a session is active somewhere; when the
- * network is idle it answers immediately with a retry hint so idle nodes cost the store nothing.
+ * Prompt-lookup drafts: if the last `n` tokens occurred earlier in the context, propose what
+ * followed them then. Free to compute, right surprisingly often on names, code and repeated
+ * phrasing, and always checked by the model before a token is emitted.
  */
-export async function nextHop(node: StoredNode, waitMs: number): Promise<{ hop: HopPayload | null; retryMs: number; active: boolean }> {
-  const store = getStore();
-  const shard = await store.getDoc<ShardRecord>("shard", node.id);
-  if (!shard || shard.state !== "ready") return { hop: null, retryMs: 5_000, active: false };
-  const until = Date.now() + Math.max(0, Math.min(waitMs, 8_000));
-  let active = await isActive(Date.now());
-  let lastActiveCheck = Date.now();
-  for (;;) {
-    const now = Date.now();
-    const hops = await store.listDocs<Hop>("hop", { key: node.id, limit: 8, from: now - 60_000 });
-    const open = hops.filter((h) => h.status === "assigned" && h.deadline > now && h.input).sort((a, b) => a.step - b.step);
-    const h = open[0];
-    if (h) return { hop: { id: h.id, sessionId: h.sessionId, model: h.model, stage: h.stage, step: h.step, seq: h.seq, positions: h.positions, cacheLen: h.cacheLen, input: h.input!, deadline: h.deadline }, retryMs: 0, active: true };
-    if (!active || now >= until) return { hop: null, retryMs: active ? 250 : 1_500, active };
-    if (now - lastActiveCheck > 3_000) {
-      active = await isActive(now);
-      lastActiveCheck = now;
+export function lookupDrafts(ctx: ArrayLike<number>, maxDrafts = MAX_DRAFTS, maxNgram = 3, minNgram = 2): number[] {
+  const L = ctx.length;
+  for (let n = Math.min(maxNgram, L - 1); n >= minNgram; n--) {
+    for (let i = L - n - 1; i >= 0; i--) {
+      let match = true;
+      for (let j = 0; j < n; j++) {
+        if (ctx[i + j] !== ctx[L - n + j]) {
+          match = false;
+          break;
+        }
+      }
+      if (!match) continue;
+      const out: number[] = [];
+      for (let k = i + n; k < L && out.length < maxDrafts; k++) out.push(ctx[k]);
+      if (out.length) return out;
     }
-    await new Promise((r) => setTimeout(r, 200));
   }
-}
-
-export async function submitHop(node: StoredNode, hopId: string, body: { output?: string; gpuMs?: number; error?: string }): Promise<{ ok: boolean }> {
-  const store = getStore();
-  const hop = await store.getDoc<Hop>("hop", hopId);
-  if (!hop || hop.nodeId !== node.id) throw new NodeError("unknown_hop", 404);
-  if (hop.status !== "assigned") throw new NodeError("hop_closed", 409);
-  const now = Date.now();
-  const model = NETWORK_MODELS[hop.model];
-  let next: Hop;
-  if (body.error || !body.output) {
-    next = { ...hop, status: "failed", error: String(body.error ?? "no output").slice(0, 200), doneAt: now };
-  } else {
-    const expectedBytes = hop.seq * (model?.config.hidden ?? 0) * 4;
-    const actualBytes = Math.floor((body.output.length * 3) / 4) - (body.output.endsWith("==") ? 2 : body.output.endsWith("=") ? 1 : 0);
-    if (!model || actualBytes !== expectedBytes) next = { ...hop, status: "failed", error: `malformed output (${actualBytes} bytes, expected ${expectedBytes})`, doneAt: now };
-    else next = { ...hop, status: now > hop.deadline ? "failed" : "done", output: body.output, gpuMs: Math.max(0, Number(body.gpuMs) || 0), doneAt: now, error: now > hop.deadline ? "deadline" : undefined };
-  }
-  await store.putDoc("hop", hop.id, next, { at: hop.issuedAt, key: hop.nodeId });
-  return { ok: next.status === "done" };
+  return [];
 }
 
 /* ------------------------------------------------------------------ session orchestration */
@@ -348,59 +356,46 @@ export interface NetworkChatInput {
   model?: NetworkModel;
 }
 
-class StageRun {
-  /** Nodes still in the pipeline for this stage, in preference order. */
-  nodes: string[];
-  constructor(
-    readonly span: StageSpan,
-    nodes: string[],
-  ) {
-    this.nodes = nodes;
-  }
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 /**
  * Run one chat completion on the network. Emits tokens as they are sampled and returns the summary
- * once the session is terminal. Throws `NodeError("no_capacity")` before any work if a stage has
- * no ready node.
+ * once the session is terminal. Throws `NodeError("no_capacity")` before any work if no model has
+ * a node for every stage.
  */
 export async function runNetworkChat(input: NetworkChatInput, emit: (e: NetworkChatEvent) => void, signal?: AbortSignal): Promise<NetworkRunSummary> {
-  const model = input.model ?? DEFAULT_NETWORK_MODEL;
   const store = getStore();
   const t0 = Date.now();
+  if (!relayConfigured()) throw new NodeError("no_capacity:the inference relay is not configured", 503);
 
   const running = (await store.listDocs<InferenceSession>("isession", { limit: 20, from: t0 - 5 * 60_000 })).filter((s) => s.status === "running" && t0 - s.updatedAt < 30_000);
   if (running.length >= MAX_CONCURRENT_SESSIONS) throw new NodeError("busy", 503);
 
-  const live = await listLiveShards(model, t0);
+  const picked = await pickModel(input.model);
+  if (!picked) {
+    const want = input.model ?? DEFAULT_NETWORK_MODEL;
+    const cap = await inferenceCapacity(want);
+    const missing = cap.stages.filter((s) => s.ready === 0).map((s) => s.stage);
+    throw new NodeError(`no_capacity:${want.label} stage ${missing.join(",")} has no serving node`, 503);
+  }
+  const { model } = picked;
+  const serving = await servingShards(model, t0);
   const plan = stagePlan(model);
-  const stages = plan.map((span) => {
-    const holders = live
-      .filter((x) => x.shard.stage === span.stage && x.shard.state === "ready")
+  const stages: { span: StageSpan; nodes: string[] }[] = plan.map((span) => ({
+    span,
+    nodes: serving
+      .filter((x) => x.shard.stage === span.stage)
       .sort((a, b) => b.node.reputation - a.node.reputation || b.node.computeScore - a.node.computeScore)
       .slice(0, 2)
-      .map((x) => x.node.id);
-    return new StageRun(span, holders);
-  });
+      .map((x) => x.node.id),
+  }));
   const missing = stages.filter((s) => s.nodes.length === 0).map((s) => s.span.stage);
-  if (missing.length) throw new NodeError(`no_capacity:stage ${missing.join(",")} has no ready node`, 503);
+  if (missing.length) throw new NodeError(`no_capacity:${model.label} stage ${missing.join(",")} has no serving node`, 503);
 
-  emit({ type: "status", detail: `pipeline: ${stages.map((s) => `${s.nodes.length} node${s.nodes.length === 1 ? "" : "s"}`).join(" → ")}` });
-  const tGw = Date.now();
-  const warm = g.__brainGateway?.has(model.id);
-  if (!warm) emit({ type: "status", detail: "loading gateway weights (embedding + output projection) on this server, first request only" });
-  const gw = await gatewayWeights(model);
-  const gatewayMs = Date.now() - tGw;
+  emit({ type: "status", detail: `${model.label} · ${stages.map((s) => `${s.nodes.length} node${s.nodes.length === 1 ? "" : "s"}`).join(" → ")}` });
+  const tok = await gatewayTokenizer(model);
   const cfg = model.config;
-  const promptText = chatPrompt(input.messages);
-  let promptIds = gw.tokenizer.encode(promptText);
-  if (promptIds.length > MAX_PROMPT_TOKENS) {
-    // Keep the system turn head and the most recent tokens; the template tail (assistant header) must survive.
-    promptIds = promptIds.slice(promptIds.length - MAX_PROMPT_TOKENS);
-  }
-  const maxNew = Math.max(1, Math.min(input.maxTokens, model.maxContext - promptIds.length - 1));
+  let promptIds = tok.encode(chatPrompt(input.messages, { noThink: model.noThink }));
+  if (promptIds.length > MAX_PROMPT_TOKENS) promptIds = promptIds.slice(promptIds.length - MAX_PROMPT_TOKENS);
+  const maxNew = Math.max(1, Math.min(input.maxTokens, model.maxContext - promptIds.length - MAX_DRAFTS - 1));
 
   const sessionId = `is-${t0.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const session: InferenceSession = {
@@ -411,157 +406,121 @@ export async function runNetworkChat(input: NetworkChatInput, emit: (e: NetworkC
     updatedAt: t0,
     promptTokens: promptIds.length,
     outputTokens: 0,
+    draftedTokens: 0,
+    laps: 0,
     stages: stages.map((s) => ({ stage: s.span.stage, layerFrom: s.span.layerFrom, layerTo: s.span.layerTo, nodes: [...s.nodes] })),
     nodes: {},
     provenance: "live",
   };
-  for (const s of stages) for (const n of s.nodes) session.nodes[n] = { nodeId: n, stage: s.span.stage, hops: 0, tokens: 0, checked: 0, mismatches: 0, gpuMs: 0 };
+  for (const s of stages) for (const n of s.nodes) session.nodes[n] = { nodeId: n, stage: s.span.stage, hops: 0, tokens: 0, checked: 0, mismatches: 0, gpuMs: 0, ms: 0 };
   await store.putDoc("isession", sessionId, session, { at: t0, key: model.id });
-  await markActive();
 
-  const pendingPairs: { ids: [string, string]; credited: Set<string> }[] = [];
-  const hopIds: { id: string; nodeId: string; issuedAt: number }[] = [];
-  let hopSeq = 0;
-
-  const issue = async (stage: StageRun, step: number, hidden: Float32Array, seq: number, positions: number[], cacheLen: number): Promise<Hop[]> => {
-    const now = Date.now();
-    const deadline = now + (step === 0 ? PREFILL_DEADLINE_MS + seq * 20 : DECODE_DEADLINE_MS);
-    const input = encodeF32(hidden);
-    const hops: Hop[] = stage.nodes.map((nodeId) => ({
-      id: `${sessionId}-${stage.span.stage}-${step}-${(hopSeq++).toString(36)}`,
-      sessionId,
-      model: model.id,
-      stage: stage.span.stage,
-      nodeId,
-      step,
-      seq,
-      positions,
-      cacheLen,
-      input,
-      status: "assigned",
-      issuedAt: now,
-      deadline,
-    }));
-    await Promise.all(hops.map((h) => store.putDoc("hop", h.id, h, { at: now, key: h.nodeId })));
-    for (const h of hops) hopIds.push({ id: h.id, nodeId: h.nodeId, issuedAt: now });
-    return hops;
-  };
-
-  /** Wait for the first successful result among the hops; drop nodes that fail. */
-  const collect = async (stage: StageRun, hops: Hop[]): Promise<Float32Array> => {
-    const states = new Map(hops.map((h) => [h.id, h]));
-    const deadline = Math.max(...hops.map((h) => h.deadline));
-    for (;;) {
-      if (signal?.aborted) throw new NodeError("aborted", 499);
-      const now = Date.now();
-      const fresh = await Promise.all(hops.map((h) => store.getDoc<Hop>("hop", h.id)));
-      fresh.forEach((h) => h && states.set(h.id, h));
-      const done = [...states.values()].filter((h) => h.status === "done" && h.output);
-      const failed = [...states.values()].filter((h) => h.status === "failed" || (h.status === "assigned" && h.deadline < now));
-      for (const f of failed) {
-        const sn = session.nodes[f.nodeId];
-        if (sn && !sn.dropped) sn.dropped = f.error ?? "deadline";
-        stage.nodes = stage.nodes.filter((n) => n !== f.nodeId);
+  // Per-lap accounting from relay reports. A stage's two reports for one step are paired by step.
+  const lapSeq = new Map<number, number>();
+  let dispute: string | null = null;
+  const onStage = (m: StageMsg) => {
+    const sn = session.nodes[m.nodeId];
+    if (!sn) return;
+    const seq = lapSeq.get(m.step) ?? 1;
+    if (m.ok) {
+      sn.hops++;
+      sn.tokens += seq;
+      sn.gpuMs += m.gpuMs;
+      sn.ms += m.ms;
+    } else if (!sn.dropped) {
+      sn.dropped = m.error ?? "failed";
+      const st = stages.find((s) => s.span.stage === m.stage);
+      if (st) st.nodes = st.nodes.filter((n) => n !== m.nodeId);
+    }
+    if (m.rms !== null) {
+      // Both nodes of this stage answered this step: the comparison counts for both.
+      const st = session.stages.find((s) => s.stage === m.stage);
+      for (const id of st?.nodes ?? []) {
+        const x = session.nodes[id];
+        if (!x) continue;
+        x.checked++;
+        if (m.rms > REPLICA_TOLERANCE) x.mismatches++;
       }
-      if (done.length) {
-        for (const d of done) credit(d);
-        if (done.length === 2) compare(done[0], done[1]);
-        else if (hops.length === 2 && failed.length === 0) pendingPairs.push({ ids: [hops[0].id, hops[1].id], credited: new Set(done.map((d) => d.id)) });
-        return decodeF32(done[0].output!);
-      }
-      if (stage.nodes.length === 0 || now > deadline) throw new NodeError(`stage ${stage.span.stage} lost: ${failed.map((f) => f.error ?? "deadline").join("; ") || "no result"}`, 503);
-      await sleep(HOP_POLL_MS);
+      if (m.rms > REPLICA_TOLERANCE && !dispute) dispute = `stage ${m.stage} replicas disagree (relative RMS ${m.rms.toExponential(1)})`;
     }
   };
 
-  const credit = (h: Hop) => {
-    const sn = session.nodes[h.nodeId]!;
-    sn.hops++;
-    sn.tokens += h.seq;
-    sn.gpuMs += h.gpuMs ?? 0;
-  };
-
-  const compare = (a: Hop, b: Hop) => {
-    const rms = relativeRms(decodeF32(a.output!), decodeF32(b.output!));
-    const ok = rms <= REPLICA_TOLERANCE;
-    for (const h of [a, b]) {
-      const sn = session.nodes[h.nodeId]!;
-      sn.checked++;
-      if (!ok) sn.mismatches++;
-    }
-  };
-
-  /** Resolve pairs whose sibling finished after we moved on. */
-  const settlePairs = async (waitMs: number) => {
-    const until = Date.now() + waitMs;
-    while (pendingPairs.length) {
-      const next: typeof pendingPairs = [];
-      for (const p of pendingPairs) {
-        const [a, b] = await Promise.all([store.getDoc<Hop>("hop", p.ids[0]), store.getDoc<Hop>("hop", p.ids[1])]);
-        if (a?.status === "done" && b?.status === "done" && a.output && b.output) {
-          // The late sibling's work counts now that it is in; then the pair is compared.
-          for (const h of [a, b]) if (!p.credited.has(h.id)) credit(h);
-          compare(a, b);
-        } else if (a?.status === "failed" || b?.status === "failed" || Date.now() > until) {
-          // Unresolvable: the hop stays unchecked for the node that did answer.
-        } else next.push(p);
-      }
-      pendingPairs.length = 0;
-      pendingPairs.push(...next);
-      if (pendingPairs.length) await sleep(150);
-    }
-  };
-
+  const relay = await RelaySession.connect(model.id, sessionId, onStage);
   const rnd = mulberry32(input.seed ?? (t0 >>> 0));
   const sampling = { temperature: Math.max(0, Math.min(2, input.temperature)), topP: Math.max(0.05, Math.min(1, input.topP)), seed: input.seed ?? 0 };
-  const decoder = new StreamDecoder(gw.tokenizer);
+  const decoder = new StreamDecoder(tok);
   const out: number[] = [];
   let finishReason: NetworkRunSummary["finishReason"] = "length";
   let firstTokenMs: number | null = null;
   let error: string | undefined;
+  let step = 0;
 
   const touch = async () => {
     session.updatedAt = Date.now();
     session.outputTokens = out.length;
-    await Promise.all([store.putDoc("isession", sessionId, session, { at: t0, key: model.id }), markActive()]);
+    session.laps = step;
+    await store.putDoc("isession", sessionId, session, { at: t0, key: model.id });
+  };
+
+  const lap = async (tokens: number[], cacheLen: number, hopMs: number) => {
+    const planNow: LapStage[] = stages.map((s) => ({ stage: s.span.stage, nodes: s.nodes }));
+    const lost = planNow.find((s) => s.nodes.length === 0);
+    if (lost) throw new NodeError(`stage ${lost.stage} lost: no serving node left`, 503);
+    const positions = tokens.map((_, i) => cacheLen + i);
+    lapSeq.set(step, tokens.length);
+    const r = await relay.lap(step, planNow, Uint32Array.from(tokens), positions, cacheLen, hopMs, signal);
+    step++;
+    return unpackTopK(r.topk);
   };
 
   try {
-    // Prefill
-    let hidden = embed(gw.embed, cfg.hidden, promptIds);
-    const positions = promptIds.map((_, i) => i);
-    const stageMs: number[] = [];
-    for (const stage of stages) {
-      const ts = Date.now();
-      const hops = await issue(stage, 0, hidden, promptIds.length, positions, 0);
-      hidden = await collect(stage, hops);
-      stageMs.push(Date.now() - ts);
-    }
-    console.log(`[inference] ${sessionId} prefill ${promptIds.length} tokens: gateway ${gatewayMs} ms, stages ${stageMs.join("/")} ms`);
-    let last = hidden.subarray((promptIds.length - 1) * cfg.hidden);
-    await touch();
+    // Prefill: the whole prompt in one lap; the last column's top-k gives the first token.
+    const tp = Date.now();
+    const pre = await lap(promptIds, 0, PREFILL_HOP_MS + promptIds.length * 20);
+    console.log(`[inference] ${sessionId} ${model.id} prefill ${promptIds.length} tokens in ${Date.now() - tp} ms`);
+    let cacheLen = promptIds.length;
+    const ctx = [...promptIds];
+    let last = sampleTopK(pre[pre.length - 1], sampling, rnd);
+    const emitTok = (t: number) => {
+      out.push(t);
+      ctx.push(t);
+      if (firstTokenMs == null) firstTokenMs = Date.now() - t0;
+      const text = decoder.push(t);
+      if (text) emit({ type: "token", text, token: t });
+    };
+    if (cfg.eos.includes(last)) finishReason = "stop";
+    else emitTok(last);
 
-    for (let step = 1; step <= maxNew; step++) {
+    while (finishReason !== "stop" && out.length < maxNew) {
       if (signal?.aborted) throw new NodeError("aborted", 499);
       if (Date.now() - t0 > SESSION_BUDGET_MS) break;
-      const logits = finalLogits(cfg, gw.norm, gw.embed, last);
-      const tok = sampleTopK(topK(logits, TOP_K), sampling, rnd);
-      if (cfg.eos.includes(tok)) {
-        finishReason = "stop";
+      if (dispute) throw new NodeError(`replica-dispute: ${dispute}`, 502);
+      const drafts = lookupDrafts(ctx, Math.min(MAX_DRAFTS, maxNew - out.length));
+      const tokens = [last, ...drafts];
+      const cols = await lap(tokens, cacheLen, DECODE_HOP_MS);
+      // Column j predicts the token after tokens[j]. Accept drafts while the model's own sample agrees.
+      let accepted = 0;
+      let next = -1;
+      for (let j = 0; j < cols.length; j++) {
+        const s = sampleTopK(cols[j], sampling, rnd);
+        next = s;
+        if (cfg.eos.includes(s)) {
+          finishReason = "stop";
+          break;
+        }
+        if (j < drafts.length && drafts[j] === s) {
+          accepted++;
+          emitTok(s);
+          if (out.length >= maxNew) break;
+          continue;
+        }
+        emitTok(s);
         break;
       }
-      out.push(tok);
-      if (firstTokenMs == null) firstTokenMs = Date.now() - t0;
-      const text = decoder.push(tok);
-      if (text) emit({ type: "token", text, token: tok });
-      if (step === maxNew) break;
-      let h = embed(gw.embed, cfg.hidden, [tok]);
-      const pos = promptIds.length + step - 1;
-      for (const stage of stages) {
-        const hops = await issue(stage, step, h, 1, [pos], pos);
-        h = await collect(stage, hops);
-      }
-      last = h;
+      session.draftedTokens += accepted;
+      // Committed to every node's cache: `last` plus the accepted drafts; the rest is rolled back by the next lap.
+      cacheLen += 1 + accepted;
+      last = next;
       if (step % 4 === 0) await touch();
     }
     const tail = decoder.flush();
@@ -572,7 +531,9 @@ export async function runNetworkChat(input: NetworkChatInput, emit: (e: NetworkC
     console.warn(`[inference] ${sessionId} failed after ${out.length} tokens: ${error}`);
   }
 
-  await settlePairs(4_000);
+  // Give late replica reports a moment to land before settling.
+  await new Promise((r) => setTimeout(r, 400));
+  relay.end();
   const totalMs = Date.now() - t0;
   session.status = finishReason === "error" ? "failed" : "completed";
   session.finishReason = finishReason;
@@ -580,18 +541,10 @@ export async function runNetworkChat(input: NetworkChatInput, emit: (e: NetworkC
   session.firstTokenMs = firstTokenMs ?? undefined;
   session.totalMs = totalMs;
   session.outputTokens = out.length;
+  session.laps = step;
   session.updatedAt = Date.now();
   await store.putDoc("isession", sessionId, session, { at: t0, key: model.id });
-
-  const summary = await settleSession(model, session);
-  // Hidden states are not kept: strip the payloads once the session is settled.
-  void Promise.all(
-    hopIds.map(async (h) => {
-      const doc = await store.getDoc<Hop>("hop", h.id);
-      if (doc) await store.putDoc("hop", h.id, { ...doc, input: undefined, output: undefined }, { at: h.issuedAt, key: h.nodeId });
-    }),
-  ).catch(() => {});
-  return summary;
+  return settleSession(model, session);
 }
 
 /* ------------------------------------------------------------------ settlement */
@@ -606,6 +559,7 @@ export async function settleSession(model: NetworkModel, session: InferenceSessi
   const store = getStore();
   const now = Date.now();
   const cfg = model.config;
+  const plan = stagePlan(model);
   const stageOf = new Map(session.stages.map((s) => [s.stage, s]));
   let totalUnits = 0;
   let verifiedUnits = 0;
@@ -617,8 +571,8 @@ export async function settleSession(model: NetworkModel, session: InferenceSessi
       continue;
     }
     const st = stageOf.get(sn.stage)!;
-    const layers = st.layerTo - st.layerFrom;
-    const units = stageUnits(cfg, layers, sn.tokens);
+    const span = plan.find((p) => p.stage === sn.stage) ?? { layerFrom: st.layerFrom, layerTo: st.layerTo, hasHead: false };
+    const units = stageUnits(cfg, span, sn.tokens);
     const disputed = sn.mismatches > 0;
     const fullyChecked = sn.checked >= sn.hops;
     const verified = !disputed && fullyChecked;
@@ -639,8 +593,8 @@ export async function settleSession(model: NetworkModel, session: InferenceSessi
       latencyMs: session.totalMs,
       submittedAt: session.createdAt,
       lifecycle: [
-        { stage: "submitted", at: session.createdAt, detail: `network inference session ${session.id}, stage ${sn.stage} (layers ${st.layerFrom}–${st.layerTo - 1})` },
-        { stage: "executing", at: session.createdAt, detail: `${sn.hops} hops · ${sn.tokens} tokens · client GPU ${Math.round(sn.gpuMs)} ms (reported)` },
+        { stage: "submitted", at: session.createdAt, detail: `network inference session ${session.id}, ${model.label} stage ${sn.stage} (layers ${st.layerFrom}–${st.layerTo - 1}${span.hasHead ? " + head" : ""})` },
+        { stage: "executing", at: session.createdAt, detail: `${sn.hops} hops · ${sn.tokens} token-columns · client GPU ${Math.round(sn.gpuMs)} ms (reported) · relay ${Math.round(sn.ms)} ms` },
         { stage: "verifying", at: now, detail: `replica-tolerance: ${sn.checked}/${sn.hops} hops checked, ${sn.mismatches} disagreements` },
         verified ? { stage: "completed", at: now, detail: `+${units} units` } : { stage: "failed", at: now, detail: failReason },
       ],
@@ -683,6 +637,8 @@ export async function settleSession(model: NetworkModel, session: InferenceSessi
     modelLabel: model.label,
     promptTokens: session.promptTokens,
     outputTokens: session.outputTokens,
+    draftedTokens: session.draftedTokens ?? 0,
+    laps: session.laps ?? 0,
     firstTokenMs: session.firstTokenMs ?? null,
     totalMs: session.totalMs ?? 0,
     tokPerSec,
@@ -703,16 +659,22 @@ export async function recentSessions(limit = 20): Promise<InferenceSession[]> {
 }
 
 export async function inferenceStatus() {
-  const [capacity, sessions] = await Promise.all([inferenceCapacity(), recentSessions(50)]);
+  const [models, sessions] = await Promise.all([allCapacity(), recentSessions(50)]);
   const completed = sessions.filter((s) => s.status === "completed");
   const tokens = completed.reduce((a, s) => a + s.outputTokens, 0);
   const secs = completed.reduce((a, s) => a + Math.max(0, (s.totalMs ?? 0) - (s.firstTokenMs ?? 0)), 0) / 1000;
+  const serving = models.find((m) => m.verifiable) ?? models.find((m) => m.available) ?? null;
   return {
-    capacity,
+    /** The model a NETWORK chat would run right now, or null. */
+    serving: serving?.model ?? null,
+    models,
+    /** Kept for older clients: the capacity of the model currently served (or the default). */
+    capacity: serving ?? models.find((m) => m.model === DEFAULT_NETWORK_MODEL.id) ?? models[0],
     sessions: { recent: sessions.length, completed: completed.length, failed: sessions.filter((s) => s.status === "failed").length, running: sessions.filter((s) => s.status === "running" && Date.now() - s.updatedAt < 30_000).length },
     outputTokens: tokens,
     /** Decode throughput across recent completed sessions; null until there is data. */
     tokPerSec: completed.length && secs > 0 ? +((tokens - completed.length) / secs).toFixed(2) : null,
+    relay: relayConfigured(),
     provenance: "live" as const,
   };
 }

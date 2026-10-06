@@ -1,12 +1,12 @@
 import { hubUrl, type NetworkModel, type StageSpan } from "./config";
-import { fetchHeader, fetchTensors, layerTensorNames, type LoadedTensors, type SafetensorsHeader } from "./safetensors";
+import { GGUF_EMBED, GGUF_FINAL_NORM, GGUF_OUTPUT, fetchGgufEntries, fetchGgufHeader, ggufLayerNames, type GgufHeader, type LoadedEntries } from "./gguf";
 
 /**
- * Browser-side weight loading for one pipeline stage: header once, then range requests for the
- * stage's layers only, cached in the Cache API so a returning node does not download again.
+ * Browser-side weight loading for one pipeline stage: GGUF header once, then one range request per
+ * tensor of the stage, cached in the Cache API so a returning node does not download again.
  */
 
-const CACHE = "brain-weights-v1";
+const CACHE = "brain-weights-v2";
 
 async function cachingFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const range = (init?.headers as Record<string, string> | undefined)?.range;
@@ -27,35 +27,45 @@ async function cachingFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   return res;
 }
 
-const headers = new Map<string, Promise<SafetensorsHeader>>();
+const headers = new Map<string, Promise<GgufHeader>>();
 
-export function stageTensorNames(span: StageSpan): string[] {
+/** Tensor names a stage needs, in download order. Optional names (q/k norm, untied head) are filtered by the loader. */
+export function stageTensorNames(span: StageSpan): { names: string[]; optional: Set<string> } {
   const names: string[] = [];
-  for (let l = span.layerFrom; l < span.layerTo; l++) names.push(...layerTensorNames(l));
-  return names;
+  const optional = new Set<string>();
+  if (span.hasEmbed || span.hasHead) names.push(GGUF_EMBED);
+  for (let l = span.layerFrom; l < span.layerTo; l++) {
+    const n = ggufLayerNames(l);
+    names.push(n.ln1, n.wq, n.wk, n.wv, n.wo, n.qNorm, n.kNorm, n.ln2, n.wgate, n.wup, n.wdown);
+    optional.add(n.qNorm);
+    optional.add(n.kNorm);
+  }
+  if (span.hasHead) {
+    names.push(GGUF_FINAL_NORM, GGUF_OUTPUT);
+    optional.add(GGUF_OUTPUT);
+  }
+  return { names, optional };
 }
 
-export async function loadStageTensors(
+export async function stageHeader(model: NetworkModel): Promise<GgufHeader> {
+  const url = hubUrl(model, model.weightsFile);
+  let header = headers.get(url);
+  if (!header) {
+    header = fetchGgufHeader(url, cachingFetch);
+    headers.set(url, header);
+    header.catch(() => headers.delete(url));
+  }
+  return header;
+}
+
+export async function loadStageEntries(
   model: NetworkModel,
   span: StageSpan,
   onProgress?: (bytes: number, total: number) => void,
   signal?: AbortSignal,
-): Promise<LoadedTensors> {
+): Promise<LoadedEntries> {
   const url = hubUrl(model, model.weightsFile);
-  let header = headers.get(url);
-  if (!header) {
-    header = fetchHeader(url, cachingFetch);
-    headers.set(url, header);
-    header.catch(() => headers.delete(url));
-  }
-  const h = await header;
-  return fetchTensors(url, h, stageTensorNames(span), { fetchImpl: cachingFetch, onProgress, signal });
-}
-
-/** Approximate download size of a stage in bytes (bf16 checkpoint). */
-export function stageDownloadBytes(model: NetworkModel, span: StageSpan): number {
-  const c = model.config;
-  const headDim = c.hidden / c.heads;
-  const perLayer = 2 * c.hidden * c.hidden + 2 * c.hidden * c.kvHeads * headDim + 3 * c.hidden * c.intermediate + 2 * c.hidden;
-  return perLayer * 2 * (span.layerTo - span.layerFrom);
+  const h = await stageHeader(model);
+  const { names, optional } = stageTensorNames(span);
+  return fetchGgufEntries(url, h, names, { fetchImpl: cachingFetch, onProgress, signal, optional });
 }

@@ -1,17 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { SMOLLM2_135M, layerMacs, stagePlan, stageUnits } from "./config";
+import { QWEN3_0_6B, QWEN3_1_7B, QWEN3_4B, layerMacs, nodeFitsStage, stagePlan, stageUnits } from "./config";
+import { GGML_Q4_0, GGML_Q8_0, dequantToF32, entriesFromBuffer, entryToF32, f16Bits, f32ToF16Bits, parseGgufHeader, toWeightEntry, type GgufTensorInfo } from "./gguf";
 import { createKv, embed, finalLogits, layerForward, layerWeightsFrom, matmulT, mulberry32, relativeRms, rmsnorm, ropeInPlace, sampleTopK, stageForward, topK } from "./llama";
-import { bf16ToF32, mergeSpans, parseHeader, tensorsFromBuffer } from "./safetensors";
 import { StreamDecoder, Tokenizer, chatPrompt } from "./tokenizer";
 
 /**
- * Real-weights integration test. Runs only when the SmolLM2 checkpoint is available locally
- * (BRAIN_SMOLLM_DIR with model.safetensors + tokenizer.json); CI skips it.
+ * Real-weights integration test. Runs only when the Qwen3-0.6B Q8_0 GGUF is available locally
+ * (BRAIN_QWEN_DIR with model.gguf + tokenizer.json); CI skips it.
  */
-const DIR = process.env.BRAIN_SMOLLM_DIR ?? "/tmp/smollm";
-const HAVE_WEIGHTS = existsSync(path.join(DIR, "model.safetensors")) && existsSync(path.join(DIR, "tokenizer.json"));
+const DIR = process.env.BRAIN_QWEN_DIR ?? "/tmp/qwen3-0.6b";
+const HAVE_WEIGHTS = existsSync(path.join(DIR, "model.gguf")) && existsSync(path.join(DIR, "tokenizer.json"));
 
 describe("llama primitives", () => {
   it("rmsnorm scales rows to unit RMS times the weight", () => {
@@ -68,11 +68,11 @@ describe("llama primitives", () => {
     expect([1, 4, 3]).toContain(a);
   });
 
-  it("a layer with cache gives identical results whether tokens arrive together or one at a time", () => {
-    const cfg = { ...SMOLLM2_135M.config, hidden: 16, intermediate: 32, layers: 1, heads: 4, kvHeads: 2, vocab: 8 };
+  it("a layer with cache gives identical results whether tokens arrive together or one at a time (with q/k norm)", () => {
+    const cfg = { ...QWEN3_0_6B.config, hidden: 16, intermediate: 32, layers: 1, heads: 4, kvHeads: 2, headDim: 8, vocab: 8 };
     const rnd = mulberry32(3);
     const f = (n: number) => Float32Array.from({ length: n }, () => (rnd() - 0.5) * 0.4);
-    const w = { ln1: f(16).map((v) => v + 1), wq: f(256), wk: f(8 * 16), wv: f(8 * 16), wo: f(256), ln2: f(16).map((v) => v + 1), wgate: f(32 * 16), wup: f(32 * 16), wdown: f(16 * 32) };
+    const w = { ln1: f(16).map((v) => v + 1), wq: f(32 * 16), wk: f(16 * 16), wv: f(16 * 16), wo: f(16 * 32), qNorm: f(8).map((v) => v + 1), kNorm: f(8).map((v) => v + 1), ln2: f(16).map((v) => v + 1), wgate: f(32 * 16), wup: f(32 * 16), wdown: f(16 * 32) };
     const x = f(3 * 16);
     const together = x.slice();
     layerForward(cfg, w, together, 3, [0, 1, 2], createKv(cfg, 8));
@@ -85,81 +85,152 @@ describe("llama primitives", () => {
     expect(relativeRms(together, one)).toBeLessThan(1e-5);
   });
 
-  it("stage plan splits layers evenly and units follow MACs", () => {
-    expect(stagePlan(SMOLLM2_135M)).toEqual([
-      { stage: 0, layerFrom: 0, layerTo: 10 },
-      { stage: 1, layerFrom: 10, layerTo: 20 },
-      { stage: 2, layerFrom: 20, layerTo: 30 },
-    ]);
-    expect(layerMacs(SMOLLM2_135M.config)).toBe(663_552 + 221_184 + 2_654_208); // q/o + k/v + mlp projections
-    expect(stageUnits(SMOLLM2_135M.config, 10, 1)).toBe(34);
+  it("stage plans cover every layer, put the embedding first and the head last, and units follow MACs", () => {
+    for (const m of [QWEN3_0_6B, QWEN3_1_7B, QWEN3_4B]) {
+      const plan = stagePlan(m);
+      expect(plan[0]).toMatchObject({ stage: 0, layerFrom: 0, hasEmbed: true, hasHead: false });
+      expect(plan.at(-1)).toMatchObject({ layerTo: m.config.layers, hasEmbed: false, hasHead: true });
+      expect(plan.map((s) => s.layerTo - s.layerFrom)).toEqual(m.stageLayers);
+      expect(m.stageDownloadBytes).toHaveLength(plan.length);
+    }
+    const c = QWEN3_1_7B.config;
+    // q + o + k/v + mlp projections
+    expect(layerMacs(c)).toBe(2048 * 2048 + 2048 * 2048 + 2 * 2048 * 1024 + 3 * 2048 * 6144);
+    const [s0, , , s3] = stagePlan(QWEN3_1_7B);
+    expect(stageUnits(c, s3, 1) - stageUnits(c, s0, 1)).toBe(Math.round((2048 * 151936) / 1_048_576)); // the head's projection
+    // A 256 MB adapter cannot hold the Q8 embedding of the end stages but fits a middle stage.
+    expect(nodeFitsStage(QWEN3_1_7B, s0, 256 * 1024 * 1024)).toBe(false);
+    expect(nodeFitsStage(QWEN3_1_7B, stagePlan(QWEN3_1_7B)[1], 256 * 1024 * 1024)).toBe(true);
+    expect(nodeFitsStage(QWEN3_4B, stagePlan(QWEN3_4B)[0], 1024 * 1024 * 1024)).toBe(true);
   });
 });
 
-describe("safetensors", () => {
-  it("bf16 → f32 keeps the top 16 bits", () => {
-    // 1.0 = 0x3F80 bf16, -2.5 = 0xC020
-    const bytes = new Uint8Array([0x80, 0x3f, 0x20, 0xc0]);
-    expect(Array.from(bf16ToF32(bytes))).toEqual([1, -2.5]);
+describe("gguf", () => {
+  it("f16 round-trips", () => {
+    for (const v of [0, 1, -2.5, 0.1, 65504, 1e-5, -0.333]) expect(f16Bits(f32ToF16Bits(v))).toBeCloseTo(v, v === 65504 ? -2 : 3);
   });
 
-  it("parses a header and merges nearby spans", () => {
-    const header = JSON.stringify({ a: { dtype: "BF16", shape: [2], data_offsets: [0, 4] }, b: { dtype: "F32", shape: [1], data_offsets: [4, 8] } });
-    const hb = new TextEncoder().encode(header);
-    const file = new Uint8Array(8 + hb.length + 8);
-    new DataView(file.buffer).setBigUint64(0, BigInt(hb.length), true);
-    file.set(hb, 8);
-    const h = parseHeader(file.buffer);
-    expect(h.tensors.a.start).toBe(8 + hb.length);
-    expect(h.tensors.b.end).toBe(8 + hb.length + 8);
-    expect(mergeSpans([{ start: 0, end: 10 }, { start: 12, end: 20 }, { start: 5000, end: 6000 }], 100)).toEqual([
-      { start: 0, end: 20 },
-      { start: 5000, end: 6000 },
-    ]);
+  it("dequantises Q8_0 and Q4_0 blocks and the GPU repack matches", () => {
+    // Q8_0 block: scale 0.5, values 1..32 (int8)
+    const q8 = new Uint8Array(34);
+    new DataView(q8.buffer).setUint16(0, f32ToF16Bits(0.5), true);
+    for (let i = 0; i < 32; i++) q8[2 + i] = (i + 1) & 0xff;
+    const info8: GgufTensorInfo = { name: "t", shape: [1, 32], ggmlType: GGML_Q8_0, nElems: 32, start: 0, end: 34 };
+    const f8 = dequantToF32(info8, q8);
+    expect(f8[0]).toBeCloseTo(0.5);
+    expect(f8[31]).toBeCloseTo(16);
+    const e8 = toWeightEntry(info8, q8);
+    expect(e8.kind).toBe("q8");
+    expect(Array.from(entryToF32(e8))).toEqual(Array.from(f8));
+
+    // Q4_0 block: scale 2, nibble i → low = i, high = 15 - i
+    const q4 = new Uint8Array(18);
+    new DataView(q4.buffer).setUint16(0, f32ToF16Bits(2), true);
+    for (let i = 0; i < 16; i++) q4[2 + i] = (i & 0xf) | (((15 - i) & 0xf) << 4);
+    const info4: GgufTensorInfo = { name: "t", shape: [1, 32], ggmlType: GGML_Q4_0, nElems: 32, start: 0, end: 18 };
+    const f4 = dequantToF32(info4, q4);
+    expect(f4[0]).toBe(2 * (0 - 8));
+    expect(f4[15]).toBe(2 * (15 - 8));
+    expect(f4[16]).toBe(2 * (15 - 8));
+    expect(f4[31]).toBe(2 * (0 - 8));
+    const e4 = toWeightEntry(info4, q4);
+    expect(e4.kind).toBe("q4");
+    expect(Array.from(entryToF32(e4))).toEqual(Array.from(f4));
+  });
+
+  it("parses a minimal header", () => {
+    // magic, version 3, 1 tensor, 1 kv (general.alignment u32 = 32), tensor "w" dims [4,2] f32 offset 0
+    const parts: number[] = [];
+    const u32 = (v: number) => parts.push(v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255);
+    const u64 = (v: number) => {
+      u32(v);
+      u32(0);
+    };
+    const str = (s: string) => {
+      u64(s.length);
+      for (const c of new TextEncoder().encode(s)) parts.push(c);
+    };
+    u32(0x46554747);
+    u32(3);
+    u64(1);
+    u64(1);
+    str("general.alignment");
+    u32(4);
+    u32(32);
+    str("w");
+    u32(2);
+    u64(4);
+    u64(2);
+    u32(0);
+    u64(0);
+    const h = parseGgufHeader(new Uint8Array(parts).buffer);
+    expect(h.tensors.w.shape).toEqual([2, 4]);
+    expect(h.tensors.w.start % 32).toBe(0);
+    expect(h.tensors.w.end - h.tensors.w.start).toBe(32);
   });
 });
 
-describe.skipIf(!HAVE_WEIGHTS)("SmolLM2-135M on real weights (CPU reference)", () => {
-  const file = readFileSync(path.join(DIR, "model.safetensors"));
-  const t = tensorsFromBuffer(file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength));
-  const tok = new Tokenizer(JSON.parse(readFileSync(path.join(DIR, "tokenizer.json"), "utf8")));
-  const cfg = SMOLLM2_135M.config;
+describe.skipIf(!HAVE_WEIGHTS)("Qwen3-0.6B on real weights (CPU reference)", () => {
+  // Loaded lazily: vitest evaluates skipped describe bodies during collection.
+  let loaded: { header: ReturnType<typeof parseGgufHeader>; t: ReturnType<typeof entriesFromBuffer>; tok: Tokenizer } | undefined;
+  const load = () => {
+    if (!loaded) {
+      const file = readFileSync(path.join(DIR, "model.gguf"));
+      const buf = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);
+      const header = parseGgufHeader(buf);
+      loaded = { header, t: entriesFromBuffer(buf, header), tok: new Tokenizer(JSON.parse(readFileSync(path.join(DIR, "tokenizer.json"), "utf8"))) };
+    }
+    return loaded;
+  };
+  const cfg = QWEN3_0_6B.config;
+
+  it("header matches the model config", () => {
+    const { header } = load();
+    expect(header.meta["qwen3.block_count"]).toBe(cfg.layers);
+    expect(header.meta["qwen3.embedding_length"]).toBe(cfg.hidden);
+    expect(header.meta["qwen3.attention.head_count"]).toBe(cfg.heads);
+    expect(header.meta["qwen3.attention.head_count_kv"]).toBe(cfg.kvHeads);
+    expect(header.meta["qwen3.attention.key_length"]).toBe(cfg.headDim);
+    expect(header.tensors["token_embd.weight"].shape).toEqual([cfg.vocab, cfg.hidden]);
+  });
 
   it("tokenizer round-trips text and matches known ids", () => {
-    const s = "Hello world! The year is 2024, café ☕.";
+    const { tok } = load();
+    const s = "Hello world! The year is 2024, café ☕. Don't stop.";
     const ids = tok.encode(s);
     expect(tok.decode(ids)).toBe(s);
-    // Digits are split individually by the pre-tokenizer.
-    const digits = tok.encode("2024");
-    expect(digits).toHaveLength(4);
-    expect(tok.tokenId("<|im_start|>")).toBe(1);
-    expect(tok.encode("<|im_start|>user\nhi<|im_end|>")).toEqual([1, ...tok.encode("user\nhi"), 2]);
+    expect(tok.tokenId("<|im_start|>")).toBe(151644);
+    expect(tok.tokenId("<|im_end|>")).toBe(151645);
+    expect(tok.encode("<|im_start|>user\nhi<|im_end|>")).toEqual([151644, ...tok.encode("user\nhi"), 151645]);
+    // Qwen's split keeps digits apart and attaches a leading space to words.
+    expect(tok.encode("2024")).toHaveLength(4);
     const sd = new StreamDecoder(tok);
     expect(ids.map((i) => sd.push(i)).join("") + sd.flush()).toBe(s);
   });
 
-  it("answers a factual prompt greedily through all 30 layers", () => {
-    const prompt = chatPrompt([{ role: "user", content: "What is the capital of France? Answer in one word." }]);
+  it("answers a factual prompt greedily through all 28 layers", () => {
+    const { t, tok } = load();
+    const prompt = chatPrompt([{ role: "user", content: "What is the capital of France? Answer in one word." }], { noThink: true });
     const ids = tok.encode(prompt);
     const layers = Array.from({ length: cfg.layers }, (_, i) => layerWeightsFrom(t, i));
     const kvs = layers.map(() => createKv(cfg, 64));
-    const embedW = t.get("model.embed_tokens.weight");
-    const normW = t.get("model.norm.weight");
-    const x = embed(embedW, cfg.hidden, ids);
+    const embedE = t.get("token_embd.weight");
+    const normW = entryToF32(t.get("output_norm.weight"));
+    const x = embed(embedE, cfg.hidden, ids);
     const positions = ids.map((_, i) => i);
     stageForward(cfg, layers, kvs, x, ids.length, positions);
     const out: number[] = [];
     let last = x.subarray((ids.length - 1) * cfg.hidden);
-    for (let step = 0; step < 6; step++) {
-      const logits = finalLogits(cfg, normW, embedW, last);
+    for (let step = 0; step < 5; step++) {
+      const logits = finalLogits(cfg, normW, embedE, last);
       const next = topK(logits, 1).ids[0];
       if (cfg.eos.includes(next)) break;
       out.push(next);
-      const row = embed(embedW, cfg.hidden, [next]);
+      const row = embed(embedE, cfg.hidden, [next]);
       stageForward(cfg, layers, kvs, row, 1, [ids.length + step]);
       last = row;
     }
     const text = tok.decode(out);
     expect(text.toLowerCase()).toContain("paris");
-  }, 120_000);
+  }, 300_000);
 });

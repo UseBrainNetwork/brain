@@ -1,15 +1,33 @@
 /**
  * Byte-level BPE tokenizer compatible with the Hugging Face `tokenizers` JSON format as used by
- * SmolLM2 (GPT-2 style byte mapping, a Digits pre-tokenizer splitting every digit, no normalizer).
+ * the Qwen and SmolLM families (GPT-2 style byte mapping; either a Digits pre-tokenizer or the
+ * Qwen2 `Split` regex; no normalizer).
  */
 
 export interface TokenizerJson {
   model: { type: string; vocab: Record<string, number>; merges: (string | [string, string])[] };
   added_tokens?: { id: number; content: string; special?: boolean }[];
-  pre_tokenizer?: { type: string; pretokenizers?: { type: string; individual_digits?: boolean }[] } | null;
+  pre_tokenizer?: { type: string; pattern?: { Regex?: string }; pretokenizers?: { type: string; individual_digits?: boolean; pattern?: { Regex?: string } }[] } | null;
 }
 
 const GPT2_SPLIT = /'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+/gu;
+
+/**
+ * The Qwen2 pre-tokenizer regex, with its `(?i:...)` group expanded because JS regexes do not take
+ * inline flags everywhere we run. Any other `Split` pattern falls back to the GPT-2 split.
+ */
+const QWEN2_PATTERN = "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
+const QWEN2_SPLIT = /'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD]|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+/gu;
+
+function splitPattern(json: TokenizerJson): RegExp {
+  const pre = json.pre_tokenizer;
+  const candidates = [pre, ...(pre?.pretokenizers ?? [])];
+  for (const c of candidates) {
+    const rx = c?.type === "Split" ? c.pattern?.Regex : undefined;
+    if (rx === QWEN2_PATTERN) return QWEN2_SPLIT;
+  }
+  return GPT2_SPLIT;
+}
 
 function bytesToUnicode(): { enc: string[]; dec: Map<string, number> } {
   const bs: number[] = [];
@@ -44,6 +62,7 @@ export class Tokenizer {
   private byteEnc: string[];
   private byteDec: Map<string, number>;
   private splitDigits: boolean;
+  private split: RegExp;
   private cache = new Map<string, number[]>();
 
   constructor(json: TokenizerJson) {
@@ -65,6 +84,7 @@ export class Tokenizer {
     this.byteEnc = enc;
     this.byteDec = dec;
     this.splitDigits = (json.pre_tokenizer?.pretokenizers ?? []).some((p) => p.type === "Digits" && p.individual_digits);
+    this.split = splitPattern(json);
   }
 
   get size(): number {
@@ -95,7 +115,7 @@ export class Tokenizer {
   private encodeChunk(text: string, out: number[]): void {
     const pieces = this.splitDigits ? splitDigits(text) : [text];
     for (const piece of pieces) {
-      for (const m of piece.matchAll(GPT2_SPLIT)) {
+      for (const m of piece.matchAll(this.split)) {
         const word = m[0];
         let ids = this.cache.get(word);
         if (!ids) {
@@ -227,9 +247,15 @@ export interface ChatTurn {
   content: string;
 }
 
-/** SmolLM2-Instruct ChatML template, ending with the assistant header so generation starts the reply. */
-export function chatPrompt(turns: ChatTurn[]): string {
+/**
+ * ChatML template (Qwen3, SmolLM2), ending with the assistant header so generation starts the
+ * reply. `noThink` adds the empty think block Qwen3 uses for `enable_thinking=false`, so the model
+ * answers directly instead of emitting a reasoning trace.
+ */
+export function chatPrompt(turns: ChatTurn[], opts: { noThink?: boolean } = {}): string {
   let s = "";
   for (const t of turns) s += `<|im_start|>${t.role}\n${t.content}<|im_end|>\n`;
-  return s + "<|im_start|>assistant\n";
+  s += "<|im_start|>assistant\n";
+  if (opts.noThink) s += "<think>\n\n</think>\n\n";
+  return s;
 }

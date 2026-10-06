@@ -14,7 +14,7 @@ import { recordRequest } from "@/services/customers";
 import { json, rateLimit } from "@/services/security";
 
 export const dynamic = "force-dynamic";
-/** NETWORK mode streams at roughly a token per second; a 200-token answer needs minutes, not seconds. */
+/** NETWORK mode speed depends on the nodes online; the budget covers a slow pipeline and a long answer. */
 export const maxDuration = 300;
 
 const PRIVACY = new Set<PrivacyRequirement>(["PUBLIC", "STANDARD", "PRIVATE"]);
@@ -72,7 +72,7 @@ export const POST = nodeRoute(async (req, { ip }) => {
   const customerId = account ? `acct:${account.accountId}` : `anon:${ip}`;
 
   if (mode === "BROWSER_ONLY") {
-    // The answer is produced by contributor nodes running SmolLM2's layers. No upstream provider, no
+    // The answer is produced by contributor nodes running a Qwen3 model's layers. No upstream provider, no
     // charge (research-grade; there is no measured price for it), its own small system prompt.
     const turns = [{ role: "system" as const, content: NETWORK_SYSTEM_PROMPT }, ...chat.messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role as "user" | "assistant", content: typeof m.content === "string" ? m.content : String(m.content) }))];
     const stream = networkChatStream({

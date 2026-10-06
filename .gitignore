@@ -11,3 +11,7 @@ next-env.d.ts
 .vercel
 .shots
 *.log
+
+# wrangler local secrets
+relay/.dev.vars
+relay/.wrangler

@@ -41,7 +41,7 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: "CHEAP", label: "CHEAP", hint: "Lowest cost that meets the request" },
   { id: "FAST", label: "FAST", hint: "Lowest measured latency" },
   { id: "QUALITY", label: "QUALITY", hint: "Highest configured quality tier" },
-  { id: "BROWSER_ONLY", label: "NETWORK", hint: "SmolLM2 135M run layer-by-layer on contributor browsers. Research-grade: small model, ~1 token/s, every hop replica-checked. No charge." },
+  { id: "BROWSER_ONLY", label: "NETWORK", hint: "Qwen3 (1.7B, 4B when enough nodes are on) run layer-by-layer on contributor browsers. Hops are replica-checked when two nodes hold a stage. Speed depends on who is online. No charge." },
 ];
 /** Error codes from the engine → what the user should read. Codes are safe (no vendor bodies). */
 function friendlyError(code: string | undefined): string {
@@ -681,6 +681,7 @@ function NetworkPanel({ n }: { n: NonNullable<BrainRunSummary["network"]> }) {
         <span>Ran on the network</span>
         <span>
           {n.modelLabel} · {n.promptTokens} in / {n.outputTokens} out
+          {n.draftedTokens ? ` (${n.draftedTokens} drafted)` : ""}
           {n.tokPerSec != null ? ` · ${n.tokPerSec} tok/s` : ""}
           {n.firstTokenMs != null ? ` · first token ${(n.firstTokenMs / 1000).toFixed(1)}s` : ""}
         </span>
@@ -701,9 +702,10 @@ function NetworkPanel({ n }: { n: NonNullable<BrainRunSummary["network"]> }) {
         ))}
       </div>
       <p className="mt-2.5">
-        The embedding and output projection ran on the gateway; every transformer layer ran on the nodes above. Each hop went to two nodes and their outputs were compared (relative RMS ≤ 1e-3).{" "}
+        The whole model ran on the nodes above: the first stage embeds, the last projects to logits; the server only tokenizes and samples. Hidden states moved node to node over a live relay. Each
+        hop went to two nodes where two were available and their outputs were compared (relative RMS ≤ 2e-3).{" "}
         {n.verified ? `${n.units.verified.toLocaleString()} compute units verified and credited to those nodes.` : `Not every hop could be checked, so ${n.units.verified.toLocaleString()} of ${n.units.total.toLocaleString()} units were credited.`}{" "}
-        Small model, research-grade quality; no charge.
+        Open-weights model (Apache-2.0); no charge.
       </p>
     </div>
   );

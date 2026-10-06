@@ -75,10 +75,10 @@ Every completed chat request (`/chat`, `/v1/chat/completions`) dispatches one di
 
 ## Network inference (`services/inference.ts`)
 
-NETWORK-mode chat answers are produced by contributor nodes running SmolLM2-135M's transformer layers (3 pipeline stages of 10 layers; the gateway does embedding, output projection and sampling). Accounting:
+NETWORK-mode chat answers are produced by contributor nodes running a Qwen3 model's layers (1.7B in 4 stages by default; 4B in 6 stages once enough nodes hold it; 0.6B in 3 as the small tier). The first stage also embeds and the last also applies the output head; the gateway holds no weights and only tokenizes and samples. Nodes are assigned up the ladder: every stage of the default model to two holders first, then the next model, then extra replicas. Accounting:
 
-- One job row per participating node and session: `kind: inference`, spec `llm_stage {layerFrom, layerTo, tokens}`, `computeUnits = layerMacs × layers × tokens / 2^20` (same unit as matmul work).
-- Every hop is sent to two nodes holding the stage. A node's session is **verified** only if every one of its hops was compared against the sibling and all agreed (relative RMS ≤ 1e-3). Verified units add to `verifiedComputeUnits` and count in the hourly epoch like any other verified work.
+- One job row per participating node and session: `kind: inference`, spec `llm_stage {model, layerFrom, layerTo, tokens}`, `computeUnits = (layerMacs × layers + head MACs if the stage holds it) × token-columns / 2^20` (same unit as matmul work). Speculative drafts count as token-columns because the node computed them, whether or not they were accepted.
+- Every lap's stage is sent to two nodes when two hold it. A node's session is **verified** only if every one of its hops was compared against the sibling and all agreed (relative RMS ≤ 2e-3; for the head stage, over the shared top-k logits). Verified units add to `verifiedComputeUnits` and count in the epoch like any other verified work.
 - A stage served by a single node yields `completed, verified: false, failReason: "no-replica"`: recorded, zero units credited, not counted against the node's pass rate (it is the network's shortfall). Two disagreeing nodes yield `failed, failReason: "replica-dispute"` for both, also not counted against pass rate, because the server cannot tell which one is wrong. Nothing the node reports (GPU time, success) is trusted.
 - There is no customer charge: there is no measured price for this path, so the receipt says UNKNOWN / no charge rather than inventing one.
 

@@ -1,13 +1,13 @@
 import type { LlamaConfig } from "./config";
-import type { LoadedTensors } from "./safetensors";
+import { QK, entryToF32, f16Bits, ggufLayerNames, type LoadedEntries, type WeightEntry } from "./gguf";
 
 /**
- * CPU reference for the Llama decoder (HF `LlamaForCausalLM` semantics: RMSNorm, non-interleaved
- * RoPE with rotate_half, grouped-query attention, SwiGLU MLP, tied output projection). f32 math,
- * row-major, weights stored as [out, in] exactly as in the checkpoint.
+ * CPU reference for the Llama / Qwen3 decoder (HF semantics: RMSNorm, non-interleaved RoPE with
+ * rotate_half, optional per-head q/k RMSNorm, grouped-query attention, SwiGLU MLP, tied output
+ * projection). f32 math, row-major, weights stored as [out, in] exactly as in the checkpoint
+ * (dequantised from the same blocks the GPU holds).
  *
- * Used for: the gateway's embedding / final norm / output projection, the tolerance oracle for GPU
- * kernels, and the integration test against real SmolLM2 weights.
+ * Used for: the tolerance oracle for the GPU kernels and the integration test against real weights.
  */
 
 export interface LayerWeights {
@@ -16,24 +16,29 @@ export interface LayerWeights {
   wk: Float32Array;
   wv: Float32Array;
   wo: Float32Array;
+  qNorm?: Float32Array;
+  kNorm?: Float32Array;
   ln2: Float32Array;
   wgate: Float32Array;
   wup: Float32Array;
   wdown: Float32Array;
 }
 
-export function layerWeightsFrom(t: LoadedTensors, layer: number): LayerWeights {
-  const p = `model.layers.${layer}.`;
+export function layerWeightsFrom(t: LoadedEntries, layer: number): LayerWeights {
+  const n = ggufLayerNames(layer);
+  const f = (name: string) => entryToF32(t.get(name));
   return {
-    ln1: t.get(`${p}input_layernorm.weight`),
-    wq: t.get(`${p}self_attn.q_proj.weight`),
-    wk: t.get(`${p}self_attn.k_proj.weight`),
-    wv: t.get(`${p}self_attn.v_proj.weight`),
-    wo: t.get(`${p}self_attn.o_proj.weight`),
-    ln2: t.get(`${p}post_attention_layernorm.weight`),
-    wgate: t.get(`${p}mlp.gate_proj.weight`),
-    wup: t.get(`${p}mlp.up_proj.weight`),
-    wdown: t.get(`${p}mlp.down_proj.weight`),
+    ln1: f(n.ln1),
+    wq: f(n.wq),
+    wk: f(n.wk),
+    wv: f(n.wv),
+    wo: f(n.wo),
+    qNorm: t.has(n.qNorm) ? f(n.qNorm) : undefined,
+    kNorm: t.has(n.kNorm) ? f(n.kNorm) : undefined,
+    ln2: f(n.ln2),
+    wgate: f(n.wgate),
+    wup: f(n.wup),
+    wdown: f(n.wdown),
   };
 }
 
@@ -46,7 +51,7 @@ export interface KvCache {
 }
 
 export function createKv(cfg: LlamaConfig, capacity: number): KvCache {
-  const kvDim = (cfg.hidden / cfg.heads) * cfg.kvHeads;
+  const kvDim = cfg.headDim * cfg.kvHeads;
   return { k: new Float32Array(capacity * kvDim), v: new Float32Array(capacity * kvDim), len: 0, capacity };
 }
 
@@ -112,15 +117,18 @@ export function silu(x: number): number {
  */
 export function layerForward(cfg: LlamaConfig, w: LayerWeights, x: Float32Array, seq: number, positions: ArrayLike<number>, kv: KvCache): void {
   const H = cfg.hidden;
-  const headDim = H / cfg.heads;
+  const headDim = cfg.headDim;
+  const qDim = headDim * cfg.heads;
   const kvDim = headDim * cfg.kvHeads;
   const group = cfg.heads / cfg.kvHeads;
   if (kv.len + seq > kv.capacity) throw new Error("kv cache full");
 
   const h = rmsnorm(x, w.ln1, cfg.eps, seq, H);
-  const q = matmulT(h, w.wq, seq, H, H);
+  const q = matmulT(h, w.wq, seq, H, qDim);
   const k = matmulT(h, w.wk, seq, H, kvDim);
   const v = matmulT(h, w.wv, seq, H, kvDim);
+  if (w.qNorm) rmsnorm(q, w.qNorm, cfg.eps, seq * cfg.heads, headDim, q);
+  if (w.kNorm) rmsnorm(k, w.kNorm, cfg.eps, seq * cfg.kvHeads, headDim, k);
   ropeInPlace(q, seq, cfg.heads, headDim, positions, cfg.ropeTheta);
   ropeInPlace(k, seq, cfg.kvHeads, headDim, positions, cfg.ropeTheta);
 
@@ -130,13 +138,13 @@ export function layerForward(cfg: LlamaConfig, w: LayerWeights, x: Float32Array,
   kv.len += seq;
 
   const scale = 1 / Math.sqrt(headDim);
-  const attn = new Float32Array(seq * H);
+  const attn = new Float32Array(seq * qDim);
   const scores = new Float32Array(kv.len);
   for (let s = 0; s < seq; s++) {
     const upto = base + s; // inclusive: causal
     for (let hd = 0; hd < cfg.heads; hd++) {
       const kvh = Math.floor(hd / group);
-      const qo = s * H + hd * headDim;
+      const qo = s * qDim + hd * headDim;
       let max = -Infinity;
       for (let j = 0; j <= upto; j++) {
         const ko = j * kvDim + kvh * headDim;
@@ -153,7 +161,7 @@ export function layerForward(cfg: LlamaConfig, w: LayerWeights, x: Float32Array,
         sum += e;
       }
       const inv = 1 / sum;
-      const ao = s * H + hd * headDim;
+      const ao = s * qDim + hd * headDim;
       for (let j = 0; j <= upto; j++) {
         const p = scores[j] * inv;
         const vo = j * kvDim + kvh * headDim;
@@ -161,7 +169,7 @@ export function layerForward(cfg: LlamaConfig, w: LayerWeights, x: Float32Array,
       }
     }
   }
-  matmulT(attn, w.wo, seq, H, H, x, true);
+  matmulT(attn, w.wo, seq, qDim, H, x, true);
 
   const h2 = rmsnorm(x, w.ln2, cfg.eps, seq, H);
   const g = matmulT(h2, w.wgate, seq, H, cfg.intermediate);
@@ -176,16 +184,56 @@ export function stageForward(cfg: LlamaConfig, layers: LayerWeights[], kvs: KvCa
 
 /* ------------------------------------------------------------------ ends */
 
-export function embed(embedW: Float32Array, hidden: number, tokens: ArrayLike<number>): Float32Array {
+/** One dequantised row of a [rows, cols] weight entry. */
+export function entryRow(e: WeightEntry, row: number, out: Float32Array = new Float32Array(e.shape[1])): Float32Array {
+  const cols = e.shape[1];
+  if (e.kind === "f32") {
+    out.set(e.data.subarray(row * cols, (row + 1) * cols));
+    return out;
+  }
+  const sc16 = new Uint16Array(e.scales.buffer);
+  const nb = cols / QK;
+  const b0 = row * nb;
+  if (e.kind === "q8") {
+    for (let b = 0; b < nb; b++) {
+      const d = f16Bits(sc16[b0 + b]);
+      const base = (b0 + b) * QK;
+      for (let i = 0; i < QK; i++) {
+        const q = e.qs[base + i];
+        out[b * QK + i] = d * (q > 127 ? q - 256 : q);
+      }
+    }
+  } else {
+    for (let b = 0; b < nb; b++) {
+      const d = f16Bits(sc16[b0 + b]);
+      const base = (b0 + b) * 16;
+      for (let i = 0; i < 16; i++) {
+        const byte = e.qs[base + i];
+        out[b * QK + i] = d * ((byte & 0xf) - 8);
+        out[b * QK + i + 16] = d * ((byte >> 4) - 8);
+      }
+    }
+  }
+  return out;
+}
+
+export function embed(embedE: WeightEntry, hidden: number, tokens: ArrayLike<number>): Float32Array {
   const x = new Float32Array(tokens.length * hidden);
-  for (let s = 0; s < tokens.length; s++) x.set(embedW.subarray(tokens[s] * hidden, (tokens[s] + 1) * hidden), s * hidden);
+  for (let s = 0; s < tokens.length; s++) entryRow(embedE, tokens[s], x.subarray(s * hidden, (s + 1) * hidden));
   return x;
 }
 
-/** Final norm + tied output projection for one hidden row. */
-export function finalLogits(cfg: LlamaConfig, normW: Float32Array, embedW: Float32Array, xRow: Float32Array, out: Float32Array = new Float32Array(cfg.vocab)): Float32Array {
+/** Final norm + (tied) output projection for one hidden row, streaming the head rows. */
+export function finalLogits(cfg: LlamaConfig, normW: Float32Array, headE: WeightEntry, xRow: Float32Array, out: Float32Array = new Float32Array(cfg.vocab)): Float32Array {
   const h = rmsnorm(xRow, normW, cfg.eps, 1, cfg.hidden);
-  return matmulT(h, embedW, 1, cfg.hidden, cfg.vocab, out);
+  const row = new Float32Array(cfg.hidden);
+  for (let v = 0; v < cfg.vocab; v++) {
+    entryRow(headE, v, row);
+    let acc = 0;
+    for (let i = 0; i < cfg.hidden; i++) acc += h[i] * row[i];
+    out[v] = acc;
+  }
+  return out;
 }
 
 export interface TopK {

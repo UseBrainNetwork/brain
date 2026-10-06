@@ -157,8 +157,10 @@ engine/       BRAIN AUTO: providers, router, plan, orders (streaming + fallback)
 api/          Gateway (validation, reframed streams, API keys), chat event stream
 services/     Server: nodes, distributed jobs, verification, reputation, receipts, accounting,
               accounts, credits, capability, store (memory | Postgres), event bus, mock/
-webgpu/       Browser: device detection, WGSL kernels, ComputeBackend, benchmark
-network/      Deterministic workloads, contributor engine, realtime sources
+webgpu/       Browser: device detection, WGSL kernels (matmul, Q4_0/Q8_0 LLM stage), ComputeBackend, benchmark
+inference/    Network LLM inference: GGUF loader, Qwen3 config + stage plan, tokenizer, CPU reference, wire protocol
+relay/        Cloudflare Worker + Durable Object that moves hidden states node → node (deployed separately)
+network/      Deterministic workloads, contributor engine (jobs + inference stage), realtime sources
 rewards/      Reward formula and engine, config, simulator
 providers/    OpenAI-compatible upstream client
 lib/          Non-secret config, plans, pricing, formatting, wallet adapters
@@ -224,6 +226,7 @@ heartbeat 5 s    ─────────────────────
 | `BRAIN_CREDIT_USD`, `BRAIN_PLAN_FREE_CREDITS`, `BRAIN_PLAN_PRO_USD` / `_CREDITS`, `BRAIN_PLAN_MAX_USD` / `_CREDITS` | Credit value and plan allowances |
 | `SOLANA_RPC_URL` + `BRAIN_TOKEN_MINT` | Real SPL holdings lookup. The protocol-wallet read falls back to the public RPC when unset |
 | `BRAIN_SERVER_SECRET` | HMAC key for sessions and claims. Required in production |
+| `BRAIN_RELAY_URL` + `BRAIN_RELAY_SECRET` | The inference relay (`relay/`, a Cloudflare Worker: `cd relay && npx wrangler deploy && npx wrangler secret put RELAY_SECRET`, same value as `BRAIN_RELAY_SECRET`). Unset = NETWORK chat reports no capacity |
 | `BRAIN_ADMIN_TOKEN` · `BRAIN_DEMO_TOKEN` | Operator routes · optional gate on console job/order creation |
 | `BRAIN_PAYOUTS_ENABLED` + `BRAIN_PAYOUT_SECRET_KEY` | SOL claim payouts. Off by default |
 | `BRAIN_PAYOUTS_OPEN_AT` | Optional opening time (ISO-8601 or epoch ms); claims refused before it, open automatically after |
@@ -238,6 +241,16 @@ Exercise the inference path without a real provider:
 node scripts/mock-upstream.mjs 3999
 BRAIN_EXTERNAL_BASE_URL=http://localhost:3999/v1 BRAIN_EXTERNAL_API_KEY=test BRAIN_EXTERNAL_MODEL=mock npm run dev
 ```
+
+Run network inference locally (relay on :8787, app on :3000, then open `/node?autostart=1` in four or more WebGPU browsers):
+
+```bash
+echo "RELAY_SECRET=$(openssl rand -hex 32)" > relay/.dev.vars          # local relay secret
+(cd relay && npx wrangler dev --port 8787)                              # the relay
+BRAIN_RELAY_URL=http://127.0.0.1:8787 BRAIN_RELAY_SECRET=<same value> npm run dev
+```
+
+`/dev/llm-check?model=qwen3-1.7b&layers=4` compares the GPU kernels against the CPU reference on real weights.
 
 </details>
 
