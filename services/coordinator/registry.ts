@@ -102,6 +102,8 @@ export interface PublicNativeNode {
   benchmark: NativeNode["benchmark"];
   reputation: number;
   activeJobs: number;
+  /** Operator wallet as reported by the node (public chain address). Earns only once `walletLinked`. */
+  walletAddress: string | null;
   walletLinked: boolean;
   history: TelemetrySample[];
   /** Always true; here so UI code cannot forget to say so. */
@@ -127,6 +129,7 @@ export function publicNativeNode(n: NativeNode, now = Date.now()): PublicNativeN
     benchmark: n.benchmark,
     reputation: n.reputation,
     activeJobs: n.activeJobIds.length,
+    walletAddress: n.wallet?.address ?? null,
     walletLinked: Boolean(n.wallet?.verified),
     history: n.history ?? [],
     hardwareIsReported: true,
@@ -334,6 +337,21 @@ export async function sweepNativeNodes(now = Date.now()): Promise<NativeNode[]> 
 /** Nodes a router may consider right now. */
 export async function routableNativeNodes(now = Date.now()) {
   return (await sweepNativeNodes(now)).filter((n) => n.state !== "OFFLINE" && !n.banReason);
+}
+
+/**
+ * Marks the node's wallet as proven. Two independent statements have to agree: the node, signing
+ * with its own key, reported `address` on registration (the operator set BRAIN_NODE_WALLET), and
+ * the wallet, signing on the site, produced the link token for the same `address`. Either alone
+ * is refused: a wallet holder cannot claim someone else's node, and a node cannot claim a wallet
+ * it does not control.
+ */
+export async function linkNativeWallet(nodeId: string, address: string): Promise<NativeNode> {
+  const n = await getNativeNode(nodeId);
+  if (!n) throw new NodeError("not_found", 404);
+  if (!n.wallet || n.wallet.address !== address) throw new NodeError("wallet_mismatch", 409);
+  if (n.wallet.verified) return n;
+  return (await updateNativeNode(nodeId, (x) => void (x.wallet = { address, verified: true })))!;
 }
 
 /** Mutates a node under lock and persists it. Used by the job state machine for counters. */

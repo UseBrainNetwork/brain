@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { PublicInferenceJob } from "@/services/coordinator/jobs";
 import type { PublicNativeNode, TelemetrySample } from "@/services/coordinator/registry";
-import { cx, fmtInt } from "@/lib/format";
+import { cx, fmtInt, shortAddr } from "@/lib/format";
+import { useWallet, walletStore } from "@/lib/wallet/store";
+import { Button } from "@/components/ui";
 import { Metric, NO_DATA, Panel, UNKNOWN } from "@/components/economy/parts";
 import { JobPipeline, NodeDetail, Tag, VerificationTag, gb, kindTag, stateTone, useFleet } from "@/components/network/NativeFleet";
 
@@ -18,8 +20,8 @@ interface View {
 /**
  * Operator view of one Brain Node. Reads /api/coordinator/nodes/<id>. Hardware and utilization
  * are what the node reported (labelled); jobs, speed, uptime, reliability and earnings are what
- * the coordinator recorded. Earnings are the ledger's accrued amounts at list price; nothing has
- * been paid out, and the page says so rather than projecting.
+ * the coordinator recorded. The USD ledger shows accrued amounts at list price; actual pay is the
+ * node's share of the hourly SOL epochs, which the wallet panel explains rather than projecting.
  */
 export function ProviderDashboard({ initialNodeId }: { initialNodeId: string | null }) {
   const { nodes } = useFleet(10_000);
@@ -30,6 +32,9 @@ export function ProviderDashboard({ initialNodeId }: { initialNodeId: string | n
   useEffect(() => {
     if (!nodeId && nodes?.length) setNodeId(nodes[0].nodeId);
   }, [nodes, nodeId]);
+
+  const [tick, setTick] = useState(0);
+  const reload = () => setTick((t) => t + 1);
 
   useEffect(() => {
     if (!nodeId) return;
@@ -53,7 +58,7 @@ export function ProviderDashboard({ initialNodeId }: { initialNodeId: string | n
       alive = false;
       clearInterval(t);
     };
-  }, [nodeId]);
+  }, [nodeId, tick]);
 
   const today = useMemo(() => {
     if (!view) return null;
@@ -124,9 +129,11 @@ npm run node`}</pre>
               <Metric k="Ask" v={n.askUsdPer1MTokens == null ? "list price" : `$${n.askUsdPer1MTokens.toFixed(2)} / 1M`} sub="BRAIN_NODE_ASK_USD_PER_1M" />
             </div>
             <p className="mt-4 max-w-[720px] font-mono text-[11px] leading-relaxed text-chalk/40">
-              Accrued is the sum of the provider share of every priced receipt issued for this node, at the network list price in force when the job ran. It is a ledger balance, not a projection. Settlement to a wallet is a planned interface; until it exists Settled stays 0.
+              Accrued is the sum of the provider share of every priced receipt issued for this node, at the network list price in force when the job ran. It is a USD ledger balance, not a projection, and it is not paid in USD. Payment runs through the hourly SOL epochs below.
             </p>
           </Panel>
+
+          <WalletPanel node={n} onLinked={reload} />
 
           <div className="grid gap-6 md:grid-cols-2">
             <Panel title="Load · last heartbeats" right={<span>reported by node</span>}>
@@ -229,5 +236,70 @@ function Bars({ values, unit }: { values: number[]; unit: string }) {
         </span>
       </div>
     </div>
+  );
+}
+
+/**
+ * Where this node's pay goes. Verified inference work enters the hourly SOL epochs (the same ones
+ * browser contributors settle in) only once the wallet the node reported has been proven by a
+ * signature on this site. Two statements must match: the node said "my wallet is X" (signed with
+ * its node key), and X signed here. Nothing is projected; the claim itself happens on /rewards.
+ */
+function WalletPanel({ node, onLinked }: { node: PublicNativeNode; onLinked: () => void }) {
+  const w = useWallet();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const reported = node.walletAddress;
+  const connectedMatches = Boolean(reported && w.status === "connected" && w.verified && w.address === reported);
+
+  const link = async () => {
+    if (!walletStore.linkToken) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch(`/api/coordinator/nodes/${node.nodeId}/link`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ linkToken: walletStore.linkToken }) });
+      const j = (await r.json()) as { error?: string };
+      if (!r.ok) throw new Error(j.error === "wallet_mismatch" ? "This node reported a different wallet. Restart it with BRAIN_NODE_WALLET set to the connected address." : j.error ?? `HTTP ${r.status}`);
+      onLinked();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Panel title="Rewards · hourly epochs" right={<span>SOL · paid from creator fees · claim on /rewards</span>}>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-6 md:grid-cols-4">
+        <Metric k={<span>Wallet <Tag>reported</Tag></span>} v={<span className="text-[18px]">{reported ? shortAddr(reported) : "none"}</span>} sub={reported ? "BRAIN_NODE_WALLET on the node" : "set BRAIN_NODE_WALLET and restart the node"} />
+        <Metric k="Verified" v={node.walletLinked ? "yes" : "no"} sub={node.walletLinked ? "earns a share of every epoch it works in" : "work is recorded but accrues nothing until verified"} tone={node.walletLinked ? "ok" : "warn"} />
+        <Metric k="Pays for" v={<span className="text-[18px]">customer inference</span>} sub="benchmarks, canaries and shadow checks are unpaid" />
+        <Metric k="Unit" v={<span className="text-[18px]">params × tokens</span>} sub="same 2^20-MAC unit the browser kernels settle in" />
+      </div>
+      {!node.walletLinked && reported && (
+        <div className="mt-5 flex flex-wrap items-center gap-4">
+          {connectedMatches ? (
+            <Button tone="dark" variant="signal" onClick={link} disabled={busy} className="h-11 px-6 text-[14px]">
+              {busy ? "Verifying…" : `Verify ${shortAddr(reported)} for ${node.nodeId}`}
+            </Button>
+          ) : w.status === "connected" ? (
+            <span className="font-mono text-[12px] text-warn">Connected wallet {w.address ? shortAddr(w.address) : ""} is not the one this node reported. Connect {shortAddr(reported)} to verify.</span>
+          ) : (
+            <>
+              <Button tone="dark" onClick={() => void walletStore.connectPrimary()} className="h-11 px-6 text-[14px]">
+                Connect {shortAddr(reported)}
+              </Button>
+              <span className="font-mono text-[12px] text-chalk/50">Sign once with the wallet the node reported. No funds move.</span>
+            </>
+          )}
+          {err && <span className="font-mono text-[12px] text-signal">{err}</span>}
+        </div>
+      )}
+      {node.walletLinked && (
+        <p className="mt-4 font-mono text-[11px] leading-relaxed text-chalk/40">
+          Allocations and claims for this wallet are on <Link href="/rewards" className="underline">/rewards</Link>. An epoch with no verified customer inference on this node pays it nothing.
+        </p>
+      )}
+    </Panel>
   );
 }

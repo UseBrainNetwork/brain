@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// settlement.ts reads the native-node registry, which is server-only.
+vi.mock("server-only", () => ({}));
 import type { ComputeReceipt } from "@/domain/economy";
 import { referenceResult, workloadUnits } from "@/network/workloads";
 import { record, snapshot } from "./accounting";

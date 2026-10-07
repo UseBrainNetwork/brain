@@ -3,6 +3,7 @@ import { eventBus } from "@/services/eventBus";
 import { cancelJob, createInferenceJob, getInferenceJob, matchJob, patchJob, type InferenceJob } from "./jobs";
 import { CANARY_REQUESTER, VERIFY_REQUESTER, isProbeJob } from "./probes";
 import { getNativeNode, updateNativeNode, type NativeNode } from "./registry";
+import { disputeNativeWork } from "./work";
 
 export { CANARY_REQUESTER, VERIFY_REQUESTER, isProbeJob, probeKind } from "./probes";
 
@@ -149,6 +150,8 @@ export async function recordShadowResult(shadowJobId: string, now = Date.now()) 
   };
   await updateNativeNode(p.assignedNode, bump);
   await updateNativeNode(s.assignedNode, bump);
+  // Two nodes disagreed and the coordinator cannot say which was right: the primary's work is unpaid.
+  if (!matched) await disputeNativeWork(p.jobId);
   eventBus.publish({ type: "nverify.result", at: now, kind: "redundant", jobId: p.jobId, nodeIds: [p.assignedNode, s.assignedNode], passed: matched, detail: `similarity ${sim}` });
 }
 

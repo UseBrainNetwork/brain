@@ -12,6 +12,7 @@ import { issueNodeReceipt } from "./receipts";
 import { recordBenchmark } from "./benchmark";
 import { probeKind } from "./probes";
 import { maybeShadow, recordCanary, recordShadowResult } from "./verify";
+import { recordNativeFailure, recordNativeWork } from "./work";
 
 /**
  * Inference job state machine for native Brain Nodes.
@@ -359,6 +360,7 @@ async function fail(j: InferenceJob, reason: string, note: string | undefined, n
   }
   if (kind === "verify") after.push(() => recordShadowResult(j.jobId, now));
   else if (kind === "canary") after.push(() => recordCanary(j.jobId, now));
+  else if (kind === "inference") after.push(() => recordNativeFailure(j, timedOut).then(() => undefined));
   publish(j, now);
   return j;
 }
@@ -465,7 +467,11 @@ export async function reportCompleted(nodeId: string, jobId: string, body: Compl
     if (kind === "benchmark") after.push(() => recordBenchmark(j.jobId, tokPerSec, firstByte, now));
     else if (kind === "verify") after.push(() => recordShadowResult(j.jobId, now));
     else if (kind === "canary") after.push(() => recordCanary(j.jobId, now));
-    else after.push(() => maybeShadow(j.jobId, now));
+    else {
+      // Customer work: enters the settlement aggregate, then may be sampled for a shadow replica.
+      after.push(() => recordNativeWork(j).then(() => undefined));
+      after.push(() => maybeShadow(j.jobId, now));
+    }
     publish(j, now);
     return j;
   });

@@ -32,6 +32,24 @@ export interface WorkAggregate {
   buckets: number[];
 }
 
+/**
+ * A unit of coordinator-measured work that is not a browser kernel job: today, one customer
+ * inference request served by a native GPU node. Lives in the same table and aggregate as
+ * `StoredJob` so settlement sees one population; the shape is the subset settlement reads.
+ */
+export interface WorkRecord {
+  id: string;
+  source: "native-inference";
+  assignedTo: string;
+  status: "completed" | "failed";
+  submittedAt: number;
+  verified: boolean;
+  failReason?: string;
+  computeUnits: number;
+  model: string;
+  tokens: { prompt: number; completion: number };
+}
+
 export interface StoredJob extends ComputeJob {
   spec: WorkloadSpec;
   assignedTo: string;
@@ -84,6 +102,9 @@ export interface NetworkStore {
    * (node, status, verified) with counts, verified compute units and the distinct availability buckets.
    */
   aggregateWork(from: number, to: number, bucketMs: number): Promise<WorkAggregate[]>;
+  /** Upserts a non-kernel work record into the settlement aggregate (see WorkRecord). */
+  recordWork(w: WorkRecord): Promise<void>;
+  getWork(id: string): Promise<WorkRecord | null>;
   /** Jobs still in flight (not completed/failed) submitted after `since`, newest first. */
   listOpenJobs(limit: number, since: number): Promise<StoredJob[]>;
   getEpoch(id: string): Promise<RewardEpoch | null>;
@@ -164,6 +185,7 @@ export class MemoryStore implements NetworkStore {
   }
   private nodes = new Map<string, StoredNode>();
   private jobs = new Map<string, StoredJob>();
+  private work = new Map<string, WorkRecord>();
   private challenges = new Map<string, StoredChallenge>();
   private epochs = new Map<string, RewardEpoch>();
   private allocations: RewardAllocation[] = [];
@@ -231,9 +253,16 @@ export class MemoryStore implements NetworkStore {
   async listJobsBetween(from: number, to: number) {
     return [...this.jobs.values()].filter((j) => j.submittedAt >= from && j.submittedAt < to);
   }
+  async recordWork(w: WorkRecord) {
+    this.work.set(w.id, w);
+  }
+  async getWork(id: string) {
+    return this.work.get(id) ?? null;
+  }
   async aggregateWork(from: number, to: number, bucketMs: number) {
     const m = new Map<string, WorkAggregate & { b: Set<number> }>();
-    for (const j of await this.listJobsBetween(from, to)) {
+    const work = [...this.work.values()].filter((w) => w.submittedAt >= from && w.submittedAt < to);
+    for (const j of [...(await this.listJobsBetween(from, to)), ...work]) {
       const reason = j.failReason ?? null;
       const k = `${j.assignedTo}|${j.status}|${Boolean(j.verified)}|${reason ?? ""}`;
       let a = m.get(k);
@@ -337,7 +366,7 @@ export class MemoryStore implements NetworkStore {
 const g = globalThis as typeof globalThis & { __brainStore?: NetworkStore };
 
 /** Dev HMR keeps the globalThis singleton across module reloads; replace it if its shape is stale. */
-const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode", "countNodesJoined", "aggregateWork", "listOpenJobs", "getNodes", "allocationsForEpoch"];
+const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode", "countNodesJoined", "aggregateWork", "recordWork", "listOpenJobs", "getNodes", "allocationsForEpoch"];
 
 export function getStore(): NetworkStore {
   if (g.__brainStore && REQUIRED.some((k) => typeof g.__brainStore?.[k] !== "function")) g.__brainStore = undefined;

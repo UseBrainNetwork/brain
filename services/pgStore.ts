@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { Pool } from "pg";
 import type { DistributedJob, RewardAllocation, RewardClaim, RewardEpoch } from "@/domain/types";
 import { Breaker } from "./failsoft";
-import { KeyedMutex, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode, type WorkAggregate } from "./store";
+import { KeyedMutex, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode, type WorkAggregate, type WorkRecord } from "./store";
 
 /** Postgres implementation of NetworkStore. Schema: db/schema.sql. */
 /** Content hash of schema.sql: the DDL re-runs only when the file changes. */
@@ -281,6 +281,19 @@ export class PgStore implements NetworkStore {
   async getJob(id: string) {
     const r = await this.q(`SELECT data FROM brain_jobs WHERE id = $1`, [id]);
     return (r.rows[0]?.data as StoredJob) ?? null;
+  }
+  /** Same table as kernel jobs so aggregateWork sees one population; rows are terminal on insert. */
+  async recordWork(w: WorkRecord) {
+    await this.q(
+      `INSERT INTO brain_jobs (id, assigned_to, status, submitted_at, data)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE SET status = $3, data = $5`,
+      [w.id, w.assignedTo, w.status, w.submittedAt, JSON.stringify(w)],
+    );
+  }
+  async getWork(id: string) {
+    const r = await this.q(`SELECT data FROM brain_jobs WHERE id = $1 AND data->>'source' = 'native-inference'`, [id]);
+    return (r.rows[0]?.data as WorkRecord) ?? null;
   }
   async listRecentJobs(limit: number) {
     const r = await this.q(`SELECT data FROM brain_jobs ORDER BY submitted_at DESC LIMIT $1`, [limit]);

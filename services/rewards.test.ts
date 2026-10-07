@@ -1,6 +1,9 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { Keypair, SystemProgram, Transaction } from "@solana/web3.js";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// settlement.ts reads the native-node registry, which is server-only.
+vi.mock("server-only", () => ({}));
 import type { RewardAllocation, RewardEpoch } from "@/domain/types";
 import { balanceOf, claim, issueClaim, payoutStatus, setPayoutSender } from "./claims";
 import type { PayoutSender } from "./payouts";

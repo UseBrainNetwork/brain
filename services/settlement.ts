@@ -6,6 +6,7 @@ import { contributorPoolToday } from "@/rewards/simulate";
 import { demoSolPriceUsd } from "@/services/mock/mockData";
 import { NodeError } from "./nodes";
 import { notifySettled } from "./notify";
+import { listNativeNodes, type NativeNode } from "./coordinator/registry";
 import { getStore, type StoredNode } from "./store";
 import { allocateFromTreasury, syncedTreasury } from "./treasury";
 import { getHoldings } from "./wallet";
@@ -97,9 +98,55 @@ async function settleDueUnlocked(store: ReturnType<typeof getStore>, now: number
   return settled;
 }
 
+/**
+ * What settlement needs to know about a node, whichever registry it lives in. Browser nodes come
+ * from brain_nodes; native GPU nodes from the coordinator registry. Both populations settle through
+ * the same formula with the same inputs.
+ */
+export interface Earner {
+  id: string;
+  deviceClass: string;
+  /** 0..1 */
+  reputation: number;
+  status: string;
+  walletAddress?: string;
+  /** Proven by a wallet signature. Unverified wallets never accrue. */
+  walletVerified: boolean;
+  tokenAmount: number;
+}
+
+const fromStored = (n: StoredNode): Earner => ({ id: n.id, deviceClass: n.deviceClass, reputation: n.reputation, status: n.status, walletAddress: n.walletAddress, walletVerified: n.walletVerified, tokenAmount: n.tokenAmount });
+
+const fromNative = (n: NativeNode): Earner => ({
+  id: n.nodeId,
+  deviceClass: n.benchmark.computeClass ?? "UNMEASURED",
+  reputation: n.reputation / 100,
+  status: n.state === "OFFLINE" ? "offline" : "idle",
+  walletAddress: n.wallet?.address,
+  walletVerified: Boolean(n.wallet?.verified && n.wallet.address),
+  tokenAmount: 0,
+});
+
+/** Resolves every node id that did work, across both registries, in two batched reads. */
+export async function resolveEarners(ids: string[]): Promise<Map<string, Earner>> {
+  const out = new Map<string, Earner>();
+  if (ids.length === 0) return out;
+  const stored = await getStore().getNodes(ids);
+  for (const [id, n] of stored) out.set(id, fromStored(n));
+  const missing = ids.filter((id) => !out.has(id));
+  if (missing.length) {
+    const native = new Map((await listNativeNodes()).map((n) => [n.nodeId, n]));
+    for (const id of missing) {
+      const n = native.get(id);
+      if (n) out.set(id, fromNative(n));
+    }
+  }
+  return out;
+}
+
 interface WalletWork {
   wallet: string;
-  nodes: StoredNode[];
+  nodes: Earner[];
   verifiedCompute: number;
   jobsAssigned: number;
   jobsCompleted: number;
@@ -126,8 +173,8 @@ export async function measureWork(from: number, to: number) {
   // Aggregated in the store: one row per (node, status, verified). Never loads job rows, so an epoch
   // with a hundred thousand jobs costs one indexed range scan.
   const rows = await store.aggregateWork(from, to, bucketMs);
-  // One batched query for every node that worked, not one round-trip per node.
-  const nodes: Map<string, StoredNode> = await store.getNodes([...new Set(rows.filter((r) => r.status !== "assigned").map((r) => r.nodeId))]);
+  // One batched read per registry for every node that worked, not one round-trip per node.
+  const nodes = await resolveEarners([...new Set(rows.filter((r) => r.status !== "assigned").map((r) => r.nodeId))]);
   const byWallet = new Map<string, WalletWork>();
   let networkVerifiedCompute = 0;
 
@@ -200,7 +247,7 @@ export async function epochWorkReport(epochStart: number, now = Date.now()): Pro
   const bucketMs = networkConfig.rewards.availabilityBucketMs;
   const rows = await store.aggregateWork(e.startsAt, to, bucketMs);
   const done = rows.filter((r) => r.status !== "assigned");
-  const nodes = await store.getNodes([...new Set(done.map((r) => r.nodeId))]);
+  const nodes = await resolveEarners([...new Set(done.map((r) => r.nodeId))]);
   const totalBuckets = Math.max(1, Math.ceil((to - e.startsAt) / bucketMs));
 
   const byNode = new Map<string, EpochWorkRow & { buckets: Set<number> }>();

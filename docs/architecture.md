@@ -66,8 +66,9 @@ flowchart LR
   jobs --> pg
   rcpt --> pg
   ledger --> pg
-  rcpt -.->|anchor hash · PLANNED| sol[(Solana)]
-  ledger -.->|settlement · PLANNED| sol
+  jobs -->|COMPLETED customer job · WorkRecord| epochs[hourly SOL epochs<br/>services/settlement.ts]
+  epochs -->|claim| sol[(Solana)]
+  rcpt -.->|anchor hash · PLANNED| sol
 ```
 
 ## Components
@@ -106,9 +107,11 @@ Backends: `MockBackend` (DEMO) serves only `brain/mock` and says so in every tok
 
 `services/coordinator/receipts.ts`. `CanonicalReceiptBody` (`v, jobId, nodeId, model, inputTokens, outputTokens, executionMs, timestamp, requestHash, responseHash, hardwareClass, cost`) is serialised with sorted keys, hashed with sha256 and signed with the coordinator's ed25519 key (`BRAIN_COORDINATOR_SIGNING_SEED`, or derived from `BRAIN_SERVER_SECRET`). `GET /api/coordinator/signer` publishes the key; `verifyReceipt()` checks any receipt offline. Receipts are issued at high frequency off-chain; anchoring a batch hash on Solana is PLANNED and nothing on the site claims otherwise.
 
-### Accounting — LIVE (ledger) / PLANNED (settlement)
+### Accounting — LIVE (ledger) / LIVE (epoch settlement)
 
-`services/accounting.ts`. Each priced receipt accrues `COMPUTE_PROVIDER_EARNED` events per node using the published revenue split. `/provider` shows **accrued** (owed, at list price) and **settled** (paid, always 0 today) as two separate numbers with their basis. No settlement to wallets runs; the interface for Solana settlement is PLANNED.
+`services/accounting.ts`. Each priced receipt accrues `COMPUTE_PROVIDER_EARNED` events per node using the published revenue split. `/provider` shows **accrued** (owed, at list price, USD) and **settled** (USD backed by a transaction reference; none yet) as two separate numbers with their basis. That USD ledger is not what pays nodes.
+
+**Native nodes are paid through the same hourly SOL epochs as browser contributors** (`services/settlement.ts`, pool = contributors' share of real creator fees). `services/coordinator/work.ts` turns every customer inference job the coordinator saw through to `COMPLETED` into a `WorkRecord` in the settlement aggregate (`brain_jobs`, `source: "native-inference"`), so `measureWork` sees one population. Units are the network's existing LLM unit (`params × tokens / 2^20` MACs, the `llm_stage` yardstick), with node-reported token counts clipped to the text the coordinator streamed. Probes (benchmark, canary, shadow) never become work. A failed customer job is recorded with settlement's lost-unit reasons (`deadline`, `node lost`) or its verification reason; a shadow mismatch re-records the primary as `replica-dispute` (unpaid, lost, not a failed check — the coordinator cannot say which node was wrong). Mock models produce no work. The wallet must be proven before anything accrues: the node reports `BRAIN_NODE_WALLET` under its own signature, and the operator signs on the site; `POST /api/coordinator/nodes/<id>/link` accepts only when both name the same address (`linkNativeWallet`). Until then the node's work is recorded and visible but earns nothing. Claims run through the existing `/rewards` flow. What "verified" means for native work is exactly what the coordinator established (streamed and timed the tokens, text/hash/token-count checks, benchmark and canary gating, shadow sampling); model re-execution is not part of it.
 
 ### Store — LIVE
 

@@ -54,7 +54,7 @@ BRAIN_NODE_MODE=mock npm run node
 | `BRAIN_NODE_REGION` | Operator label shown to developers, e.g. `eu-north` |
 | `BRAIN_NODE_CONCURRENCY` | Parallel jobs (1–16) |
 | `BRAIN_NODE_ASK_USD_PER_1M` | Optional ask price per 1M tokens; a routing input |
-| `BRAIN_NODE_WALLET` | Solana address to associate (ownership verified separately) |
+| `BRAIN_NODE_WALLET` | Solana address that gets paid. Then verify it once on `/provider` (sign with that wallet); verified customer inference on the node earns a share of the hourly SOL epochs, claimable on `/rewards`. Unverified: work is recorded, nothing accrues |
 | `BRAIN_NODE_HOME` | Where `identity.json` lives (default `~/.brain-node`) |
 | `HF_TOKEN` | For gated model repositories |
 
