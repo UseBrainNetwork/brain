@@ -27,6 +27,13 @@ export interface NetworkState {
   connected: boolean;
 }
 
+/**
+ * Subscribers are notified at most this often. State itself updates on every event; React and the
+ * canvases read the latest snapshot when told. Ten times a second is indistinguishable from
+ * per-event for a feed, and it bounds render work regardless of how many nodes are online.
+ */
+export const NOTIFY_EVERY_MS = 100;
+
 const baseline = getBaselineMetrics();
 const initial: NetworkState = {
   metrics: baseline,
@@ -69,9 +76,21 @@ class NetworkStoreImpl {
     };
   }
 
+  private notifyScheduled = false;
+  /**
+   * State changes apply immediately; subscribers are told at most every NOTIFY_EVERY_MS. With 700+
+   * nodes the event bus carries tens of events a second, and notifying React on every one made
+   * every subscribed component re-render per event. The visible result is identical.
+   */
   private set(patch: Partial<NetworkState>) {
     this.state = { ...this.state, ...patch };
-    this.listeners.forEach((l) => l());
+    if (this.notifyScheduled) return;
+    this.notifyScheduled = true;
+    const flush = () => {
+      this.notifyScheduled = false;
+      this.listeners.forEach((l) => l());
+    };
+    setTimeout(flush, NOTIFY_EVERY_MS);
   }
 
   private start() {

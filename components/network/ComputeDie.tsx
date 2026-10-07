@@ -17,6 +17,8 @@ import { cx, fmtInt } from "@/lib/format";
  */
 
 const PITCH = 0.062;
+/** Above this many live pillars, per-node labels and shadows are dropped (your own node keeps both). */
+const LABEL_MAX_PILLARS = 40;
 const COL_BUDGET = 150;
 const GAP_COLS = 3;
 const MARGIN = 0.42;
@@ -462,7 +464,8 @@ export function ComputeDie({
           );
           mesh.position.set(x, 0, z);
           mesh.scale.y = 0.001;
-          mesh.castShadow = true;
+          // Each caster is drawn again in the shadow pass; past a few dozen the shadows are invisible noise anyway.
+          mesh.castShadow = you || pillars.size < LABEL_MAX_PILLARS;
           const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: you ? 0x3d5afe : 0x27c46d, transparent: true, opacity: 0, toneMapped: false, side: THREE.DoubleSide }));
           ring.rotation.x = -Math.PI / 2;
           ring.position.set(x, 0.004, z);
@@ -828,6 +831,12 @@ export function ComputeDie({
 
         // live pillars
         const local = networkStore.getSnapshot().localNodeId;
+        // One layout read per frame. Reading the host rect inside the loop, right after writing a
+        // transform, forced a synchronous layout per live node per frame: with 700 nodes that alone
+        // was the page's frame budget.
+        const hostRect = labelEls.size ? el.getBoundingClientRect() : null;
+        // Everyone's own node is labelled; the rest only while there are few enough to read.
+        const showLabels = pillars.size <= LABEL_MAX_PILLARS;
         for (const [id, p] of pillars) {
           const age = (now - p.born) / 1000;
           const grow = Math.min(1, age / 0.9);
@@ -842,12 +851,20 @@ export function ComputeDie({
           p.ring.scale.set(rs, rs, rs);
           (p.ring.material as InstanceType<typeof THREE.MeshBasicMaterial>).opacity = (1 - ringT) * (p.you ? 0.75 : 0.4) * (age < 6 || p.you ? 1 : 0.4);
           const lab = labelEls.get(id);
-          if (lab) {
+          if (lab && hostRect) {
+            const you = id === local;
+            if (!you && !showLabels) {
+              if (lab.style.display !== "none") lab.style.display = "none";
+              continue;
+            }
+            if (lab.style.display === "none") lab.style.display = "";
             v3.set(p.x, p.mesh.scale.y + 0.06, p.z).applyMatrix4(die.matrixWorld).project(camera);
-            const r = el.getBoundingClientRect();
-            lab.style.transform = `translate(${((v3.x + 1) / 2) * r.width}px, ${((1 - v3.y) / 2) * r.height}px)`;
-            lab.dataset.you = String(id === local);
-            lab.textContent = id === local ? `YOU · NODE ${id}` : `NODE ${id}`;
+            lab.style.transform = `translate(${((v3.x + 1) / 2) * hostRect.width}px, ${((1 - v3.y) / 2) * hostRect.height}px)`;
+            const text = you ? `YOU · NODE ${id}` : `NODE ${id}`;
+            if (lab.textContent !== text) {
+              lab.textContent = text;
+              lab.dataset.you = String(you);
+            }
           }
         }
 

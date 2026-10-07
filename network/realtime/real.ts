@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react";
 import { fmtUsdSmall } from "@/lib/format";
 import type { ComputeNode, DistributedJob, NetworkEvent } from "@/domain/types";
-import { networkStore } from "./store";
+import { NOTIFY_EVERY_MS, networkStore } from "./store";
 
 /**
  * REAL-ONLY view of the network for /demo and /node. Nothing simulated is ever ingested here:
@@ -57,9 +57,17 @@ class RealStore {
     };
   };
 
+  private notifyScheduled = false;
+  /** Apply now, notify at most every NOTIFY_EVERY_MS (see NetworkStore.set for why). */
   private set(p: Partial<RealState>) {
     this.state = { ...this.state, ...p };
-    this.listeners.forEach((l) => l());
+    if (this.notifyScheduled) return;
+    this.notifyScheduled = true;
+    const flush = () => {
+      this.notifyScheduled = false;
+      this.listeners.forEach((l) => l());
+    };
+    setTimeout(flush, NOTIFY_EVERY_MS);
   }
 
   private start() {
@@ -127,7 +135,8 @@ class RealStore {
         break;
       }
       case "node.heartbeat":
-        if (s.nodes[e.nodeId]) this.set({ heartbeats: { ...s.heartbeats, [e.nodeId]: e.at } });
+        // Nothing on the page reads per-node heartbeat times; the 4 s poll carries lastHeartbeatAt.
+        // Copying the whole node map here, once per node per 10 s, was O(nodes²) work for nothing.
         break;
       case "node.verified":
         if (!s.nodes[e.nodeId] || e.jobId?.includes("-")) return; // distributed units are reported via work.verified

@@ -31,7 +31,12 @@ export async function GET(req: Request) {
         }
       };
       send(`retry: 3000\n\n`);
-      const unsubscribe = eventBus.subscribe((e) => send(`data: ${JSON.stringify(redact(e))}\n\n`));
+      // Heartbeats are one event per node per 10 s and nothing in the browser consumes them; with
+      // hundreds of nodes they were most of the stream's bytes and client parse work.
+      const unsubscribe = eventBus.subscribe((e) => {
+        if (e.type === "node.heartbeat") return;
+        send(`data: ${JSON.stringify(redact(e))}\n\n`);
+      });
       // Keep-alive only. The offline sweep runs on request paths that read nodes; running it here
       // multiplied one database sweep per viewer per 10 s across every long-lived stream instance.
       const ping = setInterval(() => send(`: ping\n\n`), 10_000);

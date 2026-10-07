@@ -85,6 +85,8 @@ const quad = (a: Pt, c: Pt, b: Pt, t: number): Pt => {
   return { x: u * u * a.x + 2 * u * t * c.x + t * t * b.x, y: u * u * a.y + 2 * u * t * c.y + t * t * b.y };
 };
 const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+/** Above this many live markers, per-node labels overlap and are dropped (your own node keeps its label). */
+const LABEL_MAX_MARKERS = 40;
 
 export function TopologyCanvas({ className, labels = true, dense = false }: { className?: string; labels?: boolean; dense?: boolean }) {
   const wrap = useRef<HTMLDivElement>(null);
@@ -202,6 +204,8 @@ export function TopologyCanvas({ className, labels = true, dense = false }: { cl
     };
 
     const liveClass = new Map<string, DeviceClass>();
+    const liveByClass = new Map<DeviceClass, number>();
+    const textWidths = new Map<string, number>();
     const clusterFor = (nodeId: string) => clusters.find((c) => c.id === liveClass.get(nodeId)) ?? clusters[clusters.length - 1];
 
     const renderBackground = () => {
@@ -348,6 +352,9 @@ export function TopologyCanvas({ className, labels = true, dense = false }: { cl
       const s = networkStore.getSnapshot();
       const ids = new Set(Object.keys(s.liveNodes));
       for (const id of [...markers.keys()]) if (!ids.has(id)) markers.delete(id);
+      // Tally once per store change instead of once per frame.
+      liveByClass.clear();
+      for (const n of Object.values(s.liveNodes)) liveByClass.set(n.deviceClass, (liveByClass.get(n.deviceClass) ?? 0) + 1);
       const seats = new Map<DeviceClass, number>();
       for (const m of markers.values()) {
         const cl = clusterFor(m.id);
@@ -562,7 +569,10 @@ export function TopologyCanvas({ className, labels = true, dense = false }: { cl
           const rr = s + 6 + Math.sin(now / 120) * 2;
           ctx.strokeRect(m.x - rr / 2, m.y - rr / 2, rr, rr);
         }
-        if (labels || m.you) {
+        // Per-node labels only while they are legible. Past a few dozen they overlap into noise, and
+        // measuring and drawing text for every live node each frame was the single largest cost on
+        // this canvas with hundreds of nodes online.
+        if (m.you || (labels && markers.size <= LABEL_MAX_MARKERS)) {
           ctx.font = `600 10px ${MONO}`;
           const text = m.you ? `YOU · NODE ${m.id}` : `LIVE ${m.id}`;
           const lx = m.x + s / 2 + 16;
@@ -573,7 +583,8 @@ export function TopologyCanvas({ className, labels = true, dense = false }: { cl
           ctx.moveTo(m.x + s / 2 + 1, m.y + s / 2 + 1);
           ctx.lineTo(lx - 3, ly - 2);
           ctx.stroke();
-          const tw = ctx.measureText(text).width;
+          let tw = textWidths.get(text);
+          if (tw == null) textWidths.set(text, (tw = ctx.measureText(text).width));
           ctx.fillStyle = m.you ? `rgba(${C.signal},1)` : `rgba(${C.ok},0.18)`;
           ctx.fillRect(lx - 3, ly - 9, tw + 8, 14);
           ctx.fillStyle = m.you ? "#fff" : `rgba(${C.ok},1)`;
@@ -585,9 +596,6 @@ export function TopologyCanvas({ className, labels = true, dense = false }: { cl
       if (labels) {
         ctx.font = `500 10px ${MONO}`;
         ctx.textBaseline = "alphabetic";
-        const snap = networkStore.getSnapshot();
-        const liveByClass = new Map<DeviceClass, number>();
-        for (const n of Object.values(snap.liveNodes)) liveByClass.set(n.deviceClass, (liveByClass.get(n.deviceClass) ?? 0) + 1);
         for (const cl of clusters) {
           const x = cl.cx - cl.r;
           const y = cl.cy - cl.r - 14;
