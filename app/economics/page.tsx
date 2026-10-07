@@ -12,6 +12,8 @@ import { listEpochsV2 } from "@/services/epochs";
 import { listReceipts } from "@/services/receipts";
 import { adapterStatuses, syncedTreasury } from "@/services/treasury";
 
+const fmtSol = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Live economics", description: "Where the money comes from and where it goes, from real accounting events only." };
 
@@ -37,7 +39,7 @@ export default async function EconomicsPage() {
 
   const flywheel = [
     { k: "Trading", v: adapters.find((a) => a.name === "pumpfun")?.ok ? "connected" : "AWAITING DATA", sub: "Pump.fun creator fees · claims read on-chain" },
-    { k: "Creator rewards", v: snap.creatorRewards.count ? <Cell c={snap.creatorRewards} currency="SOL" /> : "AWAITING DATA", sub: `${treasury.received.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL received · ${treasury.balance.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL balance` },
+    { k: "Creator rewards", v: snap.creatorRewards.count ? <Cell c={snap.creatorRewards} currency="SOL" /> : "AWAITING DATA", sub: `${fmtSol(treasury.received)} SOL received · ${fmtSol(treasury.payoutFunded)} SOL moved to payout wallet` },
     { k: "Compute subsidy", v: epochs.length ? sol(epochs.reduce((s, e) => s + e.distributedLamports, 0)) : "AWAITING DATA", sub: `${epochs.length} finalized epoch${epochs.length === 1 ? "" : "s"}` },
     { k: "More capacity", v: `${network.realNodes} real nodes`, sub: `${fmtInt(network.capacityScore)} capacity score` },
     { k: "Customer jobs", v: `${receipts.filter((r) => r.customerCost).length} priced / ${receipts.length} receipts`, sub: `${network.jobsCompleted} jobs completed` },
@@ -102,13 +104,24 @@ export default async function EconomicsPage() {
       </div>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
-        <Panel title="Creator-reward treasury" right={`${treasury.adapter} adapter`}>
+        <Panel title="Creator-reward treasury" right={`${treasury.adapter} adapter · chain + database`}>
           <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-            <Metric k="Balance" v={`${treasury.balance.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL`} />
-            <Metric k="Received" v={`${treasury.received.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL`} />
-            <Metric k="Allocated" v={`${treasury.allocated.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL`} />
-            <Metric k="Pending distribution" v={`${treasury.pendingDistribution.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL`} />
+            <Metric k="Fees received" v={`${fmtSol(treasury.received)} SOL`} />
+            <Metric k="Moved to payout wallet" v={`${fmtSol(treasury.payoutFunded)} SOL`} />
+            <Metric k="Protocol wallet" v={treasury.balance == null ? "UNKNOWN" : `${fmtSol(treasury.balance)} SOL`} />
+            <Metric k="Payout wallet" v={treasury.payoutWallet?.balance == null ? "UNKNOWN" : `${fmtSol(treasury.payoutWallet.balance)} SOL`} />
+            <Metric k="Allocated (live epochs)" v={`${fmtSol(treasury.allocated)} SOL`} />
+            <Metric k="Claimed" v={`${fmtSol(treasury.distributed)} SOL`} />
+            <Metric k="Owed, unclaimed" v={`${fmtSol(treasury.pendingDistribution)} SOL`} />
+            <Metric k="Pool per epoch" v={treasury.poolPerEpoch == null ? "NOT SET" : `${fmtSol(treasury.poolPerEpoch)} SOL`} />
           </div>
+          <p className="mt-3 font-mono text-[11px] text-chalk/60">
+            {treasury.runwayEpochs == null
+              ? "Runway: UNKNOWN (payout wallet or pool not readable)."
+              : treasury.runwayEpochs < 0
+                ? `Payout wallet is ${fmtSol(-treasury.runwayEpochs * (treasury.poolPerEpoch ?? 0))} SOL short of what is already owed.`
+                : `Runway: ${Math.floor(treasury.runwayEpochs)} more epochs after covering what is owed.`}
+          </p>
           <ul className="mt-4 space-y-1 font-mono text-[11px]">
             {adapters.map((a) => (
               <li key={a.name} className="flex justify-between gap-3 border-b border-chalk/[0.07] py-1">

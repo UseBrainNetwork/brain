@@ -356,31 +356,25 @@ describe("wallet link token", () => {
   });
 });
 
-describe("end to end: verified work → linked wallet → auto-settle from creator fees → claim", () => {
-  it("pays from the treasury, paced per epoch, only to linked wallets, and never writes simulated epochs for real money", async () => {
-    const { settleDueEpochs, treasuryPoolLamports } = await import("./settlement");
+describe("end to end: verified work → linked wallet → auto-settle against the fixed pool → claim", () => {
+  it("pays the configured pool, only to linked wallets, books what is owed from epochs and claims, and never writes simulated epochs for real money", async () => {
+    const { settleDueEpochs, configuredPoolLamports } = await import("./settlement");
     const { getTreasury } = await import("./treasury");
-    const { record } = await import("./accounting");
     Object.assign(process.env, LIVE_ENV);
     process.env.BRAIN_EPOCH_MINUTES = "60";
-    process.env.BRAIN_POOL_PACE_DAYS = "1";
     process.env.BRAIN_TOKEN_MINT = "FiJ4gnd4dhqNeBKfS4E8wnERMEpjMPdUfJhu8foipump";
-    delete process.env.BRAIN_EPOCH_POOL_SOL;
+    process.env.BRAIN_EPOCH_POOL_SOL = "0.15";
     const sender = fakeSender();
     setPayoutSender(sender);
     const s = store();
 
-    // 29.78 SOL of creator fees recorded in the REAL ledger (as the on-chain adapter would).
-    const t = await getTreasury("REAL");
-    t.received = t.balance = 29.78;
-    t.references.push("4DLu9xqbYcSIG");
-    await s.putDoc("treasury", "REAL", t, { at: Date.now(), key: "REAL" });
-    await record({ type: "CREATOR_REWARD_RECEIVED", amount: 29.78, currency: "SOL", timestamp: Date.now(), source: "REAL", settlement: "settled", transactionReference: "4DLu9xqbYcSIG" });
-
-    // Hourly pacing over one day: each epoch gets 1/24 of the 50% contributor share.
+    // The pool is the operator's fixed amount, whatever the ledger says the treasury received.
     const hour = 60 * 60_000;
-    const pool = await treasuryPoolLamports(hour);
-    expect(pool).toBe(Math.floor((29.78 * 0.5) / 24 * 1e9));
+    const pool = configuredPoolLamports()!;
+    expect(pool).toBe(150_000_000);
+    const before = await getTreasury("REAL");
+    expect(before.poolPerEpoch).toBe(0.15);
+    expect(before.allocated).toBe(0);
 
     // Work in the last closed hour. Node A linked a wallet, node B did not.
     const w = wallet();
@@ -406,11 +400,13 @@ describe("end to end: verified work → linked wallet → auto-settle from creat
       expect(e.provenance).toBe("live");
       expect(e.poolLamports).toBe(pool);
       expect(e.participants).toBe(1);
-      // One participant hits the small-network cap (25%); the rest of the pool stays in the treasury.
+      // One participant hits the small-network cap (25%); the rest of the pool is simply not paid.
       expect(e.distributedLamports).toBe(Math.floor(pool * 0.25));
+      // "Allocated" is read back from the settled epoch; nothing was claimed yet, so all of it is owed.
       const after = await getTreasury("REAL");
       expect(after.allocated).toBeCloseTo(e.distributedLamports / 1e9, 9);
-      expect(after.balance).toBeCloseTo(29.78 - e.distributedLamports / 1e9, 9);
+      expect(after.distributed).toBe(0);
+      expect(after.pendingDistribution).toBeCloseTo(e.distributedLamports / 1e9, 9);
       // Idempotent and throttled.
       expect(await settleDueEpochs(Date.now())).toHaveLength(0);
 
@@ -429,6 +425,10 @@ describe("end to end: verified work → linked wallet → auto-settle from creat
       const c = await claim(w.address, message, w.sign(message));
       expect(c.status).toBe("sent");
       expect(sender.sent).toEqual([{ to: w.address, lamports: e.distributedLamports }]);
+      // The claim moves the amount from owed to distributed.
+      const paid = await getTreasury("REAL");
+      expect(paid.distributed).toBeCloseTo(e.distributedLamports / 1e9, 9);
+      expect(paid.pendingDistribution).toBe(0);
 
       // RPC down while settling real money: holdings read as zero (multiplier 1) and the epoch still
       // settles LIVE and claimable. It is never written as simulated.
@@ -442,7 +442,7 @@ describe("end to end: verified work → linked wallet → auto-settle from creat
     } finally {
       globalThis.fetch = realFetch;
       delete process.env.BRAIN_EPOCH_MINUTES;
-      delete process.env.BRAIN_POOL_PACE_DAYS;
+      delete process.env.BRAIN_EPOCH_POOL_SOL;
       delete process.env.BRAIN_TOKEN_MINT;
     }
   });

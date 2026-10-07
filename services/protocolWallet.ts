@@ -1,5 +1,6 @@
 import { protocolWallet, token } from "@/lib/site";
 import { payoutStatus } from "./claims";
+import { payoutAddress } from "./payouts";
 import { creatorVaults, LAMPORTS, readTransfer, rpc, rpcUrl, TOKEN_ACCOUNT_RENT, type WalletTransfer } from "./solana";
 
 export { creatorVaults, PUMP_PROGRAMS, readTransfer, type WalletTransfer } from "./solana";
@@ -75,7 +76,9 @@ export async function getProtocolWallet(limit = 8): Promise<ProtocolWalletView> 
   const address = protocolWallet.address;
   const tokenStatus = await getTokenStatus();
   const ps = payoutStatus();
-  const payout = ps.wallet ? { address: ps.wallet, balanceSol: null as number | null, enabled: ps.enabled, ...(ps.opensAt ? { opensAt: ps.opensAt } : {}) } : null;
+  // The wallet is shown whenever a key is configured, even while payouts are switched off: its balance is what funds epochs.
+  const payoutAddr = ps.wallet ?? payoutAddress();
+  const payout = payoutAddr ? { address: payoutAddr, balanceSol: null as number | null, enabled: ps.enabled, ...(ps.opensAt ? { opensAt: ps.opensAt } : {}) } : null;
   const vaults = creatorVaults(address);
   const creatorVault: ProtocolWalletView["creatorVault"] = { bonding: { address: vaults.bonding, sol: null }, amm: { address: vaults.ammWsol, sol: null }, totalSol: null };
   const base: ProtocolWalletView = { address, cluster: protocolWallet.cluster, source: "REAL", balanceSol: null, recent: [], fetchedAt: Date.now(), rpc: "unavailable", token: tokenStatus, payout, creatorVault };

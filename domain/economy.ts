@@ -405,17 +405,39 @@ export interface SumCell {
 
 /* ------------------------------------------------------------- treasury */
 
+/**
+ * What the chain and the database say about contributor money. Nothing here is a running total the
+ * app keeps by hand: the chain-side figures are rebuilt from protocol-wallet transactions by signature,
+ * the liabilities are sums over settled epochs and claims, and balances are read from the chain.
+ */
 export interface CreatorRewardTreasury {
-  balance: number;
+  /** On-chain SOL in the protocol wallet. null = RPC unreachable → UNKNOWN. */
+  balance: number | null;
+  /** Creator fees claimed into the protocol wallet (pump.fun vault → wallet transactions). */
   received: number;
+  /** Other SOL that arrived in the protocol wallet (not creator fees). */
+  deposited: number;
+  /** SOL moved from the protocol wallet to the payout wallet. */
+  payoutFunded: number;
+  /** SOL that left the protocol wallet anywhere else. */
+  withdrawn: number;
+  /** Sum of every live epoch's distributed lamports: what the network has promised contributors. */
   allocated: number;
+  /** Claims paid or in flight (pending, sent, confirmed). */
   distributed: number;
+  /** allocated − distributed: promised and not yet claimed. Must be covered by the payout wallet. */
   pendingDistribution: number;
+  /** The hot wallet claims are paid from, with its on-chain balance (null = UNKNOWN). */
+  payoutWallet: { address: string; balance: number | null } | null;
+  /** Fixed pool per epoch (BRAIN_EPOCH_POOL_SOL). null = not configured, nothing settles live. */
+  poolPerEpoch: number | null;
+  /** How many more epochs the payout wallet can fund after covering pendingDistribution. Negative = already short. null = unknown. */
+  runwayEpochs: number | null;
   currency: "SOL";
   source: Source;
   adapter: "mock" | "manual" | "pumpfun";
   updatedAt: number;
-  /** Where the numbers came from (tx signatures, operator notes). Empty for mock. */
+  /** Transaction signatures (and operator notes) the chain-side figures were built from. Empty for mock. */
   references: string[];
 }
 

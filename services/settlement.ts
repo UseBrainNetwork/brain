@@ -1,6 +1,6 @@
 import type { CurrentEpochProgress, Provenance, RewardAllocation, RewardEpoch } from "@/domain/types";
 import { networkConfig } from "@/lib/config";
-import { defaultRevenueSplit, defaultRewardConfig } from "@/rewards/config";
+import { defaultRewardConfig } from "@/rewards/config";
 import { computeEpoch, type ContributorInput } from "@/rewards/formula";
 import { contributorPoolToday } from "@/rewards/simulate";
 import { demoSolPriceUsd } from "@/services/mock/mockData";
@@ -8,7 +8,6 @@ import { NodeError } from "./nodes";
 import { notifySettled } from "./notify";
 import { listNativeNodes, type NativeNode } from "./coordinator/registry";
 import { getStore, type StoredNode } from "./store";
-import { allocateFromTreasury, syncedTreasury } from "./treasury";
 import { getHoldings } from "./wallet";
 
 export const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -30,29 +29,15 @@ export function demoPoolLamports(lengthMs = epochLengthMs()): number {
   return Math.floor((contributorPoolToday() / demoSolPriceUsd) * LAMPORTS_PER_SOL * (lengthMs / DAY_MS));
 }
 
-/** Operator-committed pool per epoch, if configured. Only operator-funded pools can settle as live. */
+/**
+ * The pool rule: a fixed amount of SOL per epoch, set by the operator (BRAIN_EPOCH_POOL_SOL) and
+ * funded from creator fees moved into the payout wallet. It is not a share of anything the app
+ * computes, so it cannot drift with a ledger; what it costs and how long the payout wallet lasts
+ * are read from chain (see `services/treasury.ts`). Unset ⇒ nothing settles as live.
+ */
 export function configuredPoolLamports(): number | null {
   const sol = Number(process.env.BRAIN_EPOCH_POOL_SOL);
   return sol > 0 ? Math.floor(sol * LAMPORTS_PER_SOL) : null;
-}
-
-/**
- * Pool funded by real creator fees: the contributors' share (published split) of the REAL
- * treasury balance that has been received and not yet allocated. Zero until an operator records
- * a creator-fee receipt by transaction signature. Never includes anything simulated.
- */
-export async function treasuryPoolLamports(lengthMs = epochLengthMs()): Promise<number> {
-  const t = await syncedTreasury();
-  const contributors = t.balance * defaultRevenueSplit.creatorRewards.contributors;
-  // Pace the pool: an epoch gets the slice of the contributors' share proportional to its length over
-  // BRAIN_POOL_PACE_DAYS (default 1 day). Daily epochs take the whole share; hourly epochs take 1/24.
-  const pace = Math.max(lengthMs, paceDays() * DAY_MS);
-  return Math.max(0, Math.floor(contributors * (lengthMs / pace) * LAMPORTS_PER_SOL));
-}
-
-function paceDays(): number {
-  const d = Number(process.env.BRAIN_POOL_PACE_DAYS);
-  return d > 0 ? d : 1;
 }
 
 /**
@@ -80,7 +65,7 @@ export async function settleDueEpochs(now = Date.now(), maxEpochs = 6): Promise<
 async function settleDueUnlocked(store: ReturnType<typeof getStore>, now: number, len: number, lastStart: number, maxEpochs: number): Promise<RewardEpoch[]> {
   const settled: RewardEpoch[] = [];
   // Never auto-write simulated epochs: only settle when there is a real pool to distribute.
-  if ((await treasuryPoolLamports(len)) <= 0 && configuredPoolLamports() == null) return [];
+  if (configuredPoolLamports() == null) return [];
   const last = { startsAt: lastStart };
   // Only epochs after the first verified job need settling; before that there is nothing to pay.
   for (let i = 0, start = last.startsAt; i < maxEpochs && start >= 0; i++, start -= len) {
@@ -311,9 +296,9 @@ export async function epochWorkReport(epochStart: number, now = Date.now()): Pro
     };
   }
 
-  // Open or closed-but-unsettled: dry-run the engine exactly as settlement would, against the paced pool.
+  // Open or closed-but-unsettled: dry-run the engine exactly as settlement would, against the fixed pool.
   const { wallets } = await measureWork(e.startsAt, to);
-  const fullPool = (await treasuryPoolLamports(len)) || configuredPoolLamports() || 0;
+  const fullPool = configuredPoolLamports() ?? 0;
   const pool = Math.floor(fullPool * ((to - e.startsAt) / len));
   const inputs = wallets.map((w) => toInput(w, Math.max(0, ...w.nodes.map((n) => n.tokenAmount)), totalBuckets));
   const result = computeEpoch(inputs, pool, defaultRewardConfig);
@@ -373,10 +358,8 @@ export async function settleEpoch(opts: SettleOptions): Promise<{ epoch: RewardE
   const existing = await store.getEpoch(e.id);
   if (existing) return { epoch: existing, created: false };
 
-  // Pool precedence: explicit > creator-fee treasury (real) + configured subsidy > simulated demo.
-  const treasuryPool = opts.poolLamports == null ? await treasuryPoolLamports(e.endsAt - e.startsAt) : 0;
-  const configured = configuredPoolLamports();
-  const operatorPool = opts.poolLamports ?? (treasuryPool > 0 || configured != null ? treasuryPool + (configured ?? 0) : null);
+  // Pool precedence: explicit > configured fixed pool (real) > simulated demo.
+  const operatorPool = opts.poolLamports ?? configuredPoolLamports();
   const pool = Math.floor(operatorPool ?? demoPoolLamports(e.endsAt - e.startsAt));
   if (!(pool >= 0)) throw new NodeError("invalid_pool");
 
@@ -423,11 +406,7 @@ export async function settleEpoch(opts: SettleOptions): Promise<{ epoch: RewardE
     provenance,
   };
   const created = await store.saveSettlement(epoch, allocations);
-  // Move the treasury's part of what was actually distributed from "balance" to "allocated".
-  if (created && provenance === "live" && treasuryPool > 0 && epoch.distributedLamports > 0) {
-    const fromTreasury = Math.min(treasuryPool, epoch.distributedLamports) / LAMPORTS_PER_SOL;
-    await allocateFromTreasury(fromTreasury, e.id);
-  }
+  // Nothing else to book: "allocated" is the sum of live epochs, read back from the store (services/treasury.ts).
   // Payout emails for wallets that asked for them. Never affects the settlement itself.
   if (created && provenance === "live" && allocations.length > 0) {
     try {
@@ -454,8 +433,11 @@ async function networkProgress(now: number) {
   const { wallets, networkVerifiedCompute } = await measureWork(e.startsAt, now);
   const elapsedBuckets = Math.max(1, Math.ceil((now - e.startsAt) / networkConfig.rewards.availabilityBucketMs));
   const inputs = wallets.map((w) => toInput(w, Math.max(...w.nodes.map((n) => n.tokenAmount)), elapsedBuckets));
-  const lastLive = (await getStore().listEpochs(30)).find((x) => x.provenance === "live");
-  const refPool = lastLive?.poolLamports ?? configuredPoolLamports() ?? demoPoolLamports(e.endsAt - e.startsAt);
+  // The configured pool is what this epoch will actually settle against; the last live epoch is only a
+  // fallback for the moment between a config change and the next deploy reading it.
+  const configured = configuredPoolLamports();
+  const lastLive = configured == null ? (await getStore().listEpochs(30)).find((x) => x.provenance === "live") : undefined;
+  const refPool = configured ?? lastLive?.poolLamports ?? demoPoolLamports(e.endsAt - e.startsAt);
   const result = computeEpoch(inputs, refPool * ((now - e.startsAt) / (e.endsAt - e.startsAt)), defaultRewardConfig);
   return { e, now, inputs, networkVerifiedCompute, result };
 }

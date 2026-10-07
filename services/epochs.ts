@@ -2,23 +2,21 @@ import type { RewardEpochV2, RewardEpochV2Allocation } from "@/domain/economy";
 import { allocate, defaultEngineConfig, type EngineInput } from "@/rewards/engine";
 import { NodeError } from "./nodes";
 import { sha256 } from "./receipts";
-import { LAMPORTS_PER_SOL, epochAt } from "./settlement";
+import { configuredPoolLamports, epochAt } from "./settlement";
 import { getStore, type StoredNode } from "./store";
-import { allocateFromTreasury, getTreasury } from "./treasury";
 
 /**
  * Reward epochs (v2). Finalization reads verified work from server job records (never from
  * node counters or anything a client sent), runs the reward engine, and writes an immutable
  * result whose hash anyone can recompute from the public allocation list.
  *
- * Pool: SOL lamports. With `fromTreasury`, the pool is drawn from the real creator-reward
- * treasury balance; otherwise the operator passes an explicit pool.
+ * Pool: SOL lamports. The operator passes an explicit pool, or omits it to use the fixed
+ * per-epoch pool (BRAIN_EPOCH_POOL_SOL).
  */
 
 export interface FinalizeInput {
   epochStart: number;
   poolLamports?: number;
-  fromTreasury?: boolean;
   now?: number;
 }
 
@@ -70,8 +68,7 @@ export async function finalizeEpoch(input: FinalizeInput): Promise<{ epoch: Rewa
   const existing = await store.getDoc<RewardEpochV2>("epochv2", id);
   if (existing) return { epoch: existing, created: false };
 
-  let pool = input.poolLamports ?? 0;
-  if (input.fromTreasury) pool = Math.floor((await getTreasury("REAL")).balance * LAMPORTS_PER_SOL);
+  const pool = input.poolLamports ?? configuredPoolLamports() ?? 0;
   if (!(pool >= 0)) throw new NodeError("invalid_pool");
 
   const { inputs, nodes } = await measureNodes(e.startsAt, e.endsAt);
@@ -109,7 +106,6 @@ export async function finalizeEpoch(input: FinalizeInput): Promise<{ epoch: Rewa
     allocations,
   };
   await store.putDoc("epochv2", id, epoch, { at: e.startsAt, key: "REAL" });
-  if (input.fromTreasury && distributed > 0) await allocateFromTreasury(distributed / LAMPORTS_PER_SOL, id);
   return { epoch, created: true };
 }
 

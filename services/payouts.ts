@@ -26,6 +26,17 @@ export function keyFromSecret(secret: Uint8Array): { privateKey: KeyObject; addr
   return { privateKey, address: base58Encode(pub) };
 }
 
+/** Public address of the configured payout wallet, or null when no valid key is set. Derives only; never sends. */
+export function payoutAddress(): string | null {
+  const raw = process.env.BRAIN_PAYOUT_SECRET_KEY;
+  if (!raw) return null;
+  try {
+    return keyFromSecret(parseSecretKey(raw)).address;
+  } catch {
+    return null;
+  }
+}
+
 function compactU16(n: number): number[] {
   const out: number[] = [];
   for (;;) {

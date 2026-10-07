@@ -6,11 +6,11 @@ export const dynamic = "force-dynamic";
 
 export const GET = nodeRoute(async () => json({ epochs: await listEpochsV2(20) }));
 
-/** Operator-only: finalize a closed epoch. Body: { epochStart, poolLamports? | fromTreasury? } */
+/** Operator-only: finalize a closed epoch. Body: { epochStart, poolLamports? } (omit the pool to use BRAIN_EPOCH_POOL_SOL) */
 export const POST = nodeRoute(async (req) => {
   const token = process.env.BRAIN_ADMIN_TOKEN;
   if (!token || req.headers.get("authorization") !== `Bearer ${token}`) return json({ error: "unauthorized" }, 401);
-  const b = await body<{ epochStart?: number; poolLamports?: number; fromTreasury?: boolean }>(req);
-  const r = await finalizeEpoch({ epochStart: Number(b.epochStart), poolLamports: b.poolLamports, fromTreasury: Boolean(b.fromTreasury) });
+  const b = await body<{ epochStart?: number; poolLamports?: number }>(req);
+  const r = await finalizeEpoch({ epochStart: Number(b.epochStart), poolLamports: b.poolLamports });
   return json(r, r.created ? 201 : 200);
 }, 10);

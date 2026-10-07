@@ -342,7 +342,7 @@ function NodeDashboard({ s, onWallet }: { s: ContributorState; onWallet: () => v
         </div>
       )}
       <div className="border-t border-chalk/[0.07] bg-warn/[0.06] px-5 py-3 font-mono text-[11px] leading-relaxed text-warn md:px-6">
-        50% of claimed creator fees is paced out hourly to linked wallets by verified compute. Zero verified compute earns zero. No return is promised.
+        A fixed SOL pool, funded from creator fees, is split each hour among linked wallets by verified compute. More network work means a smaller slice per unit. Zero verified compute earns zero. No return is promised.
       </div>
 
       <div className="px-5 pb-2 pt-5 md:px-6">

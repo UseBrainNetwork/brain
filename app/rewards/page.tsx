@@ -36,7 +36,7 @@ export default function RewardsPage() {
               </h1>
             </div>
             <p className="max-w-[400px] text-[15.5px] leading-relaxed text-chalk/60">
-              Verified compute earns a share of creator fees and inference revenue every epoch. Claim any time once payouts are open; SOL is sent straight to your wallet.
+              Verified compute earns a share of a fixed SOL pool every hour, funded by creator fees. Claim any time once payouts are open; SOL is sent straight to your wallet.
             </p>
           </div>
           <RewardsDashboard />
@@ -87,7 +87,7 @@ export default function RewardsPage() {
           <div className="mb-14 flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <h2 className="display-md text-[36px] md:text-[56px]">Where rewards come from</h2>
             <p className="max-w-[440px] text-[14.5px] leading-relaxed text-chalk/55">
-              The contributor pool is funded by creator fees and inference sales, split by published percentages each epoch. The protocol wallet is published below and read from chain; API billing is not connected yet. Modelled values are available under “Show simulated data” in the footer, labelled SIM.
+              Each hour pays a fixed SOL pool, set by the operator and funded by creator fees moved into the payout wallet; the pool is split by verified compute. The protocol and payout wallets are published below and read from chain; API billing is not connected yet. Modelled values are available under “Show simulated data” in the footer, labelled SIM.
             </p>
           </div>
           <div className="mb-10 grid gap-5 lg:grid-cols-2">

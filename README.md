@@ -188,7 +188,7 @@ Node 20+. With no configuration the app runs on an in-memory store and the infer
 | `BRAIN_PAYOUTS_ENABLED` + `BRAIN_PAYOUT_SECRET_KEY` | SOL claim payouts. Off by default |
 | `BRAIN_PAYOUTS_OPEN_AT` | Optional opening time (ISO-8601 or epoch ms); claims refused before it, open automatically after |
 | `BRAIN_EPOCH_MINUTES` | Epoch length (default 1440). Closed epochs with work settle automatically on the next dashboard read or cron run |
-| `BRAIN_POOL_PACE_DAYS` | Spread the contributors' share of the treasury over this many days per epoch (default 1) |
+| `BRAIN_EPOCH_POOL_SOL` | Fixed SOL pool per epoch, split by verified compute among linked wallets. Unset = nothing settles as live. The payout wallet must be funded to cover it; `/economics` shows the runway read from chain |
 | `NEXT_PUBLIC_BRAIN_WS_URL` | External WebSocket event bus (default: built-in SSE) |
 | `NEXT_PUBLIC_PRIVY_APP_ID` | Privy app ID (public). Wallet login runs through Privy (Solana browser wallets or email → embedded Solana wallet); ownership is still proven by a signed server nonce. Unset = built-in wallet picker |
 

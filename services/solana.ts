@@ -47,6 +47,8 @@ export interface WalletTransfer {
   pump: boolean;
   /** SOL that moved out of our pump.fun creator-fee vaults in this transaction (a creator-fee claim). 0 otherwise. */
   creatorFeeSol: number;
+  /** Net SOL change for each `watch` address passed to readTransfer (0 when not in the transaction). */
+  watched: Record<string, number>;
 }
 
 const PUBLIC_RPC: Record<string, string> = {
@@ -81,7 +83,7 @@ type ParsedTx = {
 } | null;
 
 /** Net SOL delta for `address` in one confirmed transaction, plus whether a pump.fun program was involved. */
-export async function readTransfer(url: string, address: string, signature: string, blockTime: number | null): Promise<WalletTransfer | null> {
+export async function readTransfer(url: string, address: string, signature: string, blockTime: number | null, watch: string[] = []): Promise<WalletTransfer | null> {
   const tx = await rpc<ParsedTx>(url, "getTransaction", [signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
   if (!tx) return null;
   const keys = tx.transaction.message.accountKeys.map((k) => (typeof k === "string" ? k : k.pubkey));
@@ -103,6 +105,8 @@ export async function readTransfer(url: string, address: string, signature: stri
   const vaultOut = [vaults.bonding, vaults.amm, vaults.ammWsol].reduce((s, v) => s + Math.max(0, -lamDelta(v)), 0);
   const gained = Math.max(0, lamDelta(address)) + Math.max(0, lamDelta(vaults.creatorWsol));
   const creatorFeeSol = pump && vaultOut > 0 && gained > 0 ? Math.min(vaultOut, gained) / LAMPORTS : 0;
-  return { signature, at: blockTime ? blockTime * 1000 : null, deltaSol, pump, creatorFeeSol };
+  const watched: Record<string, number> = {};
+  for (const w of watch) watched[w] = lamDelta(w) / LAMPORTS;
+  return { signature, at: blockTime ? blockTime * 1000 : null, deltaSol, pump, creatorFeeSol, watched };
 }
 
