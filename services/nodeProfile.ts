@@ -1,6 +1,6 @@
 import type { NodeReputation } from "@/domain/economy";
 import { networkConfig } from "@/lib/config";
-import { getStore, type StoredNode } from "./store";
+import { getStore, type StoredJob, type StoredNode } from "./store";
 
 /**
  * Public reputation profile for one anonymous node, computed from server records only:
@@ -23,11 +23,11 @@ export function uptimeOf(n: StoredNode, now = Date.now()): number {
   return Math.min(1, n.heartbeats / expected);
 }
 
-export async function nodeProfile(nodeId: string, now = Date.now()): Promise<NodeReputation | null> {
+export async function nodeProfile(nodeId: string, now = Date.now(), recentJobs?: StoredJob[]): Promise<NodeReputation | null> {
   const store = getStore();
   const n = await store.getNode(nodeId);
   if (!n) return null;
-  const jobs = await store.listJobsForNode(nodeId, 500);
+  const jobs = recentJobs ?? (await store.listJobsForNode(nodeId, 200));
   const latencies: number[] = [];
   let assigned = 0;
   let lostOrDeadline = 0;
@@ -105,7 +105,7 @@ export interface NodeEconomics {
 }
 
 /** The open epoch's dry-run allocation is network-wide; one computation per instance per 15 s serves every node poll. */
-const DRY_TTL_MS = 15_000;
+const DRY_TTL_MS = 60_000;
 const dryCache = globalThis as typeof globalThis & { __brainDry?: { at: number; epochId: string; value: Promise<ReturnType<typeof allocate>> } };
 async function openEpochDryRun(now: number) {
   const e = epochAt(now);
@@ -123,11 +123,11 @@ async function openEpochDryRun(now: number) {
   return value;
 }
 
-export async function nodeEconomics(nodeId: string, now = Date.now()): Promise<NodeEconomics | null> {
+export async function nodeEconomics(nodeId: string, now = Date.now(), recentJobs?: StoredJob[]): Promise<NodeEconomics | null> {
   const store = getStore();
   const n = await store.getNode(nodeId);
   if (!n) return null;
-  const jobs = (await store.listJobsForNode(nodeId, 200)).filter((j) => j.parentId && j.verified);
+  const jobs = (recentJobs ?? (await store.listJobsForNode(nodeId, 200))).filter((j) => j.parentId && j.verified);
   let customerJobs = 0;
   let subsidizedJobs = 0;
   const seen = new Map<string, boolean>();
