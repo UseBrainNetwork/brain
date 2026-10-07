@@ -341,7 +341,9 @@ export class PgStore implements NetworkStore {
   async aggregateWork(from: number, to: number, bucketMs: number) {
     const now = Date.now();
     const closed = to <= now - 3_600_000;
-    const slotMs = closed ? 86_400_000 : 60_000;
+    // Live estimates refresh every 5 minutes: the hourly window is a disk-bound scan of brain_jobs, and an
+    // estimate a few minutes old is what the dashboard labels it as anyway.
+    const slotMs = closed ? 86_400_000 : 300_000;
     const windowKey = `agg:${from}:${closed ? to : "live"}:${bucketMs}`;
     const key = `${windowKey}:${Math.floor(now / slotMs)}`;
     const memo = this.aggMemo.get(key);
@@ -354,7 +356,7 @@ export class PgStore implements NetworkStore {
       // an advisory lock while it computes; the others serve the newest finished aggregate for the same
       // window (an estimate a minute old beats a stampede) or wait for the holder to publish.
       for (let attempt = 0; attempt < 2; attempt++) {
-        const rows = await this.aggregateWorkUncached(from, closed ? to : now, bucketMs, windowKey);
+        const rows = await this.aggregateWorkUncached(from, closed ? to : now, bucketMs, windowKey, closed);
         if (rows) {
           await this.putDoc("meta", key, { rows, from, to: closed ? to : now, bucketMs }, { at: now, key: windowKey }).catch(() => undefined);
           return rows;
@@ -363,7 +365,7 @@ export class PgStore implements NetworkStore {
           const stale = await this.listDocs<{ rows: WorkAggregate[] }>("meta", { key: windowKey, limit: 1 }).catch(() => []);
           if (stale[0]?.rows) return stale[0].rows;
         }
-        const published = await this.waitForDoc<{ rows: WorkAggregate[] }>("meta", key, 20_000);
+        const published = await this.waitForDoc<{ rows: WorkAggregate[] }>("meta", key, closed ? 60_000 : 20_000);
         if (published?.rows) return published.rows;
       }
       throw new StoreUnavailableError(15, "work aggregate busy");
@@ -389,7 +391,7 @@ export class PgStore implements NetworkStore {
   }
 
   /** Returns null (without querying) when another instance holds the lock for this window. */
-  private async aggregateWorkUncached(from: number, to: number, bucketMs: number, lockKey: string): Promise<WorkAggregate[] | null> {
+  private async aggregateWorkUncached(from: number, to: number, bucketMs: number, lockKey: string, closed: boolean): Promise<WorkAggregate[] | null> {
     await this.ready;
     const c = await this.breaker.run(() => this.pool.connect());
     let failed: Error | undefined;
@@ -402,7 +404,10 @@ export class PgStore implements NetworkStore {
         return null;
       }
       // SET LOCAL survives the transaction pooler (the whole transaction is pinned to one backend).
-      await c.query("SET LOCAL statement_timeout = '30s'");
+      // A closed window is what settlement pays from, so it may take as long as the route allows; a live
+      // estimate gives up sooner and serves the previous aggregate instead.
+      const serverTimeoutS = closed ? 120 : 30;
+      await c.query(`SET LOCAL statement_timeout = '${serverTimeoutS}s'`);
       await c.query("SET LOCAL work_mem = '64MB'");
       // The pool's client-side query_timeout (15 s) must not cut this one short: pg would reject the
       // promise while the server kept running, and the connection would go back to the pool still
@@ -416,7 +421,7 @@ export class PgStore implements NetworkStore {
            FROM brain_jobs WHERE submitted_at >= $1 AND submitted_at < $2
           GROUP BY 1, 2, 3, 4`,
         values: [from, to, bucketMs],
-        query_timeout: 32_000,
+        query_timeout: serverTimeoutS * 1000 + 2_000,
       };
       const r = await c.query<Row>(cfg);
       await c.query("COMMIT");

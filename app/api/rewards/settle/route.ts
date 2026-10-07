@@ -5,6 +5,8 @@ import { bearer, json } from "@/services/security";
 import { epochAt, epochLengthMs, LAMPORTS_PER_SOL, settleDueEpochs, settleEpoch } from "@/services/settlement";
 
 export const dynamic = "force-dynamic";
+/** Settling an epoch aggregates an hour of brain_jobs and reads holdings for every wallet; give it room. */
+export const maxDuration = 300;
 
 function authorized(req: Request): boolean {
   const given = bearer(req);
