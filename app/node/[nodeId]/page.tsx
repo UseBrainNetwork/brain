@@ -2,11 +2,30 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Metric, NO_DATA, Panel, PageHead, Shell, SourceBadge, ms, pct, when } from "@/components/economy/parts";
 import { cx, fmtInt } from "@/lib/format";
-import { nodeProfile } from "@/services/nodeProfile";
+import { isStoreUnavailable, isTransientDbError } from "@/services/failsoft";
+import { profileFromRecords } from "@/services/nodeProfile";
 import { publicJob } from "@/services/nodes";
-import { getStore } from "@/services/store";
+import { getStore, type StoredJob } from "@/services/store";
+import type { NodeReputation } from "@/domain/economy";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * One store round trip for the profile scan and the recent-work list. Returns `unavailable` when
+ * the database is unreachable or slow (breaker open, pooler rejection, statement timeout) so the
+ * page can say so instead of crashing to the global error boundary.
+ */
+async function load(id: string): Promise<{ profile: NodeReputation | null; jobs: StoredJob[] } | { unavailable: true; retryAfterSec: number }> {
+  try {
+    const store = getStore();
+    const [node, jobs] = await Promise.all([store.getNode(id), store.listJobsForNode(id, 200)]);
+    if (!node) return { profile: null, jobs: [] };
+    return { profile: profileFromRecords(node, jobs), jobs: jobs.slice(0, 25) };
+  } catch (e) {
+    if (!isTransientDbError(e)) throw e;
+    return { unavailable: true, retryAfterSec: isStoreUnavailable(e) ? e.retryAfterSec : 15 };
+  }
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ nodeId: string }> }): Promise<Metadata> {
   const { nodeId } = await params;
@@ -17,7 +36,22 @@ export async function generateMetadata({ params }: { params: Promise<{ nodeId: s
 export default async function NodePage({ params }: { params: Promise<{ nodeId: string }> }) {
   const { nodeId } = await params;
   const id = decodeURIComponent(nodeId).toUpperCase();
-  const p = await nodeProfile(id);
+  const r = await load(id);
+  if ("unavailable" in r) {
+    return (
+      <Shell>
+        <div className="font-mono text-[12px] text-chalk/50">Node</div>
+        <h1 className="display mt-3 text-[48px] text-chalk">{id}</h1>
+        <p className="mt-6 max-w-[520px] font-mono text-[13px] leading-relaxed text-chalk/60">
+          The database is not answering right now, so this node&apos;s record cannot be read. Nothing is shown that was not read; retry in {r.retryAfterSec} seconds.
+        </p>
+        <Link href={`/node/${id}`} className="mt-6 inline-block font-mono text-[12px] text-chalk underline underline-offset-4">
+          Retry →
+        </Link>
+      </Shell>
+    );
+  }
+  const p = r.profile;
   if (!p) {
     return (
       <Shell>
@@ -27,7 +61,7 @@ export default async function NodePage({ params }: { params: Promise<{ nodeId: s
       </Shell>
     );
   }
-  const jobs = (await getStore().listJobsForNode(id, 25)).map(publicJob);
+  const jobs = r.jobs.map(publicJob);
   return (
     <Shell>
       <PageHead

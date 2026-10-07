@@ -28,6 +28,11 @@ export async function nodeProfile(nodeId: string, now = Date.now(), recentJobs?:
   const n = await store.getNode(nodeId);
   if (!n) return null;
   const jobs = recentJobs ?? (await store.listJobsForNode(nodeId, 200));
+  return profileFromRecords(n, jobs, now);
+}
+
+/** Profile from records already in hand (node row + the unit jobs issued to it); no store reads. */
+export function profileFromRecords(n: StoredNode, jobs: StoredJob[], now = Date.now()): NodeReputation {
   const latencies: number[] = [];
   let assigned = 0;
   let lostOrDeadline = 0;

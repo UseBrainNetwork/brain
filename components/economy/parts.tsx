@@ -102,4 +102,4 @@ export function Shell({ children }: { children: ReactNode }) {
 export const n = (x: number | null | undefined, suffix = "") => (x == null ? NO_DATA : `${fmtInt(x)}${suffix}`);
 export const pct = (x: number | null | undefined, digits = 1) => (x == null ? NO_DATA : `${(x * 100).toFixed(digits)}%`);
 export const ms = (x: number | null | undefined) => (x == null ? UNKNOWN : x >= 1000 ? `${(x / 1000).toFixed(2)}s` : `${Math.round(x)}ms`);
-export const when = (t: number) => new Date(t).toISOString().replace("T", " ").slice(0, 19) + "Z";
+export const when = (t: number | null | undefined): ReactNode => (t == null || !Number.isFinite(t) ? UNKNOWN : new Date(t).toISOString().replace("T", " ").slice(0, 19) + "Z");

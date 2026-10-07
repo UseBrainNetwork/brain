@@ -30,6 +30,19 @@ export function isStoreUnavailable(e: unknown): e is StoreUnavailableError {
   return typeof e === "object" && e != null && (e as { code?: unknown }).code === "database_unavailable" && (e as { status?: unknown }).status === 503;
 }
 
+/**
+ * Transient database trouble a page should degrade on rather than crash: connectivity loss, pooler
+ * rejection, or a statement/query timeout (SQLSTATE 57014, or the pg driver's own read timeout).
+ * SQL errors that indicate a bug (bad column, constraint) are not transient and are not matched.
+ */
+export function isTransientDbError(e: unknown): boolean {
+  if (isConnectivityError(e)) return true;
+  const err = e as { code?: string; message?: string } | null;
+  if (!err) return false;
+  if (String(err.code ?? "") === "57014") return true;
+  return /statement timeout|Query read timeout|canceling statement/i.test(String(err.message ?? ""));
+}
+
 /** Connection-level failures (not SQL errors): the database or pooler is not answering. */
 export function isConnectivityError(e: unknown): boolean {
   if (isStoreUnavailable(e)) return true;
