@@ -36,6 +36,12 @@ export const MATCH_THRESHOLD = 0.8;
 /** A real node gets a canary at least this often while online, and after this many completed jobs. */
 export const CANARY_INTERVAL_MS = 60 * 60_000;
 export const CANARY_EVERY_JOBS = 25;
+/**
+ * Canary deadline. Measured on a consumer card (RTX 4060, Qwen 1.5B): a node that has been idle
+ * reloads weights for ~32 s before the first token, and 32 tokens follow at 1–60 tok/s. 60 s cut
+ * off healthy nodes mid-reload and then counted that as a wrong answer.
+ */
+export const CANARY_TTL_MS = 180_000;
 
 /**
  * Character 4-gram Jaccard similarity over whitespace-normalised, lower-cased text, blended with a
@@ -163,6 +169,9 @@ const canaryDue = (n: NativeNode, now: number) => {
   if (n.reported.hardware.mock) return false;
   if (n.state !== "ONLINE" && !(n.state === "DEGRADED" && (n.measured.canaryFailStreak ?? 0) >= 2)) return false;
   if (n.activeJobIds.some((id) => id.startsWith("cj-"))) return false;
+  // A node at capacity cannot start the canary; it would sit ASSIGNED until the deadline and be
+  // blamed for it. Ask again when it has a free slot.
+  if (n.activeJobIds.length >= n.reported.capabilities.maxConcurrency) return false;
   const last = n.lastCanaryAt ?? 0;
   const since = n.measured.jobsCompleted - (n.jobsAtLastCanary ?? 0);
   // A node degraded by canaries gets another chance every 5 minutes; otherwise hourly or per N jobs.
@@ -179,7 +188,7 @@ export async function scheduleCanary(nodeId: string, now = Date.now(), force = f
     if (!model) return null;
     const canary = pickCanary(Math.floor(now / 1000) + n.nodeId.charCodeAt(2));
     const job = await createInferenceJob(
-      { requesterId: CANARY_REQUESTER, model, messages: [{ role: "user", content: canary.prompt }], maxTokens: 32, temperature: 0, pinnedNode: nodeId, allowDegraded: true, ttlMs: 60_000, idPrefix: "cj", canaryId: canary.id },
+      { requesterId: CANARY_REQUESTER, model, messages: [{ role: "user", content: canary.prompt }], maxTokens: 32, temperature: 0, pinnedNode: nodeId, allowDegraded: true, ttlMs: CANARY_TTL_MS, idPrefix: "cj", canaryId: canary.id },
       now,
     );
     const matched = await matchJob(job.jobId, now);
@@ -204,8 +213,14 @@ export async function recordCanary(jobId: string, now = Date.now()) {
   if (!j || j.requesterId !== CANARY_REQUESTER || !j.assignedNode || !j.canaryId) return;
   const canary = CANARIES.find((c) => c.id === j.canaryId);
   const passed = j.state === "COMPLETED" && Boolean(canary?.check(j.output));
-  await patchJob(j.jobId, (x) => void (x.verification = { kind: "canary", status: passed ? "passed" : "failed", canaryId: j.canaryId!, similarity: null }));
+  // A canary asks whether the node answers correctly. A timeout says nothing about that: the node
+  // was slow or busy, which fail() has already charged to its reliability (jobsTimedOut,
+  // consecutiveFailures). Counting it here as well would make slowness a second, separate offence
+  // and send honest cold nodes to DEGRADED. It is retried on the next schedule.
+  const inconclusive = !passed && j.state === "FAILED" && j.failureReason === "timeout";
+  await patchJob(j.jobId, (x) => void (x.verification = { kind: "canary", status: passed ? "passed" : inconclusive ? "inconclusive" : "failed", canaryId: j.canaryId!, similarity: null }));
   await updateNativeNode(j.assignedNode, (n) => {
+    if (inconclusive) return;
     if (passed) {
       n.measured.canaryPassed = (n.measured.canaryPassed ?? 0) + 1;
       n.measured.canaryFailStreak = 0;
@@ -214,5 +229,5 @@ export async function recordCanary(jobId: string, now = Date.now()) {
       n.measured.canaryFailStreak = (n.measured.canaryFailStreak ?? 0) + 1;
     }
   });
-  eventBus.publish({ type: "nverify.result", at: now, kind: "canary", jobId: j.jobId, nodeIds: [j.assignedNode], passed, detail: `canary ${j.canaryId}` });
+  eventBus.publish({ type: "nverify.result", at: now, kind: "canary", jobId: j.jobId, nodeIds: [j.assignedNode], passed, detail: inconclusive ? `canary ${j.canaryId} timed out (inconclusive)` : `canary ${j.canaryId}` });
 }

@@ -7,7 +7,7 @@ import { DEFAULTS, signingString, type HardwareReport, type NodeCapabilities, ty
 import { MemoryStore } from "@/services/store";
 import { authenticateSigned, checkReplay, nodeIdFor, verifyNodeSignature, type SignedRequest } from "./auth";
 import { classify, scheduleBenchmark } from "./benchmark";
-import { CANARIES, MATCH_THRESHOLD, maybeShadow, scheduleCanary, similarity } from "./verify";
+import { CANARIES, CANARY_TTL_MS, MATCH_THRESHOLD, maybeShadow, scheduleCanary, similarity } from "./verify";
 import { TRANSITIONS, createInferenceJob, getInferenceJob, matchJob, observeJob, publicInferenceJob, reportCompleted, reportFailed, reportProgress, reportStarted, sweepInferenceJobs, transition, type InferenceJob } from "./jobs";
 import { canonicalJson, receiptHash, verifyReceipt } from "./receipts";
 import { getNativeNode, heartbeatNativeNode, listNativeNodes, registerNativeNode, reliabilityScore, sweepNativeNodes, updateNativeNode } from "./registry";
@@ -490,6 +490,43 @@ describe("verification probes", () => {
     expect(node.state).toBe("ONLINE");
     const mock = await registerMock(true);
     expect(await scheduleCanary(mock.n.nodeId, t, true)).toBeNull();
+  });
+
+  it("a canary that times out is inconclusive: it costs reliability, not the canary streak, and does not degrade the node", async () => {
+    const { n } = await registerMock(false);
+    const t = Date.now();
+    const c1 = (await scheduleCanary(n.nodeId, t, true))!;
+    expect(c1.deadlineAt - c1.createdAt).toBe(CANARY_TTL_MS);
+    // Node acknowledged, then reloaded weights for too long: the deadline passes with no answer.
+    await reportStarted(n.nodeId, c1.jobId, { backend: "mock", loaded: false }, t + 1000);
+    await sweepInferenceJobs(t + CANARY_TTL_MS + 1);
+    const j = (await getInferenceJob(c1.jobId))!;
+    expect(j.state).toBe("FAILED");
+    expect(j.failureReason).toBe("timeout");
+    expect(j.verification).toMatchObject({ kind: "canary", status: "inconclusive" });
+    let node = (await getNativeNode(n.nodeId))!;
+    expect(node.measured.canaryFailStreak ?? 0).toBe(0);
+    expect(node.measured.canaryFailed ?? 0).toBe(0);
+    expect(node.measured.jobsTimedOut).toBe(1);
+    // A second timeout still does not degrade; a wrong answer still does count.
+    const c2 = (await scheduleCanary(n.nodeId, t + 2000, true))!;
+    await reportStarted(n.nodeId, c2.jobId, { backend: "mock", loaded: false }, t + 3000);
+    await sweepInferenceJobs(t + 2000 + CANARY_TTL_MS + 6000); // past the sweep throttle
+    node = (await getNativeNode(n.nodeId))!;
+    expect(node.state).toBe("ONLINE");
+    expect(node.measured.jobsTimedOut).toBe(2);
+    const c3 = (await scheduleCanary(n.nodeId, t + 4000, true))!;
+    await runJob(n.nodeId, c3, "No.", t + 4000);
+    node = (await getNativeNode(n.nodeId))!;
+    expect(node.measured.canaryFailStreak).toBe(1);
+  });
+
+  it("no canary is issued to a node that has no free slot", async () => {
+    const { n } = await registerMock(false);
+    const t = Date.now();
+    const busy = await createInferenceJob({ requesterId: "cust", model: "qwen/qwen2.5-7b-instruct", messages: [{ role: "user", content: "hi" }], maxTokens: 8, temperature: 0 }, t);
+    expect((await matchJob(busy.jobId, t)).assignedNode).toBe(n.nodeId);
+    expect(await scheduleCanary(n.nodeId, t + 1)).toBeNull();
   });
 });
 

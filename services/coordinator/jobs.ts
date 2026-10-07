@@ -91,7 +91,7 @@ export interface InferenceJob {
 
 export type JobVerification =
   | { kind: "redundant"; status: "pending" | "matched" | "mismatched" | "inconclusive"; peerJobId: string; peerNodeId: string | null; similarity: number | null }
-  | { kind: "canary"; status: "passed" | "failed"; canaryId: string; similarity: null };
+  | { kind: "canary"; status: "passed" | "failed" | "inconclusive"; canaryId: string; similarity: null };
 
 /** Job as shown publicly: no prompt, no output text, lengths only. */
 export type PublicInferenceJob = Omit<InferenceJob, "request" | "output" | "requesterId"> & { request: { messages: number; chars: number; maxTokens: number }; outputChars: number; kind: "inference" | "benchmark" | "verify" | "canary" };

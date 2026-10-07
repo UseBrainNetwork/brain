@@ -66,8 +66,17 @@ function friendlyError(code: string | undefined): string {
 interface ModelMap {
   configured: boolean;
   models: Partial<Record<Mode, string | null>>;
+  /** Community GPUs (Brain Node agents) online right now and the model they serve; null when none. */
+  native?: { model: string | null; name: string | null; nodes: number; usdPer1MTokens: number | null };
   filters: "none";
 }
+
+/** Privacy levels the chat offers, in the order shown. PRIVATE needs a plan with private routing. */
+const PRIVACY_HINT: Record<PrivacyRequirement, string> = {
+  PUBLIC: "May run on community GPUs. The machine that answers can read this prompt. Nothing here is encrypted from the node operator.",
+  STANDARD: "Plaintext never goes to community or browser nodes; operator infrastructure and external models only",
+  PRIVATE: "Operator infrastructure only",
+};
 
 const TARGET_LABEL: Record<string, string> = { BROWSER_NETWORK: "BROWSER COMPUTE", NATIVE_NETWORK: "NATIVE GPU", CLOUD_GPU: "CLOUD GPU", EXTERNAL_MODEL: "EXTERNAL MODEL", EXTERNAL_PROVIDER: "EXTERNAL MODEL" };
 
@@ -122,7 +131,11 @@ export function ChatApp() {
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("AUTO");
-  const [privacy, setPrivacy] = useState<PrivacyRequirement>("STANDARD");
+  // PUBLIC by default: the people who power BRAIN are the ones meant to serve it. The toggle next
+  // to the modes says what PUBLIC means; STANDARD is one tap away for anything sensitive.
+  const [privacy, setPrivacy] = useState<PrivacyRequirement>("PUBLIC");
+  /** Community GPU option: send the request to Brain Nodes by naming their model (always PUBLIC). */
+  const [community, setCommunity] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState<null | "routing" | "streaming">(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
@@ -207,7 +220,13 @@ export function ChatApp() {
       const id = convId;
       const patch = (fn: (m: Msg) => Msg) => update(id, (c) => ({ ...c, updatedAt: Date.now(), messages: c.messages.map((m) => (m.id === asstMsg.id ? fn(m) : m)) }));
       try {
-        const r = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "brain/auto", messages, mode, privacy, max_tokens: mode === "BROWSER_ONLY" ? 192 : 4096 }), signal: ac.signal });
+        const nativeModel = community ? (models?.native?.model ?? null) : null;
+        const r = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(nativeModel ? { model: nativeModel, messages, mode: "AUTO", privacy: "PUBLIC", max_tokens: 512 } : { model: "brain/auto", messages, mode, privacy, max_tokens: mode === "BROWSER_ONLY" ? 192 : 4096 }),
+          signal: ac.signal,
+        });
         if (!r.ok || !r.body) {
           const j = await r.json().catch(() => ({}));
           const msg = friendlyError(j?.error?.code ?? j?.error?.message ?? (r.status === 402 ? "out_of_credits" : `Request failed (${r.status}).`));
@@ -280,7 +299,7 @@ export function ChatApp() {
         refreshAccount();
       }
     },
-    [activeId, busy, convs, mode, privacy, refreshAccount, update],
+    [activeId, busy, community, convs, mode, models, privacy, refreshAccount, update],
   );
 
   const stop = () => abortRef.current?.abort();
@@ -389,28 +408,48 @@ Route <span className="text-chalk/70">{MODES.find((m) => m.id === mode)?.label ?
                         key={m.id}
                         type="button"
                         title={models?.models[m.id] ? `${m.hint} · ${models.models[m.id]}` : m.hint}
-                        onClick={() => setMode(m.id)}
-                        className={cx("rounded-full px-2.5 py-1 transition-colors", mode === m.id ? "bg-chalk/[0.12] text-chalk" : "text-chalk/45 hover:bg-chalk/[0.06] hover:text-chalk")}
+                        onClick={() => {
+                          setMode(m.id);
+                          setCommunity(false);
+                        }}
+                        className={cx("rounded-full px-2.5 py-1 transition-colors", !community && mode === m.id ? "bg-chalk/[0.12] text-chalk" : "text-chalk/45 hover:bg-chalk/[0.06] hover:text-chalk")}
                       >
                         {m.label}
                       </button>
                     ))}
-                    {privateAllowed && (
-                      <>
-                        <span className="mx-1 h-3.5 w-px bg-chalk/15" />
-                        {(["STANDARD", "PRIVATE"] as const).map((p) => (
-                          <button
-                            key={p}
-                            type="button"
-                            title={p === "STANDARD" ? "Plaintext never goes to untrusted distributed nodes" : "Operator infrastructure only"}
-                            onClick={() => setPrivacy(p)}
-                            className={cx("rounded-full px-2.5 py-1 transition-colors", privacy === p ? "bg-signal/20 text-signal-2" : "text-chalk/45 hover:bg-chalk/[0.06] hover:text-chalk")}
-                          >
-                            {p}
-                          </button>
-                        ))}
-                      </>
-                    )}
+                    <button
+                      type="button"
+                      disabled={!models?.native?.model}
+                      title={
+                        models?.native?.model
+                          ? `${models.native.name ?? models.native.model} on ${models.native.nodes} community GPU${models.native.nodes === 1 ? "" : "s"} running the Brain Node agent. Always PUBLIC: the node operator can read the prompt. ${models.native.usdPer1MTokens == null ? "Cost UNKNOWN (no list price configured)." : `$${models.native.usdPer1MTokens} per 1M tokens, list price.`} Verified by the coordinator's own timing and canaries; it pays the GPU's owner.`
+                          : models?.native
+                            ? "No community GPU is online right now"
+                            : "Checking which community GPUs are online…"
+                      }
+                      onClick={() => {
+                        setCommunity(true);
+                        setPrivacy("PUBLIC");
+                      }}
+                      className={cx("rounded-full px-2.5 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-35", community ? "bg-chalk/[0.12] text-chalk" : "text-chalk/45 hover:bg-chalk/[0.06] hover:text-chalk")}
+                    >
+                      GPU{models?.native?.nodes ? ` ${models.native.nodes}` : ""}
+                    </button>
+                    <span className="mx-1 h-3.5 w-px bg-chalk/15" />
+                    {(["PUBLIC", "STANDARD", "PRIVATE"] as const)
+                      .filter((p) => p !== "PRIVATE" || privateAllowed)
+                      .map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          disabled={community && p !== "PUBLIC"}
+                          title={community && p !== "PUBLIC" ? "The community GPU option is always PUBLIC" : PRIVACY_HINT[p]}
+                          onClick={() => setPrivacy(p)}
+                          className={cx("rounded-full px-2.5 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-35", privacy === p ? "bg-signal/20 text-signal-2" : "text-chalk/45 hover:bg-chalk/[0.06] hover:text-chalk")}
+                        >
+                          {p}
+                        </button>
+                      ))}
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
                     <span className="hidden font-mono text-[10.5px] text-chalk/35 sm:inline">
@@ -431,8 +470,11 @@ Route <span className="text-chalk/70">{MODES.find((m) => m.id === mode)?.label ?
                   </div>
                 </div>
               </form>
-              <div className="mt-2.5 flex items-center justify-center gap-1.5 font-mono text-[10px] text-chalk/30">
-                <span>No added filters. Every answer tells you where it ran and what it cost.</span>
+              <div className="mt-2.5 flex items-center justify-center gap-1.5 text-center font-mono text-[10px] text-chalk/30">
+                <span>
+                  {privacy === "PUBLIC" ? (community ? "Answered by a community GPU; its operator can read this prompt. " : "PUBLIC: a community GPU may answer and its operator can read the prompt; STANDARD keeps it off those machines. ") : privacy === "STANDARD" ? "STANDARD: plaintext stays off community and browser nodes. " : "PRIVATE: operator infrastructure only. "}
+                  Every answer tells you where it ran and what it cost.
+                </span>
                 <span className="hidden sm:inline">·</span>
                 <Link href="/account" className="hidden hover:text-chalk/60 sm:inline">
                   Account

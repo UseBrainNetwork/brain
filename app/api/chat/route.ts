@@ -8,6 +8,7 @@ import type { PrivacyRequirement } from "@/domain/economy";
 import { normalizeMode } from "@/domain/economy";
 import { withTimeout } from "@/lib/async";
 import { planById } from "@/lib/plans";
+import { isAllowedModel } from "@/node/models";
 import { ensureAccount } from "@/services/accounts";
 import { balance, consumeForReceipt, ensureMonthlyGrant, mayConsume } from "@/services/credits";
 import { recordRequest } from "@/services/customers";
@@ -50,8 +51,12 @@ export const POST = nodeRoute(async (req, { ip }) => {
   const chat = validateChat({ ...raw, stream: true });
   const mode = normalizeMode(String(raw.mode ?? "auto"));
   if (!plan.modes.includes(mode)) return json({ error: { code: "mode_not_in_plan", message: `${mode} routing is not included in the ${plan.name} plan.` } }, 403);
-  const privacyRaw = String(raw.privacy ?? "standard").toUpperCase() as PrivacyRequirement;
+  // A node model (the Community GPU option) runs only on community Brain Nodes, whose operators can
+  // read the prompt. Choosing it is choosing PUBLIC; the UI says so before the request is sent.
+  const nodeModel = isAllowedModel(chat.model);
+  const privacyRaw = String(raw.privacy ?? (nodeModel ? "public" : "standard")).toUpperCase() as PrivacyRequirement;
   const privacy = PRIVACY.has(privacyRaw) ? privacyRaw : "STANDARD";
+  if (nodeModel && privacy !== "PUBLIC") return json({ error: { code: "privacy_conflict", message: `${chat.model} runs on community GPUs whose operators can read prompts; it needs PUBLIC privacy.` } }, 400);
   if (privacy === "PRIVATE" && !plan.privateRouting) return json({ error: { code: "privacy_not_in_plan", message: `PRIVATE routing is not included in the ${plan.name} plan.` } }, 403);
 
   if (account) {
@@ -68,7 +73,8 @@ export const POST = nodeRoute(async (req, { ip }) => {
   const t0 = Date.now();
   const chatId = `chatcmpl-${randomBytes(10).toString("hex")}`;
   const messages = chat.messages[0]?.role === "system" ? chat.messages : [{ role: "system" as const, content: CHAT_SYSTEM_PROMPT }, ...chat.messages];
-  const request = { kind: "chat" as const, model: chat.model, messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy };
+  // Community GPUs decode at consumer-card speed; a 4096-token budget would be a four-minute answer.
+  const request = { kind: "chat" as const, model: chat.model, messages, maxTokens: nodeModel ? Math.min(chat.max_tokens ?? 512, 768) : chat.max_tokens, temperature: chat.temperature, privacy };
   const customerId = account ? `acct:${account.accountId}` : `anon:${ip}`;
 
   if (mode === "BROWSER_ONLY") {

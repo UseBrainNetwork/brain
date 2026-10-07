@@ -24,6 +24,8 @@ They share one GPU and do not earn more than one tab would. The server's reassig
 **Is my prompt private?**
 On the browser crowd and on GPU nodes, no: the operator of the machine can read it. BRAIN enforces this by rule: `STANDARD` and `PRIVATE` requests cannot be routed there, and asking for privacy on a node-only model returns `400 privacy_conflict`. Prompts never appear on any public surface of the site.
 
+The chat at `/chat` defaults to `PUBLIC`, so a community GPU may answer and its operator can read the prompt; the composer says so and `STANDARD` is one tap away. The API defaults to `STANDARD`. The `GPU` option in the chat sends the request to community GPUs by name and is always `PUBLIC`.
+
 **Is node inference verified?**
 Not bit-exactly, and the receipt says so (`node-reported`, `verified: false`). The coordinator checks the response hash, stream consistency, token plausibility and wall time on its own clock, re-runs 5 % of deterministic jobs on a second node, and runs hourly canaries. Those probes move the node's reliability score. Browser work and network-inference stages are verified exactly and say `verified: true`.
 
