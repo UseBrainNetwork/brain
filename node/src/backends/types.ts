@@ -17,6 +17,8 @@ export interface InferenceBackend {
   loadedModels(): string[];
   /** Load (or confirm) a model. Resolves `true` when a load actually happened. */
   ensureLoaded(model: string, signal: AbortSignal): Promise<boolean>;
+  /** Optional: begin loading a model in the background before any job asks for it. */
+  prewarm?(model?: string): void;
   generate(job: JobPayload, onDelta: (delta: string, tokens: number) => void, signal: AbortSignal): Promise<GenerateResult>;
   /** Stop everything; containers down, memory freed. */
   shutdown(): Promise<void>;

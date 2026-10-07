@@ -10,7 +10,7 @@ import { classify, scheduleBenchmark } from "./benchmark";
 import { CANARIES, MATCH_THRESHOLD, maybeShadow, scheduleCanary, similarity } from "./verify";
 import { TRANSITIONS, createInferenceJob, getInferenceJob, matchJob, observeJob, publicInferenceJob, reportCompleted, reportFailed, reportProgress, reportStarted, sweepInferenceJobs, transition, type InferenceJob } from "./jobs";
 import { canonicalJson, receiptHash, verifyReceipt } from "./receipts";
-import { getNativeNode, heartbeatNativeNode, listNativeNodes, registerNativeNode, reliabilityScore, sweepNativeNodes } from "./registry";
+import { getNativeNode, heartbeatNativeNode, listNativeNodes, registerNativeNode, reliabilityScore, sweepNativeNodes, updateNativeNode } from "./registry";
 
 const g = globalThis as typeof globalThis & { __brainStore?: MemoryStore; __brainNNodes?: unknown; __brainNSweep?: number; __brainNJobSweep?: number };
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -26,10 +26,21 @@ const hw = (mock = true): HardwareReport => ({ os: { platform: "linux", release:
 const caps = (models: string[], extra: Partial<NodeCapabilities> = {}): NodeCapabilities => ({ backend: "mock", supportedModels: models, loadedModels: models, maxConcurrency: 1, region: null, askUsdPer1MTokens: null, ...extra });
 const tele = (extra: Partial<Telemetry> = {}): Telemetry => ({ gpuUtilPct: 0, vramUsedMb: 0, vramTotalMb: 24_576, temperatureC: 40, powerW: 30, load: 0, activeJobs: 0, loadedModels: ["brain/mock"], rttMs: 20, ...extra });
 
-async function registerMock(mock = true, models = mock ? ["brain/mock"] : ["qwen/qwen2.5-7b-instruct"]) {
+/**
+ * Registers a node. Real (non-mock) nodes are marked benchmarked by default, because the router
+ * never routes customer work to unbenchmarked real hardware; pass `benchmarked = false` to test the
+ * benchmark path itself.
+ */
+async function registerMock(mock = true, models = mock ? ["brain/mock"] : ["qwen/qwen2.5-7b-instruct"], benchmarked = !mock) {
   const k = keypair();
   const body: RegisterBody = { protocol: 1, nodeId: k.nodeId, publicKey: k.pub, agentVersion: "t", hardware: hw(mock), capabilities: caps(models) };
-  const n = await registerNativeNode(body, "ip");
+  let n = await registerNativeNode(body, "ip");
+  if (benchmarked) {
+    n = (await updateNativeNode(n.nodeId, (x) => {
+      x.benchmark = { score: 30, computeClass: "CONSUMER", basis: "coordinator-timed", at: Date.now() };
+    }))!;
+    g.__brainNNodes = undefined;
+  }
   return { k, n };
 }
 
@@ -273,7 +284,7 @@ describe("listing", () => {
 describe("cold model load", () => {
   it("gives a node that has not loaded the model the cold-start window, and fails a pinned job instead of re-queuing it", async () => {
     // A real vLLM node on first start: supports the model, has nothing loaded yet.
-    const { n } = await registerMock(false);
+    const { n } = await registerMock(false, undefined, false);
     const t = Date.now();
     await heartbeatNativeNode(n.nodeId, tele({ loadedModels: [] }), undefined, undefined, t);
     g.__brainNNodes = undefined;
@@ -311,7 +322,7 @@ describe("cold model load", () => {
   });
 
   it("keeps the 20 s window for a node that already has the model loaded", async () => {
-    const { n } = await registerMock(false);
+    const { n } = await registerMock(false, undefined, false);
     const t = Date.now();
     await heartbeatNativeNode(n.nodeId, tele({ loadedModels: ["qwen/qwen2.5-7b-instruct"] }), undefined, undefined, t);
     g.__brainNNodes = undefined;
@@ -333,7 +344,7 @@ describe("benchmark on join", () => {
   });
 
   it("schedules one pinned, unpaid benchmark job per node and records the measured speed", async () => {
-    const { n } = await registerMock(false);
+    const { n } = await registerMock(false, undefined, false);
     const t = Date.now();
     const job = await scheduleBenchmark(n.nodeId, t);
     expect(job?.state).toBe("ASSIGNED");

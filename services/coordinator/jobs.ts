@@ -215,7 +215,7 @@ export async function matchJob(jobId: string, now = Date.now()): Promise<Inferen
     if (!j) throw new NodeError("unknown_job", 404);
     if (j.state !== "QUEUED") return j;
     transition(j, "MATCHING", now);
-    const r = await routeToNativeNode(j.model, { region: j.requirements.region, exclude: j.excludedNodes, only: j.pinnedNode, allowDegraded: Boolean(j.allowDegraded && j.pinnedNode) }, now);
+    const r = await routeToNativeNode(j.model, { region: j.requirements.region, exclude: j.excludedNodes, only: j.pinnedNode, allowDegraded: Boolean(j.allowDegraded && j.pinnedNode), allowUnmeasured: Boolean(j.pinnedNode) }, now);
     j.routing = { reason: r.reason, eligible: r.ranked.filter((x) => x.eligible).length, considered: r.ranked.length };
     if (!r.selected) {
       transition(j, "QUEUED", now, r.reason);
@@ -338,17 +338,21 @@ async function fail(j: InferenceJob, reason: string, note: string | undefined, n
   transition(j, "FAILED", now, note);
   await save(j);
   const nodeId = j.assignedNode;
+  const kind = probeKind(j);
   if (nodeId) {
     after.push(() =>
       updateNativeNode(nodeId, (n) => {
         n.activeJobIds = n.activeJobIds.filter((id) => id !== j.jobId);
         if (timedOut) n.measured.jobsTimedOut++;
         else n.measured.jobsFailed++;
-        n.measured.consecutiveFailures++;
+        // A failed benchmark is recorded (it lowers reliability) but does not degrade the node: it is
+        // the coordinator's warm-up probe, retried every five minutes, and a node that cannot pass it
+        // never receives customer work anyway ("not yet benchmarked"). DEGRADED comes from failing
+        // real work or canaries.
+        if (kind !== "benchmark") n.measured.consecutiveFailures++;
       }),
     );
   }
-  const kind = probeKind(j);
   if (kind === "verify") after.push(() => recordShadowResult(j.jobId, now));
   else if (kind === "canary") after.push(() => recordCanary(j.jobId, now));
   publish(j, now);

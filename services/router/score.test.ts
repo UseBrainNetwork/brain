@@ -10,7 +10,8 @@ const cand = (nodeId: string, extra: Partial<RouteCandidate> = {}): RouteCandida
   activeJobs: 0,
   maxConcurrency: 2,
   tokPerSec: null,
-  benchmarkScore: null,
+  benchmarkScore: 30,
+  mock: false,
   reputation: 70,
   rttMs: null,
   region: null,
@@ -21,6 +22,16 @@ const cand = (nodeId: string, extra: Partial<RouteCandidate> = {}): RouteCandida
 const W = { model: "qwen/qwen2.5-7b-instruct", minVramMb: 20_000 };
 
 describe("router scoring", () => {
+  it("never sends customer work to real hardware that has not been benchmarked; probes may", () => {
+    const fresh = cand("N-NEW", { benchmarkScore: null });
+    const r = scoreNodes([fresh], W);
+    expect(r.selected).toBeNull();
+    expect(r.ranked[0].rejections).toContain("not yet benchmarked");
+    expect(scoreNodes([fresh], { ...W, allowUnmeasured: true }).selected?.nodeId).toBe("N-NEW");
+    // Mock nodes (development) are exempt: they are refused by production coordinators anyway.
+    expect(scoreNodes([cand("N-MOCK", { benchmarkScore: null, mock: true, supportedModels: ["brain/mock"], loadedModels: ["brain/mock"] })], { model: "brain/mock", minVramMb: null }).selected?.nodeId).toBe("N-MOCK");
+  });
+
   it("is deterministic and tie-breaks by node id", () => {
     const a = scoreNodes([cand("N-B"), cand("N-A")], W);
     const b = scoreNodes([cand("N-A"), cand("N-B")], W);
@@ -64,7 +75,7 @@ describe("router scoring", () => {
   });
 
   it("scores unknowns as neutral and says so", () => {
-    const r = scoreNodes([cand("N-A")], W);
+    const r = scoreNodes([cand("N-A", { benchmarkScore: null })], { ...W, allowUnmeasured: true });
     expect(r.selected?.latency).toBe(0.5);
     expect(r.selected?.price).toBe(0.5);
     expect(r.selected?.notes).toEqual(expect.arrayContaining(["speed unmeasured", "rtt unmeasured", "no price ask"]));

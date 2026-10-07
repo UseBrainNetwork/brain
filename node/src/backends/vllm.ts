@@ -24,6 +24,7 @@ export class VllmBackend implements InferenceBackend {
   readonly kind = "vllm" as const;
   private loaded: string | null = null;
   private loading: Promise<boolean> | null = null;
+  private loadingModel: string | null = null;
   private supported: ModelSpec[];
 
   constructor(private opts: { gpus: GpuReport[]; models?: string[]; hfToken?: string; maxModelLen?: number }) {
@@ -38,21 +39,58 @@ export class VllmBackend implements InferenceBackend {
     return this.loaded ? [this.loaded] : [];
   }
 
+  /**
+   * Make `model` resident. Loading is independent of the job that asked for it: if the job is
+   * aborted (deadline, cancel) while weights are still downloading, the job fails but the load keeps
+   * going, so the next job finds the model ready instead of restarting a multi-gigabyte download.
+   * Only one load runs at a time; concurrent callers wait on it.
+   */
   async ensureLoaded(model: string, signal: AbortSignal): Promise<boolean> {
     if (this.loaded === model && (await this.healthy())) return false;
-    if (this.loading) await this.loading.catch(() => undefined);
-    if (this.loaded === model && (await this.healthy())) return false;
-    this.loading = this.launch(model, signal);
+    if (!this.loading || this.loadingModel !== model) {
+      if (this.loading) await this.loading.catch(() => undefined); // a different model: let it settle first
+      if (this.loaded === model && (await this.healthy())) return false;
+      this.loadingModel = model;
+      this.loading = this.launch(model).finally(() => {
+        this.loading = null;
+        this.loadingModel = null;
+      });
+    }
+    const loading = this.loading;
+    if (signal.aborted) throw new Error("load cancelled");
+    return await new Promise<boolean>((resolve, reject) => {
+      const onAbort = () => reject(new Error("load cancelled"));
+      signal.addEventListener("abort", onAbort, { once: true });
+      loading.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    });
+  }
+
+  /** Start loading the first supported model now so the first job (the coordinator's benchmark) finds it ready. */
+  prewarm(model = this.supported[0]?.id): void {
+    if (!model) return;
+    void this.ensureLoaded(model, new AbortController().signal).catch(() => undefined);
+  }
+
+  /** True when a container from a previous agent run is already serving `model` and healthy. */
+  private async adopt(model: string): Promise<boolean> {
+    if (!(await this.healthy())) return false;
     try {
-      return await this.loading;
-    } finally {
-      this.loading = null;
+      const r = await fetch(`${BASE}/v1/models`, { signal: AbortSignal.timeout(2_000) });
+      const j = (await r.json()) as { data?: { id: string }[] };
+      return Boolean(j.data?.some((m) => m.id === model));
+    } catch {
+      return false;
     }
   }
 
-  private async launch(model: string, signal: AbortSignal): Promise<boolean> {
+  private async launch(model: string): Promise<boolean> {
     const spec = modelSpec(model);
     if (!spec || spec.mock || !this.supported.some((m) => m.id === model)) throw new Error(`model ${model} is not allowlisted for this node`);
+    // Agent restarted but the container from last time is still up with this model: keep it.
+    if (await this.adopt(model)) {
+      this.loaded = model;
+      return false;
+    }
     await run("docker", ["rm", "-f", CONTAINER]).catch(() => undefined);
     this.loaded = null;
     const args = [
@@ -71,7 +109,6 @@ export class VllmBackend implements InferenceBackend {
     // Weights may need to download: allow up to 20 minutes, polling health.
     const until = Date.now() + 20 * 60_000;
     while (Date.now() < until) {
-      if (signal.aborted) throw new Error("load cancelled");
       if (await this.healthy()) {
         this.loaded = model;
         return true;

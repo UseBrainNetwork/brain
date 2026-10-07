@@ -54,14 +54,17 @@ const recentlyAttempted = (n: NativeNode, now: number) => n.lastBenchmarkAttempt
 export async function scheduleBenchmark(nodeId: string, now = Date.now()): Promise<InferenceJob | null> {
   try {
     const n = await getNativeNode(nodeId);
-    if (!n || n.state !== "ONLINE" || !needsBenchmark(n, now) || hasPendingBenchmark(n) || recentlyAttempted(n, now)) return null;
-    const model = n.reported.capabilities.supportedModels[0];
+    // ONLINE or DEGRADED: a DEGRADED node must be able to earn its way back, and until it is benchmarked
+    // it receives nothing else. (Not BUSY, DRAINING or OFFLINE.)
+    if (!n || (n.state !== "ONLINE" && n.state !== "DEGRADED") || !needsBenchmark(n, now) || hasPendingBenchmark(n) || recentlyAttempted(n, now)) return null;
+    // Prefer a model the node says it already has loaded; otherwise the first it supports (cold load).
+    const model = n.reported.capabilities.supportedModels.find((m) => n.reported.telemetry?.loadedModels.includes(m)) ?? n.reported.capabilities.supportedModels[0];
     if (!model) return null;
     await updateNativeNode(nodeId, (x) => {
       x.lastBenchmarkAttemptAt = now;
     });
     const job = await createInferenceJob(
-      { requesterId: BENCHMARK_REQUESTER, model, messages: [{ role: "user", content: PROMPT }], maxTokens: MAX_TOKENS, temperature: 0, pinnedNode: nodeId, ttlMs: JOB_TTL_MS, idPrefix: "bj" },
+      { requesterId: BENCHMARK_REQUESTER, model, messages: [{ role: "user", content: PROMPT }], maxTokens: MAX_TOKENS, temperature: 0, pinnedNode: nodeId, ttlMs: JOB_TTL_MS, idPrefix: "bj", allowDegraded: true },
       now,
     );
     return await matchJob(job.jobId, now);

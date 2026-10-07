@@ -21,8 +21,10 @@ export interface RouteCandidate {
   maxConcurrency: number;
   /** Coordinator-measured tokens/s median, if any. */
   tokPerSec: number | null;
-  /** Coordinator benchmark, if measured. */
+  /** Coordinator benchmark, if measured. null = the node has not yet produced tokens for the coordinator. */
   benchmarkScore: number | null;
+  /** Mock backend (development only; production coordinators refuse them). */
+  mock: boolean;
   /** 0–100 Brain Reliability Score. */
   reputation: number;
   rttMs: number | null;
@@ -44,6 +46,12 @@ export interface Workload {
   requireKnownVram?: boolean;
   /** Coordinator probes (canaries) may target a DEGRADED node so it can prove recovery. Never set for customer work. */
   allowDegraded?: boolean;
+  /**
+   * Coordinator probes (benchmarks) may target a node that has not been benchmarked yet; that is how
+   * it gets benchmarked. Customer work never goes to real hardware that has not produced a single
+   * coordinator-timed token.
+   */
+  allowUnmeasured?: boolean;
 }
 
 export interface RoutingWeights {
@@ -155,6 +163,7 @@ function rejections(c: RouteCandidate, w: Workload): string[] {
   else if (c.state === "DEGRADED" && !w.allowDegraded) r.push("degraded");
   else if (c.state === "BUSY" || c.activeJobs >= c.maxConcurrency) r.push("no free slot");
   if (!c.supportedModels.includes(w.model)) r.push(`does not serve ${w.model}`);
+  if (c.benchmarkScore == null && !c.mock && !w.allowUnmeasured) r.push("not yet benchmarked");
   if (w.minVramMb != null && w.minVramMb > 0) {
     if (c.vramTotalMb == null) {
       if (w.requireKnownVram) r.push("VRAM unknown");

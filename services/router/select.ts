@@ -22,6 +22,7 @@ export function candidateOf(n: NativeNode, excluded: ReadonlySet<string> = new S
     maxConcurrency: n.reported.capabilities.maxConcurrency,
     tokPerSec: median(n.measured.tokPerSec),
     benchmarkScore: n.benchmark.score,
+    mock: n.reported.hardware.mock,
     reputation: n.reputation,
     rttMs: n.reported.telemetry?.rttMs ?? null,
     region: n.region,

@@ -288,6 +288,10 @@ export async function heartbeatNativeNode(nodeId: string, telemetry: Telemetry, 
     n.reported.capabilities.loadedModels = n.reported.telemetry.loadedModels.filter((m) => n.reported.capabilities.supportedModels.includes(m));
   }
   if (draining != null) n.draining = draining;
+  // A node that has never been benchmarked has never been routed customer work ("not yet benchmarked")
+  // and no canaries (those follow the benchmark), so any failure streak it carries came from benchmark
+  // probes, which no longer count. Clear it; the counter restarts from real work.
+  if (n.benchmark.basis === "unmeasured" && n.measured.jobsCompleted === 0 && n.measured.consecutiveFailures > 0 && !(n.measured.canaryFailStreak ?? 0)) n.measured.consecutiveFailures = 0;
   const prev = n.state;
   n.state = deriveState(n);
   await save(n);

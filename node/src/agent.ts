@@ -116,6 +116,12 @@ export class Agent {
     };
     this.heartbeatTimer = setInterval(() => void beat(), DEFAULTS.heartbeatMs);
     await beat();
+    // Start loading the first model now, not when the first job arrives: the coordinator's benchmark
+    // comes within seconds of registering, and a cold vLLM start (image pull, weights) takes minutes.
+    if (this.backend.prewarm && this.caps.supportedModels[0]) {
+      this.log(`loading ${this.caps.supportedModels[0]} in the background`);
+      this.backend.prewarm(this.caps.supportedModels[0]);
+    }
     await this.workLoop();
   }
 
