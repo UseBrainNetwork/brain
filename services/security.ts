@@ -64,7 +64,9 @@ export function json(data: unknown, init?: number | ResponseInit) {
  * seconds cost one database read per edge region, not N. Browsers still revalidate (max-age=0).
  */
 export function sharedJson(data: unknown, seconds = 3) {
-  return json(data, { headers: { "Cache-Control": `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=${seconds * 5}` } });
+  // stale-if-error: during a database outage the CDN keeps serving the last good body (up to an
+  // hour) instead of the origin's 503. The body itself is unchanged, so nothing is fabricated.
+  return json(data, { headers: { "Cache-Control": `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=${seconds * 5}, stale-if-error=3600` } });
 }
 
 export function tooMany() {

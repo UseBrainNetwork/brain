@@ -114,6 +114,8 @@ Backends: `MockBackend` (DEMO) serves only `brain/mock` and says so in every tok
 
 `services/store.ts`. `MemoryStore` for local development, `PgStore` with advisory locks for production. Node and job records are generic documents (`nnode`, `njob`) with indexed keys so hot paths (registry list, work queue) are single queries with short in-process caches.
 
+**Database outage behaviour** (`services/failsoft.ts`). `PgStore` has a per-instance circuit breaker: two consecutive connection failures open it for 15 s, during which every query fails in microseconds with `StoreUnavailableError` (routes answer `503 database_unavailable` + `Retry-After`) instead of each waiting an 8 s connect timeout; one probe per window closes it. Public read routes (`/api/stats`, `/api/network/real`, `/api/coordinator/nodes`, `/jobs`) keep their last successfully built body and return it with `stale: true` and `asOf` while the database is unreachable; the UI shows "LIVE DATA DELAYED". No previous body means a fast 503, never an invented one. `sharedJson` adds `stale-if-error=3600` so the CDN keeps serving the last good body too. Browser nodes keep heartbeating through a 503 and are not dropped.
+
 ### Frontend — LIVE
 
 Unchanged visual identity. New surfaces read only coordinator records:

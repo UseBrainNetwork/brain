@@ -15,17 +15,28 @@ interface Stats {
   workUnitsVerified: number;
   verifiedComputeUnits: number;
   successRate: number | null;
+  /** Server could not reach its database and returned its last measured values. */
+  stale?: boolean;
+  at?: number;
 }
 
 export function RealMetricsStrip({ tone = "light", className }: { tone?: "light" | "dark"; className?: string }) {
   const [s, setS] = useState<Stats | null>(null);
+  const [delayed, setDelayed] = useState(false);
   useEffect(() => {
     let alive = true;
     const load = () =>
       fetch("/api/stats", { cache: "no-store" })
-        .then((r) => r.json())
-        .then((j) => alive && setS(j))
-        .catch(() => {});
+        .then(async (r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          return (await r.json()) as Stats;
+        })
+        .then((j) => {
+          if (!alive) return;
+          setS(j);
+          setDelayed(Boolean(j.stale));
+        })
+        .catch(() => alive && setDelayed(true)); // keep the last good numbers, say they are delayed
     load();
     const t = setInterval(load, 15_000);
     return () => {
@@ -50,9 +61,15 @@ export function RealMetricsStrip({ tone = "light", className }: { tone?: "light"
         </div>
       ))}
       <div className={cx("col-span-2 flex items-center justify-between px-4 py-3.5 font-mono text-[10.5px] sm:col-span-3 lg:col-span-5", dark ? "bg-ink-2 text-chalk/45" : "bg-paper text-fog")}>
-        <span className="flex items-center gap-2">
-          <span className="inline-block size-[6px] bg-ok" /> REAL · this server&apos;s records · refreshes every 15s
-        </span>
+        {delayed ? (
+          <span className="flex items-center gap-2 text-warn">
+            <span className="inline-block size-[6px] bg-warn" /> LIVE DATA DELAYED · database unreachable{s?.at ? ` · last measured ${new Date(s.at).toLocaleTimeString()}` : ""} · retrying
+          </span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <span className="inline-block size-[6px] bg-ok" /> REAL · this server&apos;s records · refreshes every 15s
+          </span>
+        )}
         <Link href="/network" className={cx("hover:underline", dark ? "text-chalk/70" : "text-ink/70")}>
           Operations →
         </Link>

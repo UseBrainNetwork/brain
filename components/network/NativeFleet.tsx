@@ -16,19 +16,34 @@ import { RequestFlow } from "@/components/network/RequestFlow";
  */
 export const JOB_STATES: JobState[] = ["QUEUED", "MATCHING", "ASSIGNED", "STARTING", "RUNNING", "VERIFYING", "COMPLETED"];
 
+const okJson = async <T,>(r: Response): Promise<T> => {
+  if (!r.ok) throw new Error(String(r.status));
+  return (await r.json()) as T;
+};
+
+/**
+ * Polls the public coordinator views. A failed poll (503 while the database is unreachable, network
+ * error) keeps the last good values and sets `delayed`; a `stale: true` body (server returned its
+ * last known good) does the same. The UI says so rather than showing an empty fleet.
+ */
 export function useFleet(intervalMs = 5_000) {
   const [nodes, setNodes] = useState<PublicNativeNode[] | null>(null);
   const [jobs, setJobs] = useState<PublicInferenceJob[] | null>(null);
+  const [delayed, setDelayed] = useState(false);
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const [n, j] = await Promise.all([fetch("/api/coordinator/nodes").then((r) => r.json()), fetch("/api/coordinator/jobs?limit=12").then((r) => r.json())]);
+        const [n, j] = await Promise.all([
+          fetch("/api/coordinator/nodes").then((r) => okJson<{ nodes: PublicNativeNode[]; stale?: boolean }>(r)),
+          fetch("/api/coordinator/jobs?limit=12").then((r) => okJson<{ jobs: PublicInferenceJob[]; stale?: boolean }>(r)),
+        ]);
         if (!alive) return;
         setNodes(n.nodes ?? []);
         setJobs(j.jobs ?? []);
+        setDelayed(Boolean(n.stale || j.stale));
       } catch {
-        /* keep last good values */
+        if (alive) setDelayed(true); // keep last good values
       }
     };
     void load();
@@ -38,7 +53,7 @@ export function useFleet(intervalMs = 5_000) {
       clearInterval(t);
     };
   }, [intervalMs]);
-  return { nodes, jobs };
+  return { nodes, jobs, delayed };
 }
 
 export const stateTone = (s: string) => (s === "ONLINE" || s === "COMPLETED" ? "text-ok" : s === "BUSY" || s === "RUNNING" || s === "STARTING" ? "text-signal" : s === "DEGRADED" || s === "DRAINING" || s === "QUEUED" ? "text-warn" : s === "FAILED" || s === "CANCELLED" || s === "OFFLINE" ? "text-chalk/40" : "text-chalk");
@@ -81,7 +96,7 @@ export function JobPipeline({ job }: { job: PublicInferenceJob }) {
 }
 
 export function NativeFleet() {
-  const { nodes, jobs } = useFleet();
+  const { nodes, jobs, delayed } = useFleet();
   const [open, setOpen] = useState<string | null>(null);
   const stats = useMemo(() => {
     if (!nodes) return null;
@@ -104,12 +119,12 @@ export function NativeFleet() {
     };
   }, [nodes, jobs]);
 
-  if (!nodes || !stats) return <Panel title="Brain Nodes">{NO_DATA}</Panel>;
+  if (!nodes || !stats) return <Panel title="Brain Nodes">{delayed ? <span className="text-warn">LIVE DATA DELAYED · database unreachable, retrying</span> : NO_DATA}</Panel>;
 
   return (
     <div className="space-y-6">
       <RequestFlow nodesOnline={stats.online} />
-      <Panel title="Brain Nodes · native agents" right={<span>{stats.mock ? `${stats.mock} mock` : "coordinator records"}</span>}>
+      <Panel title="Brain Nodes · native agents" right={delayed ? <span className="text-warn">LIVE DATA DELAYED · showing last snapshot</span> : <span>{stats.mock ? `${stats.mock} mock` : "coordinator records"}</span>}>
         <div className="grid grid-cols-2 gap-x-6 gap-y-6 md:grid-cols-5">
           <Metric k="Nodes online" v={fmtInt(stats.online)} sub={`${nodes.length} registered`} tone={stats.online ? "ok" : "muted"} />
           <Metric k="GPUs online" v={fmtInt(stats.gpus)} sub="reported by nodes" />

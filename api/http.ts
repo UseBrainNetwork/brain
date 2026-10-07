@@ -1,5 +1,6 @@
 import "server-only";
 import { networkConfig } from "@/lib/config";
+import { StoreUnavailableError } from "@/services/failsoft";
 import { NodeError } from "@/services/nodes";
 import { ipHash, json, rateLimit, tooMany } from "@/services/security";
 import { GatewayError } from "./gateway";
@@ -17,6 +18,10 @@ export function nodeRoute(handler: Handler, limit: number = networkConfig.rateLi
       if (e instanceof NodeError) return json({ error: e.code }, e.status);
       if (e instanceof GatewayError) {
         return json({ error: { code: e.code, message: e.message } }, e.status);
+      }
+      // Database unreachable: say so, say when to retry, and don't count it as a server bug.
+      if (e instanceof StoreUnavailableError) {
+        return json({ error: e.code, retryAfterSec: e.retryAfterSec }, { status: 503, headers: { "Retry-After": String(e.retryAfterSec) } });
       }
       console.error(e);
       return json({ error: "internal_error" }, 500);

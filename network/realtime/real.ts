@@ -76,11 +76,15 @@ class RealStore {
   async refresh(withJobs = false) {
     try {
       const r = await fetch("/api/network/real", { cache: "no-store" });
-      if (!r.ok) return;
-      const { nodes, summary } = (await r.json()) as { nodes: ComputeNode[]; summary: RealSummary };
+      if (!r.ok) {
+        // 503 while the database is unreachable: keep what we have, show as not live.
+        if (this.state.connected) this.set({ connected: false });
+        return;
+      }
+      const { nodes, summary, stale } = (await r.json()) as { nodes: ComputeNode[]; summary: RealSummary; stale?: boolean };
       const map: Record<string, ComputeNode> = {};
       for (const n of nodes) map[n.id] = n;
-      this.set({ nodes: map, summary, connected: true });
+      this.set({ nodes: map, summary, connected: !stale });
       if (withJobs) {
         const j = await fetch("/api/jobs?limit=5", { cache: "no-store" });
         if (j.ok) this.set({ jobs: ((await j.json()) as { jobs: DistributedJob[] }).jobs });

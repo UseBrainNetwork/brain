@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { Pool } from "pg";
 import type { DistributedJob, RewardAllocation, RewardClaim, RewardEpoch } from "@/domain/types";
+import { Breaker } from "./failsoft";
 import { KeyedMutex, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode, type WorkAggregate } from "./store";
 
 /** Postgres implementation of NetworkStore. Schema: db/schema.sql. */
@@ -89,10 +90,24 @@ export class PgStore implements NetworkStore {
     }
   }
 
-  /** Pool query gated on the schema being applied. */
-  private async q<T extends Record<string, unknown> = Record<string, unknown>>(text: string, params?: unknown[]) {
-    await this.ready;
-    return this.pool.query<T>(text, params);
+  /**
+   * One breaker per instance: when the database stops accepting connections, two failures open it
+   * and every query for the next 15 s fails in microseconds with StoreUnavailableError (503) instead
+   * of each waiting its own 8 s connect timeout. One probe per window closes it again.
+   */
+  private breaker = new Breaker({ threshold: 2, openMs: 15_000 });
+
+  /** Pool query gated on the schema being applied and on the breaker. */
+  private q<T extends Record<string, unknown> = Record<string, unknown>>(text: string, params?: unknown[]) {
+    return this.breaker.run(async () => {
+      await this.ready;
+      return this.pool.query<T>(text, params);
+    });
+  }
+
+  /** Whether this instance is currently refusing database work. For status views only. */
+  unavailable() {
+    return this.breaker.open;
   }
 
   private mutex = new KeyedMutex();
@@ -107,7 +122,7 @@ export class PgStore implements NetworkStore {
       // behind transaction-mode poolers (Supabase/pgbouncer): lock and unlock can land on different
       // backends and the lock leaks forever. A transaction is pinned to one backend and the lock
       // is released at COMMIT no matter what.
-      const c = await this.lockPool.connect();
+      const c = await this.breaker.run(() => this.lockPool.connect());
       let locked = false;
       try {
         await c.query("BEGIN");
@@ -301,7 +316,7 @@ export class PgStore implements NetworkStore {
   }
   async saveSettlement(epoch: RewardEpoch, allocations: RewardAllocation[]) {
     await this.ready;
-    const c = await this.pool.connect();
+    const c = await this.breaker.run(() => this.pool.connect());
     try {
       await c.query("BEGIN");
       const ins = await c.query(
