@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { Pool, type QueryConfig } from "pg";
 import type { DistributedJob, RewardAllocation, RewardClaim, RewardEpoch } from "@/domain/types";
-import { Breaker } from "./failsoft";
+import { Breaker, StoreUnavailableError } from "./failsoft";
 import { KeyedMutex, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode, type WorkAggregate, type WorkRecord } from "./store";
 
 /** Postgres implementation of NetworkStore. Schema: db/schema.sql. */
@@ -342,15 +342,31 @@ export class PgStore implements NetworkStore {
     const now = Date.now();
     const closed = to <= now - 3_600_000;
     const slotMs = closed ? 86_400_000 : 60_000;
-    const key = `agg:${from}:${closed ? to : "live"}:${bucketMs}:${Math.floor(now / slotMs)}`;
+    const windowKey = `agg:${from}:${closed ? to : "live"}:${bucketMs}`;
+    const key = `${windowKey}:${Math.floor(now / slotMs)}`;
     const memo = this.aggMemo.get(key);
     if (memo) return memo;
     const p = (async () => {
       const hit = await this.getDoc<{ rows: WorkAggregate[] }>("meta", key).catch(() => null);
       if (hit?.rows) return hit.rows;
-      const rows = await this.aggregateWorkUncached(from, closed ? to : now, bucketMs);
-      await this.putDoc("meta", key, { rows, from, to: closed ? to : now, bucketMs }, { at: now }).catch(() => undefined);
-      return rows;
+      // Single flight across instances. Every serverless instance misses this slot at the same moment,
+      // and a dozen copies of a 20 s scan over brain_jobs is what starves settlement. One instance holds
+      // an advisory lock while it computes; the others serve the newest finished aggregate for the same
+      // window (an estimate a minute old beats a stampede) or wait for the holder to publish.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const rows = await this.aggregateWorkUncached(from, closed ? to : now, bucketMs, windowKey);
+        if (rows) {
+          await this.putDoc("meta", key, { rows, from, to: closed ? to : now, bucketMs }, { at: now, key: windowKey }).catch(() => undefined);
+          return rows;
+        }
+        if (!closed) {
+          const stale = await this.listDocs<{ rows: WorkAggregate[] }>("meta", { key: windowKey, limit: 1 }).catch(() => []);
+          if (stale[0]?.rows) return stale[0].rows;
+        }
+        const published = await this.waitForDoc<{ rows: WorkAggregate[] }>("meta", key, 20_000);
+        if (published?.rows) return published.rows;
+      }
+      throw new StoreUnavailableError(15, "work aggregate busy");
     })();
     this.aggMemo.set(key, p);
     p.catch(() => this.aggMemo.delete(key));
@@ -361,12 +377,30 @@ export class PgStore implements NetworkStore {
   }
   private aggMemo = new Map<string, Promise<WorkAggregate[]>>();
 
-  private async aggregateWorkUncached(from: number, to: number, bucketMs: number) {
+  /** Polls for a document another instance is about to publish. Resolves null when the wait runs out. */
+  private async waitForDoc<T>(kind: DocKind, id: string, maxMs: number): Promise<T | null> {
+    const deadline = Date.now() + maxMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 2_000));
+      const doc = await this.getDoc<T>(kind, id).catch(() => null);
+      if (doc) return doc;
+    }
+    return null;
+  }
+
+  /** Returns null (without querying) when another instance holds the lock for this window. */
+  private async aggregateWorkUncached(from: number, to: number, bucketMs: number, lockKey: string): Promise<WorkAggregate[] | null> {
     await this.ready;
     const c = await this.breaker.run(() => this.pool.connect());
     let failed: Error | undefined;
     try {
       await c.query("BEGIN");
+      // Transaction-scoped so it works behind the transaction pooler and can never leak past COMMIT/ROLLBACK.
+      const lock = await c.query<{ ok: boolean }>("SELECT pg_try_advisory_xact_lock(hashtext($1)) AS ok", [lockKey]);
+      if (!lock.rows[0]?.ok) {
+        await c.query("ROLLBACK");
+        return null;
+      }
       // SET LOCAL survives the transaction pooler (the whole transaction is pinned to one backend).
       await c.query("SET LOCAL statement_timeout = '30s'");
       await c.query("SET LOCAL work_mem = '64MB'");
