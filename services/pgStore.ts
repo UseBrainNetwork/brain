@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { Pool } from "pg";
+import { Pool, type QueryConfig } from "pg";
 import type { DistributedJob, RewardAllocation, RewardClaim, RewardEpoch } from "@/domain/types";
 import { Breaker } from "./failsoft";
 import { KeyedMutex, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode, type WorkAggregate, type WorkRecord } from "./store";
@@ -141,6 +141,7 @@ export class PgStore implements NetworkStore {
       // is released at COMMIT no matter what.
       const c = await this.breaker.run(() => this.lockPool.connect());
       let locked = false;
+      let clean = false;
       try {
         await c.query("BEGIN");
         await c.query("SET LOCAL lock_timeout = '3s'");
@@ -149,12 +150,18 @@ export class PgStore implements NetworkStore {
           locked = true;
         } catch (e) {
           console.warn(`[pgStore] lock ${key} not acquired (${(e as Error).message}); continuing with in-process lock only`);
-          await c.query("ROLLBACK").catch(() => undefined);
+          clean = await c.query("ROLLBACK").then(() => true, () => false);
         }
         return await fn();
       } finally {
-        if (locked) await c.query("COMMIT").catch(() => c.query("ROLLBACK").catch(() => undefined));
-        c.release();
+        if (locked) {
+          clean = await c
+            .query("COMMIT")
+            .then(() => true)
+            .catch(() => c.query("ROLLBACK").then(() => true, () => false));
+        }
+        // A client whose transaction was not demonstrably closed is destroyed rather than pooled.
+        c.release(clean ? undefined : new Error("transaction state unknown"));
       }
     });
   }
@@ -357,26 +364,38 @@ export class PgStore implements NetworkStore {
   private async aggregateWorkUncached(from: number, to: number, bucketMs: number) {
     await this.ready;
     const c = await this.breaker.run(() => this.pool.connect());
+    let failed: Error | undefined;
     try {
       await c.query("BEGIN");
       // SET LOCAL survives the transaction pooler (the whole transaction is pinned to one backend).
       await c.query("SET LOCAL statement_timeout = '30s'");
       await c.query("SET LOCAL work_mem = '64MB'");
-      const r = await c.query<{ node_id: string; status: string; verified: boolean | null; fail_reason: string | null; jobs: number; units: string; buckets: number[] }>(
-        `/* aggregateWork */ SELECT assigned_to AS node_id, status, (data->>'verified')::boolean AS verified, data->>'failReason' AS fail_reason, count(*)::int AS jobs,
+      // The pool's client-side query_timeout (15 s) must not cut this one short: pg would reject the
+      // promise while the server kept running, and the connection would go back to the pool still
+      // inside the transaction. Give the client slightly longer than the server.
+      type Row = { node_id: string; status: string; verified: boolean | null; fail_reason: string | null; jobs: number; units: string; buckets: number[] };
+      // pg honours a per-query `query_timeout` (lib/client.js) that @types/pg does not declare.
+      const cfg: QueryConfig & { query_timeout: number } = {
+        text: `/* aggregateWork */ SELECT assigned_to AS node_id, status, (data->>'verified')::boolean AS verified, data->>'failReason' AS fail_reason, count(*)::int AS jobs,
                 coalesce(sum((data->>'computeUnits')::numeric), 0)::text AS units,
                 array_agg(DISTINCT floor(submitted_at / $3)::bigint) AS buckets
            FROM brain_jobs WHERE submitted_at >= $1 AND submitted_at < $2
           GROUP BY 1, 2, 3, 4`,
-        [from, to, bucketMs],
-      );
+        values: [from, to, bucketMs],
+        query_timeout: 32_000,
+      };
+      const r = await c.query<Row>(cfg);
       await c.query("COMMIT");
       return r.rows.map<WorkAggregate>((x) => ({ nodeId: x.node_id, status: x.status, verified: Boolean(x.verified), failReason: x.fail_reason ?? null, jobs: Number(x.jobs), computeUnits: Number(x.units), buckets: x.buckets.map(Number) }));
     } catch (e) {
+      failed = e instanceof Error ? e : new Error(String(e));
       await c.query("ROLLBACK").catch(() => undefined);
       throw e;
     } finally {
-      c.release();
+      // After any failure the connection is destroyed, not returned: a client whose ROLLBACK did not
+      // demonstrably succeed may still be mid-transaction, and one such client in the pool makes every
+      // later query on it fail with "current transaction is aborted".
+      c.release(failed);
     }
   }
   async listOpenJobs(limit: number, since: number) {
@@ -395,6 +414,7 @@ export class PgStore implements NetworkStore {
   async saveSettlement(epoch: RewardEpoch, allocations: RewardAllocation[]) {
     await this.ready;
     const c = await this.breaker.run(() => this.pool.connect());
+    let destroy: Error | undefined;
     try {
       await c.query("BEGIN");
       const ins = await c.query(
@@ -416,10 +436,11 @@ export class PgStore implements NetworkStore {
       await c.query("COMMIT");
       return true;
     } catch (e) {
-      await c.query("ROLLBACK");
+      // Destroy rather than pool the client if its transaction cannot be shown closed (see aggregateWorkUncached).
+      destroy = await c.query("ROLLBACK").then(() => undefined, (re: unknown) => (re instanceof Error ? re : new Error(String(re))));
       throw e;
     } finally {
-      c.release();
+      c.release(destroy);
     }
   }
   async listEpochs(limit: number) {
