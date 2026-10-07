@@ -39,8 +39,25 @@ export function isConnectivityError(e: unknown): boolean {
   if (/^(ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|EPIPE)$/.test(code)) return true;
   // SQLSTATE class 08 = connection exception; 57P01..03 = admin shutdown / crash / cannot connect now; 53300 = too many connections.
   if (/^08|^57P0[123]$|^53300$/.test(code)) return true;
+  if (isPoolerRejection(e)) return true;
   const msg = String(err.message ?? "");
   return /timeout exceeded when trying to connect|Connection terminated|terminating connection|the database system is (starting up|shutting down)|server closed the connection|Client has encountered a connection error/i.test(msg);
+}
+
+/**
+ * The connection pooler (Supavisor) refused a fresh connection for a reason that is its own, not ours:
+ * its client cap, or a tenant pool whose cached database credentials went bad ("Authentication
+ * credentials are invalid. Please reconnect with fresh credentials to restore pool functionality",
+ * SQLSTATE 28P01 with that exact wording). Both clear on their own and a new connection usually lands
+ * on a healthy pooler node, so callers retry once before counting it as an outage. A genuinely wrong
+ * password is 28P01 without the pooler's sentence and is not matched here.
+ */
+export function isPoolerRejection(e: unknown): boolean {
+  const err = e as { code?: string; message?: string } | null;
+  if (!err) return false;
+  const msg = String(err.message ?? "");
+  if (/max client connections reached|EMAXCONN/i.test(msg)) return true;
+  return String(err.code ?? "") === "28P01" && /restore pool functionality|reconnect with fresh credentials/i.test(msg);
 }
 
 export interface BreakerOptions {

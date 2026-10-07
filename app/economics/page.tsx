@@ -10,9 +10,16 @@ import { listEvents, snapshot } from "@/services/accounting";
 import { realSummary } from "@/services/distributed";
 import { listEpochsV2 } from "@/services/epochs";
 import { listReceipts } from "@/services/receipts";
+import { isStoreUnavailable } from "@/services/failsoft";
 import { adapterStatuses, syncedTreasury } from "@/services/treasury";
 
 const fmtSol = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+
+async function load() {
+  const receipts = await listReceipts(500);
+  const [snap, events, treasury, epochs, network] = await Promise.all([snapshot("REAL", 0, undefined, receipts), listEvents("REAL", 30), syncedTreasury(), listEpochsV2(10), realSummary()]);
+  return { receipts, snap, events, treasury, epochs, network };
+}
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Live economics", description: "Where the money comes from and where it goes, from real accounting events only." };
@@ -30,8 +37,27 @@ function Cell({ c, currency = "USD" }: { c: SumCell; currency?: "USD" | "SOL" })
 }
 
 export default async function EconomicsPage() {
-  const receipts = await listReceipts(500);
-  const [snap, events, treasury, epochs, network] = await Promise.all([snapshot("REAL", 0, undefined, receipts), listEvents("REAL", 30), syncedTreasury(), listEpochsV2(10), realSummary()]);
+  let data: Awaited<ReturnType<typeof load>>;
+  try {
+    data = await load();
+  } catch (e) {
+    if (!isStoreUnavailable(e)) throw e;
+    // Database unreachable: say so instead of crashing the page. Nothing is shown that was not read.
+    return (
+      <Shell>
+        <PageHead eyebrow={<>Live economics <SourceBadge source="REAL" /></>} title="Where the money goes.">
+          <p className="max-w-[520px] text-[15px] leading-relaxed text-chalk/60">
+            The database is not answering right now, so nothing on this page can be read. Wallet balances are still on chain; retry in {e.retryAfterSec} seconds.
+          </p>
+        </PageHead>
+        <div className="mt-6 grid gap-5 lg:grid-cols-2">
+          <TokenCard />
+          <ProtocolWalletCard />
+        </div>
+      </Shell>
+    );
+  }
+  const { receipts, snap, events, treasury, epochs, network } = data;
   const adapters = adapterStatuses();
   const priceCU = computeUnitListPriceUsd();
   const priceTok = tokenListPricePer1MUsd();

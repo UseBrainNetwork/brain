@@ -3,13 +3,30 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { Pool, type QueryConfig } from "pg";
 import type { DistributedJob, RewardAllocation, RewardClaim, RewardEpoch } from "@/domain/types";
-import { Breaker, StoreUnavailableError } from "./failsoft";
+import { Breaker, isPoolerRejection, StoreUnavailableError } from "./failsoft";
 import { KeyedMutex, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode, type WorkAggregate, type WorkRecord } from "./store";
 
 /** Postgres implementation of NetworkStore. Schema: db/schema.sql. */
 /** Content hash of schema.sql: the DDL re-runs only when the file changes. */
 function schemaVersion(sql: string) {
   return createHash("sha256").update(sql).digest("hex").slice(0, 16);
+}
+
+/**
+ * One retry, after a short pause, when the pooler itself refused the connection (client cap, or a
+ * tenant pool with stale credentials). pg opens a fresh socket for the retry, which usually reaches a
+ * healthy pooler node. Anything else propagates untouched.
+ */
+async function retryPoolerRejection<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i >= attempts || !isPoolerRejection(e)) throw e;
+      console.warn("[pgStore] pooler rejected connection, retrying:", (e as Error).message.slice(0, 80));
+      await new Promise((r) => setTimeout(r, 250 * i));
+    }
+  }
 }
 
 export class PgStore implements NetworkStore {
@@ -118,7 +135,7 @@ export class PgStore implements NetworkStore {
   private q<T extends Record<string, unknown> = Record<string, unknown>>(text: string, params?: unknown[]) {
     return this.breaker.run(async () => {
       await this.ready;
-      return this.pool.query<T>(text, params);
+      return retryPoolerRejection(() => this.pool.query<T>(text, params));
     });
   }
 
@@ -139,7 +156,7 @@ export class PgStore implements NetworkStore {
       // behind transaction-mode poolers (Supabase/pgbouncer): lock and unlock can land on different
       // backends and the lock leaks forever. A transaction is pinned to one backend and the lock
       // is released at COMMIT no matter what.
-      const c = await this.breaker.run(() => this.lockPool.connect());
+      const c = await this.breaker.run(() => retryPoolerRejection(() => this.lockPool.connect()));
       let locked = false;
       let clean = false;
       try {
@@ -393,7 +410,7 @@ export class PgStore implements NetworkStore {
   /** Returns null (without querying) when another instance holds the lock for this window. */
   private async aggregateWorkUncached(from: number, to: number, bucketMs: number, lockKey: string, closed: boolean): Promise<WorkAggregate[] | null> {
     await this.ready;
-    const c = await this.breaker.run(() => this.pool.connect());
+    const c = await this.breaker.run(() => retryPoolerRejection(() => this.pool.connect()));
     let failed: Error | undefined;
     try {
       await c.query("BEGIN");
@@ -452,7 +469,7 @@ export class PgStore implements NetworkStore {
   }
   async saveSettlement(epoch: RewardEpoch, allocations: RewardAllocation[]) {
     await this.ready;
-    const c = await this.breaker.run(() => this.pool.connect());
+    const c = await this.breaker.run(() => retryPoolerRejection(() => this.pool.connect()));
     let destroy: Error | undefined;
     try {
       await c.query("BEGIN");
