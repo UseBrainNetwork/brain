@@ -186,8 +186,14 @@ export const DEFAULTS = {
   /** Silent this long → OFFLINE. Three missed heartbeats. */
   offlineAfterMs: 45_000,
   workPollMs: 20_000,
-  /** ASSIGNED → node must report started within this, or the job is re-matched. */
+  /** ASSIGNED → node must report started within this, or the job is re-matched. Applies when the node already has the model loaded. */
   startWithinMs: 20_000,
+  /**
+   * When the node does not have the model loaded (its telemetry does not list it) or has already
+   * acknowledged the job (STARTING), it is loading weights: a cold vLLM start takes minutes, not
+   * seconds. Bounded by the job deadline.
+   */
+  coldStartWithinMs: 240_000,
   /** No progress for this long while RUNNING → FAILED timeout. */
   stallAfterMs: 60_000,
   flushMs: 200,

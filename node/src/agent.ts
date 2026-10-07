@@ -146,8 +146,11 @@ export class Agent {
     const report = <T = unknown,>(suffix: string, body: unknown) => this.transport.call<T>(`/api/coordinator/jobs/${encodeURIComponent(job.jobId)}/${suffix}`, body);
     this.log(`job ${job.jobId} ${job.model} · ${job.messages.length} messages · max ${job.maxTokens} tokens`);
     try {
+      // Acknowledge before loading weights. A cold vLLM start can take minutes; the coordinator gives
+      // an unacknowledged job 20 s and a STARTING one the cold-start window.
+      await report("started", { backend: this.backend.kind, loaded: false });
       const loaded = await this.backend.ensureLoaded(job.model, ctl.signal);
-      await report("started", { backend: this.backend.kind, loaded });
+      if (loaded) this.log(`job ${job.jobId} loaded ${job.model} on demand (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 
       // Progress flushing: coalesce deltas, send in order, never overlap sends.
       let seq = 0;

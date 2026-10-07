@@ -270,6 +270,58 @@ describe("listing", () => {
   });
 });
 
+describe("cold model load", () => {
+  it("gives a node that has not loaded the model the cold-start window, and fails a pinned job instead of re-queuing it", async () => {
+    // A real vLLM node on first start: supports the model, has nothing loaded yet.
+    const { n } = await registerMock(false);
+    const t = Date.now();
+    await heartbeatNativeNode(n.nodeId, tele({ loadedModels: [] }), undefined, undefined, t);
+    g.__brainNNodes = undefined;
+    const job = (await scheduleBenchmark(n.nodeId, t))!;
+    expect(job.state).toBe("ASSIGNED");
+
+    // 20 s later: still ASSIGNED (weights loading). Must NOT be re-matched.
+    g.__brainNJobSweep = 0;
+    await sweepInferenceJobs(t + DEFAULTS.startWithinMs + 1_000);
+    expect((await getInferenceJob(job.jobId))!.state).toBe("ASSIGNED");
+
+    // Node acknowledges, then takes two minutes to produce the first token: still fine.
+    await reportStarted(n.nodeId, job.jobId, { backend: "vllm", loaded: false }, t + 30_000);
+    g.__brainNJobSweep = 0;
+    await sweepInferenceJobs(t + 150_000);
+    expect((await getInferenceJob(job.jobId))!.state).toBe("STARTING");
+
+    // Past the cold window with no progress: a pinned job fails outright, it is never queued to nowhere.
+    g.__brainNJobSweep = 0;
+    await sweepInferenceJobs(t + DEFAULTS.coldStartWithinMs + 1_000);
+    const j = (await getInferenceJob(job.jobId))!;
+    expect(j.state).toBe("FAILED");
+    expect(j.failureReason).toBe("timeout");
+
+    // And the next heartbeat does not immediately schedule another benchmark.
+    await heartbeatNativeNode(n.nodeId, tele({ loadedModels: [] }), undefined, undefined, t + DEFAULTS.coldStartWithinMs + 2_000);
+    g.__brainNNodes = undefined;
+    expect(await scheduleBenchmark(n.nodeId, t + DEFAULTS.coldStartWithinMs + 2_000)).toBeNull();
+    // Five minutes later it is tried again.
+    const t2 = t + DEFAULTS.coldStartWithinMs + 6 * 60_000;
+    await heartbeatNativeNode(n.nodeId, tele({ loadedModels: [] }), undefined, undefined, t2);
+    g.__brainNNodes = undefined;
+    const later = await scheduleBenchmark(n.nodeId, t2);
+    expect(later?.state).toBe("ASSIGNED");
+  });
+
+  it("keeps the 20 s window for a node that already has the model loaded", async () => {
+    const { n } = await registerMock(false);
+    const t = Date.now();
+    await heartbeatNativeNode(n.nodeId, tele({ loadedModels: ["qwen/qwen2.5-7b-instruct"] }), undefined, undefined, t);
+    g.__brainNNodes = undefined;
+    const job = (await scheduleBenchmark(n.nodeId, t))!;
+    g.__brainNJobSweep = 0;
+    await sweepInferenceJobs(t + DEFAULTS.startWithinMs + 1_000);
+    expect((await getInferenceJob(job.jobId))!.state).toBe("FAILED"); // pinned: fails, not re-queued
+  });
+});
+
 describe("benchmark on join", () => {
   it("classifies by coordinator-measured speed only, never for mock nodes", () => {
     expect(classify(5, false)).toBe("EDGE");

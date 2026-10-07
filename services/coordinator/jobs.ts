@@ -500,7 +500,9 @@ export async function sweepInferenceJobs(now = Date.now()) {
   sweepAt.__brainNJobSweep = now;
   const open = (await listInferenceJobs(100)).filter((j) => !TERMINAL.has(j.state));
   if (!open.length) return;
-  const offline = new Set((await listNativeNodes()).filter((n) => n.state === "OFFLINE" || n.banReason).map((n) => n.nodeId));
+  const nodes = await listNativeNodes();
+  const offline = new Set(nodes.filter((n) => n.state === "OFFLINE" || n.banReason).map((n) => n.nodeId));
+  const byId = new Map(nodes.map((n) => [n.nodeId, n]));
   for (const o of open) {
     const rematch = await locked(o.jobId, async (after) => {
       const j = await getInferenceJob(o.jobId);
@@ -518,13 +520,23 @@ export async function sweepInferenceJobs(now = Date.now()) {
         await fail(j, "timeout", "node went offline", now, true, after);
         return false;
       }
-      if ((j.state === "ASSIGNED" || j.state === "STARTING") && j.assignedAt && now - j.assignedAt > DEFAULTS.startWithinMs) {
-        if (j.attempts < DEFAULTS.maxAttempts && j.assignedNode) {
-          await requeue(j, j.assignedNode, "node did not start in time", now, after);
-          return true;
+      if ((j.state === "ASSIGNED" || j.state === "STARTING") && j.assignedAt) {
+        // A node that already has the model loaded gets 20 s to acknowledge. A node that has to load
+        // weights first (model absent from its telemetry, or it acknowledged and is STARTING) gets the
+        // cold window, capped by the deadline. Without this a cold vLLM start could never pass its
+        // first benchmark: re-matched at 20 s, every time.
+        const node = j.assignedNode ? byId.get(j.assignedNode) : undefined;
+        const warm = Boolean((node?.reported.telemetry?.loadedModels ?? node?.reported.capabilities.loadedModels)?.includes(j.model));
+        const window = warm && j.state === "ASSIGNED" ? DEFAULTS.startWithinMs : Math.min(DEFAULTS.coldStartWithinMs, Math.max(DEFAULTS.startWithinMs, j.deadlineAt - j.assignedAt));
+        if (now - j.assignedAt > window) {
+          // Pinned jobs (benchmarks, canaries) cannot go anywhere else: fail rather than queue them to nowhere.
+          if (j.attempts < DEFAULTS.maxAttempts && j.assignedNode && !j.pinnedNode) {
+            await requeue(j, j.assignedNode, "node did not start in time", now, after);
+            return true;
+          }
+          await fail(j, "timeout", "node did not start in time", now, true, after);
+          return false;
         }
-        await fail(j, "timeout", "node did not start in time", now, true, after);
-        return false;
       }
       if (j.state === "RUNNING") {
         const last = Math.max(j.lastProgressAt ?? 0, j.firstByteAt ?? 0, j.startedAt ?? j.createdAt);

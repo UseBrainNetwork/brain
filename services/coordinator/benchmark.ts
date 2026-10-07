@@ -20,6 +20,10 @@ const PROMPT = "Write a short, plain description of how a distributed compute ne
 const MAX_TOKENS = 128;
 /** Re-benchmark after this long so a node that changed hardware is re-classified. */
 export const BENCHMARK_TTL_MS = 24 * 3_600_000;
+/** Job deadline: must cover a cold model load (minutes on first start) plus 128 tokens. */
+const JOB_TTL_MS = 300_000;
+/** After an attempt (pass or fail) wait this long before scheduling another. Not every heartbeat. */
+export const BENCHMARK_RETRY_MS = 5 * 60_000;
 
 /**
  * Single-stream decode speed thresholds, tokens per second as timed by the coordinator (includes
@@ -40,6 +44,7 @@ export function classify(tokPerSec: number, mock: boolean): ComputeClass | null 
 
 const needsBenchmark = (n: NativeNode, now: number) => n.benchmark.basis === "unmeasured" || (n.benchmark.at != null && now - n.benchmark.at > BENCHMARK_TTL_MS);
 const hasPendingBenchmark = (n: NativeNode) => n.activeJobIds.some((id) => id.startsWith("bj-"));
+const recentlyAttempted = (n: NativeNode, now: number) => n.lastBenchmarkAttemptAt != null && now - n.lastBenchmarkAttemptAt < BENCHMARK_RETRY_MS;
 
 /**
  * Creates and dispatches a benchmark job for the node when one is due and the node can take it
@@ -49,11 +54,14 @@ const hasPendingBenchmark = (n: NativeNode) => n.activeJobIds.some((id) => id.st
 export async function scheduleBenchmark(nodeId: string, now = Date.now()): Promise<InferenceJob | null> {
   try {
     const n = await getNativeNode(nodeId);
-    if (!n || n.state !== "ONLINE" || !needsBenchmark(n, now) || hasPendingBenchmark(n)) return null;
+    if (!n || n.state !== "ONLINE" || !needsBenchmark(n, now) || hasPendingBenchmark(n) || recentlyAttempted(n, now)) return null;
     const model = n.reported.capabilities.supportedModels[0];
     if (!model) return null;
+    await updateNativeNode(nodeId, (x) => {
+      x.lastBenchmarkAttemptAt = now;
+    });
     const job = await createInferenceJob(
-      { requesterId: BENCHMARK_REQUESTER, model, messages: [{ role: "user", content: PROMPT }], maxTokens: MAX_TOKENS, temperature: 0, pinnedNode: nodeId, ttlMs: 90_000, idPrefix: "bj" },
+      { requesterId: BENCHMARK_REQUESTER, model, messages: [{ role: "user", content: PROMPT }], maxTokens: MAX_TOKENS, temperature: 0, pinnedNode: nodeId, ttlMs: JOB_TTL_MS, idPrefix: "bj" },
       now,
     );
     return await matchJob(job.jobId, now);

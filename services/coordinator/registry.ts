@@ -59,6 +59,8 @@ export interface NativeNode {
   };
   lastCanaryAt?: number;
   jobsAtLastCanary?: number;
+  /** Last time a benchmark job was created for this node, pass or fail. Throttles rescheduling. */
+  lastBenchmarkAttemptAt?: number;
   /** Coordinator-timed benchmark (services/coordinator/benchmark.ts). score = decode tokens/s on the coordinator's clock. */
   benchmark: { score: number | null; computeClass: ComputeClass | null; basis: "unmeasured" | "coordinator-timed"; at: number | null; firstByteMs?: number | null; model?: string };
   /** 0–100 Brain Reliability Score, computed from `measured` and uptime. Starts neutral. */
