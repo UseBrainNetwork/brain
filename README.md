@@ -39,6 +39,7 @@ A Brain Node is an outbound-only agent. It generates an ed25519 identity, report
 git clone https://github.com/UseBrainNetwork/brain && cd brain && npm install
 
 # NVIDIA GPU + Docker: serves the allowlist in node/models.ts through vLLM
+# First start pulls the vLLM image (~10 GB) and the model weights; the agent prints progress.
 npm run node
 
 # Any machine, no GPU: a labelled mock node that only ever serves brain/mock

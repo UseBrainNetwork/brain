@@ -28,7 +28,7 @@ async function main() {
   const mock = mode === "mock";
   if (!mock && !gpus.length) throw new Error("BRAIN_NODE_MODE=vllm but nvidia-smi found no GPU. Use BRAIN_NODE_MODE=mock to run a simulated node.");
   const models = (process.env.BRAIN_NODE_MODELS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  const backend: InferenceBackend = mock ? new MockBackend() : new VllmBackend({ gpus, models: models.length ? models : undefined, hfToken: process.env.HF_TOKEN });
+  const backend: InferenceBackend = mock ? new MockBackend() : new VllmBackend({ gpus, models: models.length ? models : undefined, hfToken: process.env.HF_TOKEN, log: (l) => console.log(`${new Date().toISOString()} ${l}`) });
   const concurrency = Number(process.env.BRAIN_NODE_CONCURRENCY) || (mock ? 1 : 4);
   const ask = process.env.BRAIN_NODE_ASK_USD_PER_1M ? Number(process.env.BRAIN_NODE_ASK_USD_PER_1M) : null;
 

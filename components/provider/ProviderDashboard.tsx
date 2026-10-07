@@ -73,6 +73,7 @@ export function ProviderDashboard({ initialNodeId }: { initialNodeId: string | n
 BRAIN_NODE_MODE=mock npm run node
 
 # NVIDIA GPU + Docker: serves allowlisted open-weight models via vLLM
+# first start downloads the vLLM image (~10 GB) plus model weights
 npm run node`}</pre>
         </div>
       </Panel>

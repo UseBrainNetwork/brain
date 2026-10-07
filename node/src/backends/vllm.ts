@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { MODEL_ALLOWLIST, modelSpec, type ModelSpec } from "../../models";
 import type { GpuReport, JobPayload } from "../../protocol";
@@ -27,9 +27,38 @@ export class VllmBackend implements InferenceBackend {
   private loadingModel: string | null = null;
   private supported: ModelSpec[];
 
-  constructor(private opts: { gpus: GpuReport[]; models?: string[]; hfToken?: string; maxModelLen?: number }) {
+  private log: (line: string) => void;
+
+  constructor(private opts: { gpus: GpuReport[]; models?: string[]; hfToken?: string; maxModelLen?: number; log?: (line: string) => void }) {
     const vram = opts.gpus.reduce((s, g) => s + (g.vramTotalMb ?? 0), 0);
     this.supported = MODEL_ALLOWLIST.filter((m) => !m.mock && (!opts.models || opts.models.includes(m.id)) && (vram === 0 || m.minVramMb <= vram));
+    this.log = opts.log ?? (() => undefined);
+  }
+
+  /**
+   * `docker run` pulls a missing image silently, which on first start means ten minutes of nothing
+   * on screen while ~10 GB download. Pull explicitly and relay Docker's progress lines instead.
+   */
+  private async pullImage(): Promise<void> {
+    const have = await run("docker", ["image", "inspect", VLLM_IMAGE]).then(() => true).catch(() => false);
+    if (have) return;
+    this.log(`vllm: pulling ${VLLM_IMAGE} (about 10 GB, first start only)`);
+    await new Promise<void>((resolve, reject) => {
+      const p = spawn("docker", ["pull", VLLM_IMAGE], { stdio: ["ignore", "pipe", "pipe"] });
+      let last = 0;
+      const relay = (chunk: Buffer) => {
+        const now = Date.now();
+        if (now - last < 10_000) return; // one line every ten seconds, not Docker's full ticker
+        last = now;
+        const line = chunk.toString().trim().split("\n").pop();
+        if (line) this.log(`vllm: pull ${line}`);
+      };
+      p.stdout.on("data", relay);
+      p.stderr.on("data", relay);
+      p.on("error", reject);
+      p.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`docker pull exited ${code}`))));
+    });
+    this.log(`vllm: image ready`);
   }
 
   supportedModels() {
@@ -91,6 +120,7 @@ export class VllmBackend implements InferenceBackend {
       this.loaded = model;
       return false;
     }
+    await this.pullImage();
     await run("docker", ["rm", "-f", CONTAINER]).catch(() => undefined);
     this.loaded = null;
     const args = [
@@ -106,12 +136,21 @@ export class VllmBackend implements InferenceBackend {
       ...(spec.vllmArgs ?? []),
     ];
     await run("docker", args);
+    this.log(`vllm: container ${CONTAINER} started, loading ${spec.id} (weights download to the brain-hf-cache volume on first use)`);
     // Weights may need to download: allow up to 20 minutes, polling health.
-    const until = Date.now() + 20 * 60_000;
+    const started = Date.now();
+    const until = started + 20 * 60_000;
+    let nextStatus = started + 30_000;
     while (Date.now() < until) {
       if (await this.healthy()) {
         this.loaded = model;
+        this.log(`vllm: ${spec.id} ready after ${Math.round((Date.now() - started) / 1000)}s`);
         return true;
+      }
+      if (Date.now() >= nextStatus) {
+        nextStatus += 30_000;
+        const tail = await run("docker", ["logs", "--tail", "1", CONTAINER]).then((r) => (r.stderr + r.stdout).trim().split("\n").pop() ?? "").catch(() => "");
+        this.log(`vllm: still loading ${spec.id} (${Math.round((Date.now() - started) / 1000)}s)${tail ? ` · ${tail.slice(0, 160)}` : ""}`);
       }
       const state = await run("docker", ["inspect", "-f", "{{.State.Running}}", CONTAINER]).then((r) => r.stdout.trim()).catch(() => "false");
       if (state !== "true") {
