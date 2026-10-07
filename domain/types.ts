@@ -345,6 +345,7 @@ export type NetworkEvent =
   | { type: "nnode.updated"; at: number; node: PublicNativeNode; change: "registered" | "rejoined" | "state" | "offline" }
   | { type: "njob.updated"; at: number; job: PublicInferenceJob }
   | { type: "njob.assigned"; at: number; jobId: string; nodeId: string }
-  | { type: "njob.progress"; at: number; jobId: string; nodeId: string; seq: number; delta: string; outputChars: number };
+  | { type: "njob.progress"; at: number; jobId: string; nodeId: string; seq: number; delta: string; outputChars: number }
+  | { type: "nverify.result"; at: number; kind: "redundant" | "canary"; jobId: string; nodeIds: string[]; passed: boolean; detail: string };
 
 export type NetworkEventType = NetworkEvent["type"];

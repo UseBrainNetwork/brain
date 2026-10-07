@@ -7,6 +7,7 @@ import { DEFAULTS, signingString, type HardwareReport, type NodeCapabilities, ty
 import { MemoryStore } from "@/services/store";
 import { authenticateSigned, checkReplay, nodeIdFor, verifyNodeSignature, type SignedRequest } from "./auth";
 import { classify, scheduleBenchmark } from "./benchmark";
+import { CANARIES, MATCH_THRESHOLD, maybeShadow, scheduleCanary, similarity } from "./verify";
 import { TRANSITIONS, createInferenceJob, getInferenceJob, matchJob, observeJob, publicInferenceJob, reportCompleted, reportFailed, reportProgress, reportStarted, sweepInferenceJobs, transition, type InferenceJob } from "./jobs";
 import { canonicalJson, receiptHash, verifyReceipt } from "./receipts";
 import { getNativeNode, heartbeatNativeNode, listNativeNodes, registerNativeNode, reliabilityScore, sweepNativeNodes } from "./registry";
@@ -33,6 +34,8 @@ async function registerMock(mock = true, models = mock ? ["brain/mock"] : ["qwen
 }
 
 beforeEach(() => {
+  // Deterministic tests: no random shadow sampling unless a test forces it.
+  process.env.BRAIN_VERIFY_SAMPLE_RATE = "0";
   g.__brainStore = new MemoryStore();
   g.__brainNNodes = undefined;
   g.__brainNSweep = 0;
@@ -304,5 +307,150 @@ describe("benchmark on join", () => {
     expect((await g.__brainStore!.listDocs<ComputeReceipt>("receipt", { limit: 10 })).length).toBe(0);
     // A real node that is already measured is not re-benchmarked.
     expect(await scheduleBenchmark(n.nodeId, t + 3_000)).toBeNull();
+  });
+});
+
+describe("verification probes", () => {
+  it("similarity: identical 1, whitespace/case-insensitive, unrelated low, truncated prefix penalised", () => {
+    expect(similarity("The quick brown fox jumps.", "The quick brown fox jumps.")).toBe(1);
+    expect(similarity("The quick  brown fox", "the quick brown FOX")).toBe(1);
+    expect(similarity("Entropy measures disorder in a system.", "Paris is the capital of France.")).toBeLessThan(0.3);
+    const full = "Distributed networks schedule work by matching queued jobs to machines that report free capacity.";
+    expect(similarity(full, full.slice(0, 30))).toBeLessThan(MATCH_THRESHOLD);
+    expect(similarity(full, full + " ")).toBe(1);
+  });
+
+  async function runJob(nodeId: string, job: InferenceJob, content: string, t: number) {
+    const tokens = Math.max(1, Math.ceil(content.length / 4)); // plausible for the text, like a real tokenizer count
+    await reportStarted(nodeId, job.jobId, { backend: "vllm", loaded: true }, t + 10);
+    await reportProgress(nodeId, job.jobId, { seq: 0, delta: content, tokens }, t + 50);
+    return reportCompleted(nodeId, job.jobId, { content, finishReason: "stop", usage: { prompt: 10, completion: tokens }, durationMs: 100, responseHash: sha(content) }, t + 300);
+  }
+
+  it("shadows a deterministic customer job on a different node, records agreement on both, pays only the customer job", async () => {
+    const a = await registerMock(false);
+    const b = await registerMock(false);
+    const t = Date.now();
+    const job = await createInferenceJob({ requesterId: "cust", model: "qwen/qwen2.5-7b-instruct", messages: [{ role: "user", content: "hi" }], maxTokens: 64, temperature: 0 }, t);
+    const m = await matchJob(job.jobId, t);
+    const primary = m.assignedNode!;
+    const other = primary === a.n.nodeId ? b.n.nodeId : a.n.nodeId;
+    const done = await runJob(primary, m, "Hello there, this is the answer.", t);
+    expect(done.receiptId).not.toBeNull();
+
+    const shadow = await maybeShadow(job.jobId, t + 400, true);
+    expect(shadow?.state).toBe("ASSIGNED");
+    expect(shadow?.assignedNode).toBe(other);
+    expect(shadow?.jobId.startsWith("vj-")).toBe(true);
+    expect((await getInferenceJob(job.jobId))!.verification).toMatchObject({ kind: "redundant", status: "pending", peerJobId: shadow!.jobId });
+
+    const sd = await runJob(other, shadow!, "Hello there, this is the answer!", t + 500);
+    expect(sd.receiptId).toBeNull();
+    expect(publicInferenceJob(sd).kind).toBe("verify");
+    const p = (await getInferenceJob(job.jobId))!;
+    expect(p.verification).toMatchObject({ kind: "redundant", status: "matched" });
+    expect((await getNativeNode(primary))!.measured.redundantMatched).toBe(1);
+    expect((await getNativeNode(other))!.measured.redundantMatched).toBe(1);
+    expect((await g.__brainStore!.listDocs<ComputeReceipt>("receipt", { limit: 10 })).length).toBe(1);
+  });
+
+  it("records a mismatch against both nodes and lowers both reliability scores", async () => {
+    const a = await registerMock(false);
+    const b = await registerMock(false);
+    const t = Date.now();
+    const job = await createInferenceJob({ requesterId: "cust", model: "qwen/qwen2.5-7b-instruct", messages: [{ role: "user", content: "hi" }], maxTokens: 64, temperature: 0 }, t);
+    const m = await matchJob(job.jobId, t);
+    const primary = m.assignedNode!;
+    const other = primary === a.n.nodeId ? b.n.nodeId : a.n.nodeId;
+    await runJob(primary, m, "The capital of France is Paris, a city on the Seine.", t);
+    const before = (await getNativeNode(primary))!.reputation;
+    const shadow = (await maybeShadow(job.jobId, t + 400, true))!;
+    await runJob(other, shadow, "I cannot help with that request.", t + 500);
+    expect((await getInferenceJob(job.jobId))!.verification).toMatchObject({ kind: "redundant", status: "mismatched" });
+    const pa = (await getNativeNode(primary))!;
+    const pb = (await getNativeNode(other))!;
+    expect(pa.measured.redundantMismatched).toBe(1);
+    expect(pb.measured.redundantMismatched).toBe(1);
+    expect(pa.reputation).toBeLessThan(before);
+  });
+
+  it("does not shadow sampled jobs when temperature is not 0, when the primary is a mock node, or when no second node exists", async () => {
+    const { n } = await registerMock(false);
+    const t = Date.now();
+    const warm = await createInferenceJob({ requesterId: "cust", model: "qwen/qwen2.5-7b-instruct", messages: [{ role: "user", content: "hi" }], maxTokens: 64, temperature: 0.7 }, t);
+    await runJob(n.nodeId, await matchJob(warm.jobId, t), "x", t);
+    expect(await maybeShadow(warm.jobId, t + 400, true)).toBeNull();
+    const cold = await createInferenceJob({ requesterId: "cust", model: "qwen/qwen2.5-7b-instruct", messages: [{ role: "user", content: "hi" }], maxTokens: 64, temperature: 0 }, t + 1000);
+    await runJob(n.nodeId, await matchJob(cold.jobId, t + 1000), "y", t + 1000);
+    // Only one node: the shadow is created, cannot be matched, and is cancelled rather than left queued.
+    expect(await maybeShadow(cold.jobId, t + 1400, true)).toBeNull();
+    const open = (await g.__brainStore!.listDocs<InferenceJob>("njob", { limit: 20 })).filter((j) => j.requesterId === "coordinator:verify");
+    expect(open.every((j) => j.state === "CANCELLED")).toBe(true);
+    const mock = await registerMock(true);
+    const mj = await createInferenceJob({ requesterId: "cust", model: "brain/mock", messages: [{ role: "user", content: "hi" }], maxTokens: 64, temperature: 0 }, t + 2000);
+    await runJob(mock.n.nodeId, await matchJob(mj.jobId, t + 2000), "[mock]", t + 2000);
+    expect(await maybeShadow(mj.jobId, t + 2400, true)).toBeNull();
+  });
+
+  it("canaries: pinned, unpaid, pass/fail recorded, two failures degrade the node, a pass restores it; mock nodes are never canaried", async () => {
+    const { n } = await registerMock(false);
+    const t = Date.now();
+    const c1 = (await scheduleCanary(n.nodeId, t, true))!;
+    expect(c1.jobId.startsWith("cj-")).toBe(true);
+    expect(c1.assignedNode).toBe(n.nodeId);
+    const canary = CANARIES.find((c) => c.id === c1.canaryId)!;
+    // Wrong answer.
+    const f1 = await runJob(n.nodeId, c1, "I'm sorry, I can't do that.", t);
+    expect(f1.receiptId).toBeNull();
+    expect((await getInferenceJob(c1.jobId))!.verification).toMatchObject({ kind: "canary", status: "failed" });
+    let node = (await getNativeNode(n.nodeId))!;
+    expect(node.measured.canaryFailStreak).toBe(1);
+    expect(node.state).toBe("ONLINE");
+    const c2 = (await scheduleCanary(n.nodeId, t + 1000, true))!;
+    await runJob(n.nodeId, c2, "No.", t + 1000);
+    node = (await getNativeNode(n.nodeId))!;
+    expect(node.measured.canaryFailStreak).toBe(2);
+    expect(node.state).toBe("DEGRADED");
+    // A degraded node is not routable for customers.
+    const cust = await createInferenceJob({ requesterId: "cust", model: "qwen/qwen2.5-7b-instruct", messages: [{ role: "user", content: "hi" }], maxTokens: 8, temperature: 0 }, t + 1500);
+    expect((await matchJob(cust.jobId, t + 1500)).state).toBe("QUEUED");
+    // Correct answer (forced, since DEGRADED nodes are not due by schedule).
+    const c3 = (await scheduleCanary(n.nodeId, t + 2000, true))!;
+    const right = CANARIES.find((c) => c.id === c3.canaryId)!;
+    const answer = right.id === "word" ? "PINEAPPLE" : right.id === "sum" ? "43" : right.id === "list" ? "red, green, blue" : "niarb";
+    expect(right.check(answer)).toBe(true);
+    void canary;
+    await runJob(n.nodeId, c3, answer, t + 2000);
+    node = (await getNativeNode(n.nodeId))!;
+    expect(node.measured.canaryFailStreak).toBe(0);
+    expect(node.measured.canaryPassed).toBe(1);
+    expect(node.state).toBe("ONLINE");
+    const mock = await registerMock(true);
+    expect(await scheduleCanary(mock.n.nodeId, t, true)).toBeNull();
+  });
+});
+
+describe("offline node with work in flight", () => {
+  it("re-queues an assigned job to another node as soon as the sweep sees the node OFFLINE", async () => {
+    const a = await registerMock(false);
+    const t = Date.now();
+    const job = await createInferenceJob({ requesterId: "cust", model: "qwen/qwen2.5-7b-instruct", messages: [{ role: "user", content: "hi" }], maxTokens: 8, temperature: 0 }, t);
+    const m = await matchJob(job.jobId, t);
+    expect(m.assignedNode).toBe(a.n.nodeId);
+    // Node a disappears; node b joins and heartbeats.
+    const later = t + DEFAULTS.offlineAfterMs + 1_000;
+    const b = await registerMock(false);
+    await heartbeatNativeNode(b.n.nodeId, tele(), undefined, undefined, later);
+    g.__brainNSweep = 0;
+    await sweepNativeNodes(later);
+    expect((await getNativeNode(a.n.nodeId))!.state).toBe("OFFLINE");
+    g.__brainNJobSweep = 0;
+    await sweepInferenceJobs(later);
+    const j = (await getInferenceJob(job.jobId))!;
+    expect(j.state).toBe("ASSIGNED");
+    expect(j.assignedNode).toBe(b.n.nodeId);
+    expect(j.excludedNodes).toContain(a.n.nodeId);
+    expect(j.history.map((h) => h.state)).toEqual(["QUEUED", "MATCHING", "ASSIGNED", "QUEUED", "MATCHING", "ASSIGNED"]);
+    expect((await getNativeNode(a.n.nodeId))!.activeJobIds).toEqual([]);
   });
 });

@@ -147,6 +147,7 @@ function describe(e: { type: string; at: number } & Record<string, unknown>) {
   }
   if (e.type === "nnode.updated") return { at: e.at, type: e.type, detail: `${nodeId} · ${String(e.change)} · ${(e.node as { state: string }).state}` };
   if (e.type === "njob.progress") return { at: e.at, type: e.type, detail: `${nodeId} · ${String(e.outputChars)} chars` };
+  if (e.type === "nverify.result") return { at: e.at, type: e.type, detail: `${String(e.kind)} ${e.passed ? "passed" : "failed"} · ${(e.nodeIds as string[]).join(", ")} · ${String(e.detail)}` };
   if (job?.id != null) detail = `job #${job.id}${job.status ? ` · ${job.status}` : ""}${job.totals ? ` · ${job.totals.verified}/${job.totals.units} verified` : ""}`;
   if (unitId) detail = `unit ${unitId}${nodeId ? ` · node ${nodeId}` : ""}`;
   else if (nodeId && !detail) detail = `node ${nodeId}`;

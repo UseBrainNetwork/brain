@@ -47,6 +47,21 @@ export const Tag = ({ children, tone = "muted" }: { children: React.ReactNode; t
   <span className={cx("rounded-[4px] border px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.12em]", tone === "warn" ? "border-warn/40 text-warn" : tone === "ok" ? "border-ok/40 text-ok" : "border-chalk/15 text-chalk/45")}>{children}</span>
 );
 
+export function VerificationTag({ job }: { job: PublicInferenceJob }) {
+  const v = job.verification;
+  if (!v) return job.kind === "inference" ? <Tag>not sampled</Tag> : null;
+  if (v.kind === "canary") return <Tag tone={v.status === "passed" ? "ok" : "warn"}>canary {v.status}</Tag>;
+  const tone = v.status === "matched" ? "ok" : v.status === "mismatched" ? "warn" : "muted";
+  return (
+    <Tag tone={tone}>
+      redundant {v.status}
+      {v.similarity != null ? ` · ${Math.round(v.similarity * 100)}%` : ""}
+    </Tag>
+  );
+}
+
+export const kindTag = (kind: PublicInferenceJob["kind"]) => (kind === "inference" ? null : <Tag>{kind === "verify" ? "shadow · unpaid" : `${kind} · unpaid`}</Tag>);
+
 export const gb = (mb: number | null | undefined) => (mb == null ? "—" : `${(mb / 1024).toFixed(mb >= 10_240 ? 0 : 1)} GB`);
 
 export function JobPipeline({ job }: { job: PublicInferenceJob }) {
@@ -142,7 +157,9 @@ export function NativeFleet() {
             {jobs.map((j) => (
               <div key={j.jobId} className="rounded-[10px] border border-chalk/10 bg-ink/30 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[11.5px]">
-                  <span className="text-chalk">{j.model} {j.kind === "benchmark" && <Tag>benchmark</Tag>}</span>
+                  <span className="flex flex-wrap items-center gap-2 text-chalk">
+                    {j.model} {kindTag(j.kind)} <VerificationTag job={j} />
+                  </span>
                   <span className="flex items-center gap-3 text-chalk/55">
                     {j.assignedNode && <Link href={`/provider?node=${j.assignedNode}`} className="underline decoration-chalk/25 underline-offset-4 hover:text-chalk">{j.assignedNode}</Link>}
                     <span className={stateTone(j.state)}>{j.state}</span>
@@ -209,6 +226,7 @@ export function NodeDetail({ n }: { n: PublicNativeNode }) {
       <Metric k="Uptime" v={<span className="text-[15px]">{n.uptimePct == null ? "—" : `${n.uptimePct.toFixed(1)}%`}</span>} sub="heartbeats observed ÷ expected" />
       <Metric k="Jobs completed" v={<span className="text-[15px]">{n.measured.jobsCompleted}</span>} sub={`${n.measured.tokensGenerated} tokens · ${n.measured.tokPerSec.length ? `${median(n.measured.tokPerSec).toFixed(0)} tok/s median` : "speed unmeasured"}`} />
       <Metric k="Reliability" v={<span className="text-[15px]">{n.reputation}/100</span>} sub="coordinator-measured; not transferable" />
+      <Metric k="Verification probes" v={<span className="text-[15px]">{(n.measured.redundantMatched ?? 0) + (n.measured.redundantMismatched ?? 0) + (n.measured.canaryPassed ?? 0) + (n.measured.canaryFailed ?? 0)}</span>} sub={`${n.measured.redundantMatched ?? 0} agreed · ${n.measured.redundantMismatched ?? 0} disagreed · canaries ${n.measured.canaryPassed ?? 0} passed / ${n.measured.canaryFailed ?? 0} failed`} />
       <Metric k="Benchmark" v={<span className="text-[15px]">{n.benchmark.score == null ? "pending" : `${n.benchmark.score} tok/s`}</span>} sub={n.benchmark.score == null ? "coordinator sends a timed job on join" : `${n.benchmark.computeClass ?? (n.gpu?.mock ? "mock, unclassified" : "unclassified")} · ${n.benchmark.model ?? ""} · coordinator-timed`} />
       <div className="col-span-2 md:col-span-4">
         <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-chalk/45">Supported models</div>

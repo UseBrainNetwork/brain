@@ -6,7 +6,7 @@ import type { PublicInferenceJob } from "@/services/coordinator/jobs";
 import type { PublicNativeNode, TelemetrySample } from "@/services/coordinator/registry";
 import { cx, fmtInt } from "@/lib/format";
 import { Metric, NO_DATA, Panel, UNKNOWN } from "@/components/economy/parts";
-import { JobPipeline, NodeDetail, Tag, gb, stateTone, useFleet } from "@/components/network/NativeFleet";
+import { JobPipeline, NodeDetail, Tag, VerificationTag, gb, kindTag, stateTone, useFleet } from "@/components/network/NativeFleet";
 
 interface View {
   node: PublicNativeNode;
@@ -59,7 +59,7 @@ export function ProviderDashboard({ initialNodeId }: { initialNodeId: string | n
     if (!view) return null;
     const start = new Date();
     start.setHours(0, 0, 0, 0);
-    const js = view.jobs.filter((j) => j.createdAt >= start.getTime() && j.kind !== "benchmark");
+    const js = view.jobs.filter((j) => j.createdAt >= start.getTime() && j.kind === "inference");
     return { jobs: js.filter((j) => j.state === "COMPLETED").length, computeMs: js.reduce((s, j) => s + (j.computeDurationMs ?? 0), 0), tokens: js.reduce((s, j) => s + (j.tokenUsage?.completion ?? 0), 0) };
   }, [view]);
 
@@ -154,7 +154,9 @@ npm run node`}</pre>
                 {view.jobs.map((j) => (
                   <div key={j.jobId} className="rounded-[10px] border border-chalk/10 bg-ink/30 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[11.5px]">
-                      <span className="text-chalk">{j.model} {j.kind === "benchmark" && <Tag>benchmark · unpaid</Tag>}</span>
+                      <span className="flex flex-wrap items-center gap-2 text-chalk">
+                        {j.model} {kindTag(j.kind)} <VerificationTag job={j} />
+                      </span>
                       <span className="flex items-center gap-3 text-chalk/55">
                         <span>{new Date(j.createdAt).toLocaleTimeString()}</span>
                         <span className={stateTone(j.state)}>{j.state}</span>

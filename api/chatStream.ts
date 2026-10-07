@@ -6,6 +6,8 @@ import { placeStreamingOrder, type PlaceOrderInput } from "@/engine/orders";
 import { attachCompute, type AttachedComputeSummary } from "@/services/attachedCompute";
 import type { NetworkRunSummary } from "@/services/inference";
 import { getReceipt } from "@/services/receipts";
+import { getInferenceJob } from "@/services/coordinator/jobs";
+import { getNativeNode } from "@/services/coordinator/registry";
 import { reframeStream } from "./gateway";
 
 /**
@@ -30,6 +32,12 @@ export interface BrainRunSummary {
   /** True only when the server verified the work itself (spot-checks / redundancy). */
   verified: boolean;
   usage?: { inputUnits: number; outputUnits: number };
+  /**
+   * NATIVE_NETWORK runs: the Brain Node that produced the answer and why the router picked it.
+   * Hardware fields are omitted on purpose (they are node-reported); reliability and class are
+   * coordinator-measured. Absent for every other target.
+   */
+  node?: { id: string; region: string | null; reliability: number; computeClass: string | null; routing: string | null; verification: string | null };
   /**
    * Compute attached to this request and dispatched to the browser network after the answer completed.
    * It did not produce the answer; it is verifiable work sized by this request. null = none dispatched.
@@ -82,9 +90,26 @@ export async function summarize(order: ComputeOrder, t0: number, mode: RoutingMo
       // Only server-verified work counts: spot-checks, canaries, redundancy. Node-reported and upstream answers do not.
       verified: receipt ? receipt.verificationMethod !== "unverified-provider-response" && receipt.verificationMethod !== "node-reported" : false,
       usage: receipt?.tokens ? { inputUnits: receipt.tokens.prompt, outputUnits: receipt.tokens.completion } : undefined,
+      node: receipt?.route?.target === "NATIVE_NETWORK" ? await nodeBlock(receipt) : undefined,
       status: order.status,
       error: order.error,
     },
+  };
+}
+
+async function nodeBlock(receipt: ComputeReceipt): Promise<BrainRunSummary["node"]> {
+  const nodeId = receipt.nodesUsed[0];
+  if (!nodeId) return undefined;
+  const [n, j] = await Promise.all([getNativeNode(nodeId).catch(() => null), getInferenceJob(receipt.jobId).catch(() => null)]);
+  if (!n) return undefined;
+  const v = j?.verification;
+  return {
+    id: n.nodeId,
+    region: n.region,
+    reliability: n.reputation,
+    computeClass: n.benchmark.computeClass,
+    routing: j?.routing?.reason ?? null,
+    verification: v ? `${v.kind}:${v.status}` : null,
   };
 }
 

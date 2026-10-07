@@ -82,6 +82,22 @@ export class Agent {
         backoff = 2_000;
         break;
       } catch (e) {
+        // Permanent refusals: no amount of retrying changes the answer, so say why and exit.
+        if (e instanceof TransportError && (e.status === 403 || e.status === 409 || e.status === 426)) {
+          const why =
+            e.code === "mock_nodes_disabled"
+              ? "this coordinator does not accept mock nodes (operator must set BRAIN_ALLOW_MOCK_NODES=1); run with a real GPU or point BRAIN_COORDINATOR_URL at a local coordinator"
+              : e.code === "banned"
+                ? "this node id is banned by the coordinator"
+                : e.code === "node_id_taken"
+                  ? "another key already owns this node id; delete identity.json to generate a new identity"
+                  : e.code === "unsupported_protocol"
+                    ? "coordinator speaks a different protocol version; update the agent"
+                    : e.code;
+          this.log(`register refused (${e.status}): ${why}`);
+          process.exitCode = 2;
+          return;
+        }
         this.log(`register failed: ${describe(e)}; retrying in ${backoff / 1000}s`);
         await sleep(backoff);
         backoff = Math.min(60_000, backoff * 2);

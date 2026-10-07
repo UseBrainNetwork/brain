@@ -12,7 +12,8 @@ import { getNativeNode, updateNativeNode, type NativeNode } from "./registry";
  * Benchmark jobs are coordinator-initiated: they issue no receipt, bill nobody and earn nothing.
  * Mock nodes are timed too (so the pipeline is exercised) but are never given a compute class.
  */
-export const BENCHMARK_REQUESTER = "coordinator:benchmark";
+import { BENCHMARK_REQUESTER } from "./probes";
+export { BENCHMARK_REQUESTER } from "./probes";
 export const isBenchmarkJob = (j: Pick<InferenceJob, "requesterId">) => j.requesterId === BENCHMARK_REQUESTER;
 
 const PROMPT = "Write a short, plain description of how a distributed compute network schedules work across machines. Use complete sentences.";

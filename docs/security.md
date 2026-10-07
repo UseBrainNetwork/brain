@@ -34,7 +34,8 @@ Reporting a vulnerability: see [SECURITY.md](../SECURITY.md) at the repository r
 - **Measured vs reported.** Routing uses only coordinator-measured speed, first-byte latency, completion rate and uptime. The reported GPU name and VRAM act only as *exclusion* filters (a node that reports less VRAM than a model needs is never selected); they never raise a score.
 - **Benchmarks** are coordinator-issued, pinned jobs timed on the coordinator's clock. Compute class derives from that timing; the GPU name is display-only.
 - **Reliability score** is computed server-side from recorded outcomes and belongs to the node id.
-- **Verification label.** Node work is marked `node-reported`, `verified: false` on receipts because the coordinator does not re-execute the model. The checks it does run (response hash, stream consistency, token plausibility, wall-time) are described on the receipt. Browser WebGPU work keeps its bit-exact spot-check verification.
+- **Verification label.** Node work is marked `node-reported`, `verified: false` on receipts because the coordinator does not re-execute every request. The checks it does run (response hash, stream consistency, token plausibility, wall-time) are described on the receipt. Sampled redundant execution and canaries (`services/coordinator/verify.ts`) run as unpaid coordinator probes and move the node's reliability score; they are shown on the job, never used to relabel a receipt as verified. Browser WebGPU work keeps its bit-exact spot-check verification.
+- **Mock nodes** are refused by a production coordinator unless the operator sets `BRAIN_ALLOW_MOCK_NODES=1`, so the public registry cannot be filled with labelled-but-fake nodes.
 - **Zero verified compute, zero reward.** Receipts are issued only for `COMPLETED` jobs with a matching response hash. Benchmark jobs issue no receipt. The accounting ledger accrues only from receipts, and `settled` is 0 until a payout actually runs.
 
 ### Secrets and logs
@@ -52,7 +53,7 @@ Reporting a vulnerability: see [SECURITY.md](../SECURITY.md) at the repository r
 
 | Risk | Today | Planned |
 | --- | --- | --- |
-| A node returns a plausible but wrong answer | Detected only by the developer; node work is labelled unverified | Sampled redundant execution (same job to two nodes, compare hashes), canary prompts with known answers, reputation penalties |
+| A node returns a plausible but wrong answer | Sampled redundant execution (5% of deterministic jobs re-run on a second node, similarity-compared, mismatches penalise both nodes) and scheduled canaries with checkable answers (two failures = DEGRADED). Receipts remain `node-reported` | Higher sample rates for new nodes; re-execution of disputed jobs on a third node to attribute blame |
 | A node under-reports speed to avoid work or over-reports to attract it | Speed is measured by the coordinator; reports are ignored for routing | — |
 | A node reports VRAM it does not have to receive large models | It will fail to load, be marked `DEGRADED` after 3 consecutive failures, and its reliability drops | Benchmark with a VRAM-pressure probe; attestation via NVML/DCGM when available |
 | Replay across coordinator instances | Per-instance replay cache plus 60 s window | Shared replay cache in the store |

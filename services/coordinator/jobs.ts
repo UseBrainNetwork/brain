@@ -7,9 +7,11 @@ import { NodeError } from "@/services/nodes";
 import { routeToNativeNode } from "@/services/router/select";
 import { sha256, token } from "@/services/security";
 import { getStore } from "@/services/store";
-import { updateNativeNode } from "./registry";
+import { listNativeNodes, updateNativeNode } from "./registry";
 import { issueNodeReceipt } from "./receipts";
-import { isBenchmarkJob, recordBenchmark } from "./benchmark";
+import { recordBenchmark } from "./benchmark";
+import { probeKind } from "./probes";
+import { maybeShadow, recordCanary, recordShadowResult } from "./verify";
 
 /**
  * Inference job state machine for native Brain Nodes.
@@ -74,17 +76,29 @@ export interface InferenceJob {
   modelLoaded: boolean | null;
   orderId?: string;
   decisionId?: string;
-  /** Coordinator-pinned target (benchmarks). The router still applies every hard filter to it. */
+  /** Coordinator-pinned target (benchmarks, canaries). The router still applies every hard filter to it. */
   pinnedNode?: string;
+  /** For shadow (redundant-execution) jobs: the customer job being re-run. */
+  verifyOf?: string;
+  /** For canary jobs: which canary prompt was sent. */
+  canaryId?: string;
+  /** Canaries only: let the router pick a DEGRADED node so it can prove recovery. */
+  allowDegraded?: boolean;
+  /** Result of a verification probe involving this job. Absent = not sampled. */
+  verification?: JobVerification;
 }
 
+export type JobVerification =
+  | { kind: "redundant"; status: "pending" | "matched" | "mismatched" | "inconclusive"; peerJobId: string; peerNodeId: string | null; similarity: number | null }
+  | { kind: "canary"; status: "passed" | "failed"; canaryId: string; similarity: null };
+
 /** Job as shown publicly: no prompt, no output text, lengths only. */
-export type PublicInferenceJob = Omit<InferenceJob, "request" | "output" | "requesterId"> & { request: { messages: number; chars: number; maxTokens: number }; outputChars: number; kind: "inference" | "benchmark" };
+export type PublicInferenceJob = Omit<InferenceJob, "request" | "output" | "requesterId"> & { request: { messages: number; chars: number; maxTokens: number }; outputChars: number; kind: "inference" | "benchmark" | "verify" | "canary" };
 
 export function publicInferenceJob(j: InferenceJob): PublicInferenceJob {
   const { request, output, requesterId: _r, ...rest } = j;
   void _r;
-  return { ...rest, request: { messages: request.messages.length, chars: request.messages.reduce((s, m) => s + m.content.length, 0), maxTokens: request.maxTokens }, outputChars: output.length, kind: isBenchmarkJob(j) ? "benchmark" : "inference" };
+  return { ...rest, request: { messages: request.messages.length, chars: request.messages.reduce((s, m) => s + m.content.length, 0), maxTokens: request.maxTokens }, outputChars: output.length, kind: probeKind(j) };
 }
 
 const KIND = "njob" as const;
@@ -133,8 +147,13 @@ export interface CreateJobInput {
   /** Hard ceiling on wall time; default 120 s. */
   ttlMs?: number;
   pinnedNode?: string;
-  /** "ij" for inference, "bj" for coordinator benchmarks. */
-  idPrefix?: "ij" | "bj";
+  /** Nodes that must not receive this job (shadow runs exclude the primary node). */
+  exclude?: string[];
+  verifyOf?: string;
+  canaryId?: string;
+  allowDegraded?: boolean;
+  /** "ij" inference · "bj" benchmark · "vj" redundant-execution shadow · "cj" canary. */
+  idPrefix?: "ij" | "bj" | "vj" | "cj";
 }
 
 export async function createInferenceJob(input: CreateJobInput, now = Date.now()): Promise<InferenceJob> {
@@ -152,7 +171,7 @@ export async function createInferenceJob(input: CreateJobInput, now = Date.now()
     history: [{ state: "QUEUED", at: now }],
     assignedNode: null,
     attempts: 0,
-    excludedNodes: [],
+    excludedNodes: [...(input.exclude ?? [])],
     routing: null,
     createdAt: now,
     assignedAt: null,
@@ -177,6 +196,9 @@ export async function createInferenceJob(input: CreateJobInput, now = Date.now()
     ...(input.orderId ? { orderId: input.orderId } : {}),
     ...(input.decisionId ? { decisionId: input.decisionId } : {}),
     ...(input.pinnedNode ? { pinnedNode: input.pinnedNode } : {}),
+    ...(input.verifyOf ? { verifyOf: input.verifyOf } : {}),
+    ...(input.canaryId ? { canaryId: input.canaryId } : {}),
+    ...(input.allowDegraded ? { allowDegraded: true } : {}),
   };
   await save(j);
   publish(j, now);
@@ -193,7 +215,7 @@ export async function matchJob(jobId: string, now = Date.now()): Promise<Inferen
     if (!j) throw new NodeError("unknown_job", 404);
     if (j.state !== "QUEUED") return j;
     transition(j, "MATCHING", now);
-    const r = await routeToNativeNode(j.model, { region: j.requirements.region, exclude: j.excludedNodes, only: j.pinnedNode }, now);
+    const r = await routeToNativeNode(j.model, { region: j.requirements.region, exclude: j.excludedNodes, only: j.pinnedNode, allowDegraded: Boolean(j.allowDegraded && j.pinnedNode) }, now);
     j.routing = { reason: r.reason, eligible: r.ranked.filter((x) => x.eligible).length, considered: r.ranked.length };
     if (!r.selected) {
       transition(j, "QUEUED", now, r.reason);
@@ -326,6 +348,9 @@ async function fail(j: InferenceJob, reason: string, note: string | undefined, n
       }),
     );
   }
+  const kind = probeKind(j);
+  if (kind === "verify") after.push(() => recordShadowResult(j.jobId, now));
+  else if (kind === "canary") after.push(() => recordCanary(j.jobId, now));
   publish(j, now);
   return j;
 }
@@ -407,9 +432,9 @@ export async function reportCompleted(nodeId: string, jobId: string, body: Compl
     j.completedAt = now;
     j.responseHash = body.responseHash;
     transition(j, "COMPLETED", now);
-    const benchmark = isBenchmarkJob(j);
-    if (!benchmark) {
-      // Coordinator-initiated benchmark work issues no receipt and earns nothing.
+    const kind = probeKind(j);
+    if (kind === "inference") {
+      // Coordinator-initiated probes (benchmark, shadow, canary) issue no receipt and earn nothing.
       const receipt = await issueNodeReceipt(j, now);
       j.receiptId = receipt.receiptId;
       j.finalCost = receipt.customerCost;
@@ -429,8 +454,23 @@ export async function reportCompleted(nodeId: string, jobId: string, body: Compl
         if (firstByte != null) n.measured.firstByteMs = [...n.measured.firstByteMs, firstByte].slice(-20);
       }),
     );
-    if (benchmark) after.push(() => recordBenchmark(j.jobId, tokPerSec, firstByte, now));
+    if (kind === "benchmark") after.push(() => recordBenchmark(j.jobId, tokPerSec, firstByte, now));
+    else if (kind === "verify") after.push(() => recordShadowResult(j.jobId, now));
+    else if (kind === "canary") after.push(() => recordCanary(j.jobId, now));
+    else after.push(() => maybeShadow(j.jobId, now));
     publish(j, now);
+    return j;
+  });
+}
+
+/** Mutates a job under its lock and persists it. For annotations (verification results) that do not change state. */
+export async function patchJob(jobId: string, fn: (j: InferenceJob) => void): Promise<InferenceJob | null> {
+  return locked(jobId, async () => {
+    const j = await getInferenceJob(jobId);
+    if (!j) return null;
+    fn(j);
+    await save(j);
+    publish(j, Date.now());
     return j;
   });
 }
@@ -459,12 +499,23 @@ export async function sweepInferenceJobs(now = Date.now()) {
   if (now - (sweepAt.__brainNJobSweep ?? 0) < 5_000) return;
   sweepAt.__brainNJobSweep = now;
   const open = (await listInferenceJobs(100)).filter((j) => !TERMINAL.has(j.state));
+  if (!open.length) return;
+  const offline = new Set((await listNativeNodes()).filter((n) => n.state === "OFFLINE" || n.banReason).map((n) => n.nodeId));
   for (const o of open) {
     const rematch = await locked(o.jobId, async (after) => {
       const j = await getInferenceJob(o.jobId);
       if (!j || TERMINAL.has(j.state)) return false;
       if (now > j.deadlineAt) {
         await fail(j, "timeout", "deadline passed", now, true, after);
+        return false;
+      }
+      // The node went OFFLINE (missed heartbeats) with this job in flight: do not wait for the stall timer.
+      if (j.assignedNode && offline.has(j.assignedNode) && (j.state === "ASSIGNED" || j.state === "STARTING" || j.state === "RUNNING")) {
+        if (j.state !== "RUNNING" && j.attempts < DEFAULTS.maxAttempts && !j.pinnedNode) {
+          await requeue(j, j.assignedNode, "node went offline", now, after);
+          return true;
+        }
+        await fail(j, "timeout", "node went offline", now, true, after);
         return false;
       }
       if ((j.state === "ASSIGNED" || j.state === "STARTING") && j.assignedAt && now - j.assignedAt > DEFAULTS.startWithinMs) {

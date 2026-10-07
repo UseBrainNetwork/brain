@@ -42,6 +42,8 @@ export interface Workload {
   maxUsdPer1MTokens?: number | null;
   /** Reject nodes whose reported total VRAM is unknown. Default false: unknown VRAM passes with a note. */
   requireKnownVram?: boolean;
+  /** Coordinator probes (canaries) may target a DEGRADED node so it can prove recovery. Never set for customer work. */
+  allowDegraded?: boolean;
 }
 
 export interface RoutingWeights {
@@ -150,7 +152,7 @@ function rejections(c: RouteCandidate, w: Workload): string[] {
   const r: string[] = [];
   if (c.state === "OFFLINE") r.push("offline");
   else if (c.state === "DRAINING") r.push("draining");
-  else if (c.state === "DEGRADED") r.push("degraded");
+  else if (c.state === "DEGRADED" && !w.allowDegraded) r.push("degraded");
   else if (c.state === "BUSY" || c.activeJobs >= c.maxConcurrency) r.push("no free slot");
   if (!c.supportedModels.includes(w.model)) r.push(`does not serve ${w.model}`);
   if (w.minVramMb != null && w.minVramMb > 0) {

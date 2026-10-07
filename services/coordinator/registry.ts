@@ -49,7 +49,16 @@ export interface NativeNode {
     /** Last 20 first-byte latencies from assignment to first progress, ms. */
     firstByteMs: number[];
     consecutiveFailures: number;
+    /** Redundant-execution outcomes this node took part in (either side). */
+    redundantMatched?: number;
+    redundantMismatched?: number;
+    /** Canary outcomes. Two consecutive failures = DEGRADED until one passes. */
+    canaryPassed?: number;
+    canaryFailed?: number;
+    canaryFailStreak?: number;
   };
+  lastCanaryAt?: number;
+  jobsAtLastCanary?: number;
   /** Coordinator-timed benchmark (services/coordinator/benchmark.ts). score = decode tokens/s on the coordinator's clock. */
   benchmark: { score: number | null; computeClass: ComputeClass | null; basis: "unmeasured" | "coordinator-timed"; at: number | null; firstByteMs?: number | null; model?: string };
   /** 0–100 Brain Reliability Score, computed from `measured` and uptime. Starts neutral. */
@@ -68,7 +77,7 @@ export interface TelemetrySample {
   load: number;
   activeJobs: number;
 }
-const HISTORY_MAX = 480;
+const HISTORY_MAX = 240;
 
 /** What leaves the server. No key material, no ip hash. */
 export interface PublicNativeNode {
@@ -211,6 +220,9 @@ export async function registerNativeNode(body: RegisterBody, ipHash: string, now
   if (existing?.banReason) throw new NodeError("banned", 403);
   const caps = sanitizeCaps(body.capabilities);
   const hardware = sanitizeHardware(body.hardware);
+  // Mock nodes are a development tool. A public coordinator refuses them unless the operator opts in
+  // (docker-compose does), so nobody can fill /network with labelled-but-fake nodes.
+  if (hardware.mock && process.env.NODE_ENV === "production" && process.env.BRAIN_ALLOW_MOCK_NODES !== "1") throw new NodeError("mock_nodes_disabled", 403);
   if (hardware.mock) caps.supportedModels = caps.supportedModels.filter((m) => m === "brain/mock");
   else caps.supportedModels = caps.supportedModels.filter((m) => m !== "brain/mock");
   caps.loadedModels = caps.loadedModels.filter((m) => caps.supportedModels.includes(m));
@@ -246,6 +258,7 @@ function deriveState(n: NativeNode): NodeState {
   const t = n.reported.telemetry;
   if (n.reported.capabilities.supportedModels.length === 0) return "DEGRADED";
   if (n.measured.consecutiveFailures >= 3) return "DEGRADED";
+  if ((n.measured.canaryFailStreak ?? 0) >= 2) return "DEGRADED";
   if (t?.temperatureC != null && t.temperatureC >= 95) return "DEGRADED";
   if (n.activeJobIds.length >= n.reported.capabilities.maxConcurrency) return "BUSY";
   return "ONLINE";
@@ -334,5 +347,13 @@ export function reliabilityScore(n: NativeNode, now = Date.now()): number {
   // Confidence grows with history: the first jobs move the score less.
   const weight = Math.min(1, done / 20);
   const raw = 100 * (0.6 * completion + 0.2 * (1 - timeouts) + 0.2 * up);
-  return Math.round(70 * (1 - weight) + raw * weight);
+  let score = 70 * (1 - weight) + raw * weight;
+  // Verification probes: each mismatch or failed canary costs more than a completed job earns back.
+  const rm = m.redundantMatched ?? 0;
+  const rx = m.redundantMismatched ?? 0;
+  const cp = m.canaryPassed ?? 0;
+  const cf = m.canaryFailed ?? 0;
+  if (rm + rx > 0) score -= 20 * (rx / (rm + rx));
+  if (cp + cf > 0) score -= 30 * (cf / (cp + cf));
+  return Math.round(Math.max(0, Math.min(100, score)));
 }

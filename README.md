@@ -6,7 +6,7 @@
   <a href="https://brainnetwork.app/network"><img alt="nodes online" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbrainnetwork.app%2Fapi%2Fstats&query=%24.nodesOnline&label=nodes%20online&color=3d5afe&labelColor=0b0d11&style=flat-square"></a>
   <a href="https://brainnetwork.app/explorer"><img alt="jobs completed" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbrainnetwork.app%2Fapi%2Fstats&query=%24.jobsCompleted&label=jobs%20completed&color=27c46d&labelColor=0b0d11&style=flat-square"></a>
   <a href="https://brainnetwork.app/explorer"><img alt="work units verified" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbrainnetwork.app%2Fapi%2Fstats&query=%24.workUnitsVerified&label=work%20units%20verified&color=27c46d&labelColor=0b0d11&style=flat-square"></a>
-  <img alt="tests" src="https://img.shields.io/badge/tests-177%20passing-27c46d?labelColor=0b0d11&style=flat-square">
+  <img alt="tests" src="https://img.shields.io/badge/tests-183%20passing-27c46d?labelColor=0b0d11&style=flat-square">
   <img alt="stack" src="https://img.shields.io/badge/Next.js%2016%20%C2%B7%20React%2019%20%C2%B7%20WebGPU%20%C2%B7%20Postgres-0b0d11?labelColor=0b0d11&color=1a1e26&style=flat-square">
   <a href="https://x.com/useBrainnetwork"><img alt="X" src="https://img.shields.io/badge/@useBrainnetwork-0b0d11?logo=x&logoColor=e6e9ee&labelColor=0b0d11&style=flat-square"></a>
 </p>
@@ -89,7 +89,7 @@ console.log(r.choices[0].message.content);
 ```
 
 - `model`: a node model id from [/models](https://brainnetwork.app/models) to run on Brain Nodes, or `brain/auto` to let BRAIN AUTO choose across browser compute, Brain Nodes, operator cloud and external models. Optional fields: `mode` (`AUTO` · `CHEAP` · `FAST` · `QUALITY` · `BROWSER_ONLY`), `privacy` (`PUBLIC` · `STANDARD` · `PRIVATE`), `maxCost` (USD), `maxLatency` (ms).
-- Response headers: `brain-request-id`, `brain-target`, `brain-latency`, `x-brain-receipt`, and for node work `brain-node-id`, `brain-region`. Streams end with `event: brain` carrying route, model, cost and receipt id.
+- Response headers: `brain-request-id`, `brain-target`, `brain-latency`, `x-brain-receipt`, and for node work `brain-node-id`, `brain-region`. The `brain` object (and the stream's closing `event: brain`) carries route, model, cost, receipt id, and for node work `brain.node` = `{ id, region, reliability, computeClass, routing, verification }`.
 - Node models run on hardware BRAIN does not operate, so they are `privacy: public`; a `standard` or `private` request pinned to a node model returns `400 privacy_conflict` instead of being routed somewhere else.
 - If nothing can run the request you get `503` with every target's exclusion reason. BRAIN never answers from a target it did not select.
 
@@ -118,7 +118,7 @@ Contributors are adversarial. The server does not trust any client-reported GPU 
 | Work | Verification | Label on receipt |
 | --- | --- | --- |
 | Browser WebGPU jobs | Server-seeded challenges, secret spot-checks recomputed on the server, canaries, plausibility bounds; integer kernels, bit-exact | `spot-check` / `canary`, `verified: true` |
-| Brain Node inference | Response hash matches text received, streamed text equals final text, token count plausible for the output, wall time on the coordinator's clock. The model is **not** re-executed | `node-reported`, `verified: false` |
+| Brain Node inference | Response hash matches text received, streamed text equals final text, token count plausible for the output, wall time on the coordinator's clock. Plus unpaid probes: 5% of deterministic jobs are re-run on a second node and compared; canaries with checkable answers run hourly and after every 25 jobs, two failures = `DEGRADED` | `node-reported`, `verified: false`; probe results on the job and in `brain.node.verification` |
 | Upstream providers | None beyond transport | `unverified-provider-response`, `verified: false` |
 
 Benchmarks are coordinator-issued, pinned jobs timed on the coordinator's clock; the compute class (`EDGE` · `CONSUMER` · `PRO` · `DATACENTER`) follows from measured decode speed, never from the GPU name. The **Brain Reliability Score** (0–100) is computed from recorded outcomes, belongs to the node id and feeds routing.
@@ -160,7 +160,7 @@ npm install
 npm run dev                  # http://localhost:3000, in-memory store, BRAIN_OPEN_V1=1 for a keyless local API
 npm run node:mock            # a mock Brain Node joining localhost
 npm run demo:request
-npm test                     # 177 tests: routing, job transitions, node auth and replay, heartbeat/offline, receipts, benchmarks
+npm test                     # 183 tests: routing, job transitions, node auth and replay, heartbeat/offline, receipts, benchmarks
 npm run typecheck && npm run build
 ```
 
@@ -265,7 +265,7 @@ Threat model, residual risks and planned controls: [docs/security.md](docs/secur
 | Node agent, coordinator, node router, job state machine, OpenAI API, signed receipts, ledger, `/network` `/provider` `/models`, Docker Compose | **Shipped** |
 | vLLM backend on real NVIDIA hardware in CI | Shipped in code, not yet exercised by CI |
 | Persistent WebSocket transport (QUIC-ready interface) | Planned — V1 is HTTP long-poll because the coordinator runs serverless |
-| Sampled redundant execution and canary prompts for node inference | Planned |
+| Sampled redundant execution and canary prompts for node inference | **Shipped** (unpaid probes; receipts stay `node-reported`) |
 | NVML/DCGM telemetry attestation | Planned |
 | Solana receipt anchoring and provider settlement | Planned; the ledger's `settled` is 0 until it runs |
 | Multi-node sharding (EXO-style) for models larger than one GPU | Planned |
