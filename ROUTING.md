@@ -52,6 +52,29 @@ targetTrust     BROWSER_NETWORK, NATIVE_NETWORK → untrusted-distributed
                 EXTERNAL_MODEL                 → third-party
 ```
 
+Requests whose `model` is a Brain Node model id (the allowlist in `node/models.ts`) default to `privacy: PUBLIC`, because those models only run on `NATIVE_NETWORK`. An explicit `STANDARD` or `PRIVATE` on such a request is a contradiction and returns `400 privacy_conflict` rather than being routed to an upstream that happens to have a similarly named model. Upstream providers report `supported: false` for node model ids.
+
+## Node selection inside NATIVE_NETWORK
+
+Once BRAIN AUTO picks `NATIVE_NETWORK` (or the request pins a node model), `services/router/score.ts` picks the node. Pure, deterministic, unit-tested.
+
+```
+hard filters   state ONLINE or BUSY with a free slot · serves the model · reported VRAM ≥ model requirement
+               (reported VRAM can only exclude, never promote) · region match when required · ask ≤ budget when set
+NodeScore      0.30·capability + 0.25·availability + 0.15·latency + 0.20·reputation + 0.10·price
+  capability   1.0 if the model is loaded, 0.6 if it must be loaded first; × (0.5 + 0.5 · tok/s ÷ pool max)
+               using coordinator-measured speed (then the coordinator benchmark; 0.5 neutral with a note when unmeasured)
+  availability (1 − active ÷ slots) · (1 − queue ÷ 4·slots)
+  latency      heartbeat RTT: 1 − rtt/300 ms (×0.7) + 0.3 if at or under the pool median; +0.2 for a region match;
+               0.5 neutral with a note when unmeasured
+  reputation   Brain Reliability Score ÷ 100 (coordinator-computed)
+  price        1 − ask ÷ highest ask (scaled 0.2..1); 0.5 neutral with a note when the node sets no ask
+tie-break      node id, ascending
+no candidate   "0 of N nodes can serve <model> right now (<node>: <reason>; …)"
+```
+
+The reason string is stored on the job (`routing.reason`) and shown on `/network`.
+
 ## Step 4: score
 
 Lower is better. Costs and latencies are min–max normalised over the eligible rows that have a value.

@@ -3,6 +3,7 @@ import { networkConfig } from "@/lib/config";
 import { providerStats } from "@/engine/metrics";
 import { listJobs } from "./distributed";
 import { liveNodes } from "./nodes";
+import { listNativeNodes } from "./coordinator/registry";
 
 /**
  * What the network can do RIGHT NOW, derived only from real nodes and real job history.
@@ -131,6 +132,47 @@ export async function assessCapabilities(): Promise<{ capabilities: NetworkCapab
       evidence: { compatibleNodes: 0, recentSuccessRate: null, recentJobs: 0, capacityScore: 0 },
     },
   );
+
+  // Brain Nodes: derived from the coordinator registry. Mock nodes never count toward a real capability.
+  try {
+    const native = (await listNativeNodes()).filter((n) => n.state === "ONLINE" || n.state === "BUSY");
+    const real = native.filter((n) => !n.reported.hardware.mock && n.reported.capabilities.supportedModels.length > 0);
+    const mock = native.length - real.length;
+    const completedJobs = real.reduce((s, n) => s + n.measured.jobsCompleted, 0);
+    const failed = real.reduce((s, n) => s + n.measured.jobsFailed + n.measured.jobsTimedOut, 0);
+    const rate = completedJobs + failed > 0 ? completedJobs / (completedJobs + failed) : null;
+    const models = [...new Set(real.flatMap((n) => n.reported.capabilities.supportedModels))];
+    let state: CapabilityState;
+    const reasons: string[] = [];
+    if (real.length === 0) {
+      state = "UNAVAILABLE";
+      reasons.push(mock ? `${mock} mock node${mock === 1 ? "" : "s"} online (brain/mock only); no real Brain Node` : "no Brain Node online");
+    } else if (completedJobs === 0) {
+      state = "LIMITED";
+      reasons.push(`${real.length} node${real.length === 1 ? "" : "s"} online serving ${models.join(", ")}; no job completed yet`);
+    } else if (rate != null && rate < 0.9) {
+      state = "LIMITED";
+      reasons.push(`measured completion rate ${(rate * 100).toFixed(0)}%`);
+    } else {
+      state = "AVAILABLE";
+      reasons.push(`${real.length} node${real.length === 1 ? "" : "s"} · ${completedJobs} completed job${completedJobs === 1 ? "" : "s"} · ${models.join(", ")}`);
+    }
+    capabilities.push({
+      id: "chat-brain-nodes",
+      label: "Chat via Brain Nodes",
+      description: "Open-weight models on operator GPUs through vLLM; receipts node-reported and coordinator-signed",
+      state,
+      reasons,
+      requirements: [
+        { label: "Real Brain Nodes online", required: "≥ 1", current: String(real.length), met: real.length >= 1 },
+        { label: "Completed jobs", required: "≥ 1", current: String(completedJobs), met: completedJobs >= 1 },
+        { label: "Measured completion rate", required: "≥ 90%", current: rate == null ? "no data" : `${(rate * 100).toFixed(0)}%`, met: rate != null && rate >= 0.9 },
+      ],
+      evidence: { compatibleNodes: real.length, recentSuccessRate: rate, recentJobs: completedJobs, capacityScore: 0 },
+    });
+  } catch (e) {
+    console.error("[capability] native registry read failed", e);
+  }
 
   const completed = jobs.filter((j) => j.status === "completed");
   const verifiedUnits = completed.reduce((s, j) => s + j.totals.verified, 0);

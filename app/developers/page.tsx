@@ -6,6 +6,8 @@ import { Button, Container, Dot, Section } from "@/components/ui";
 import { modeWeights } from "@/engine/router";
 import { networkConfig } from "@/lib/config";
 import { cx } from "@/lib/format";
+import { MODEL_ALLOWLIST } from "@/node/models";
+import { DEFAULTS } from "@/node/protocol";
 
 export const metadata: Metadata = { title: "Developers" };
 export const dynamic = "force-dynamic";
@@ -119,6 +121,31 @@ const PROTOCOL = [
   ["GET", "/api/network/stream", "Server-Sent Events: joins, leaves, verified jobs."],
 ];
 
+const NODE_PROTOCOL = [
+  ["POST", "/api/coordinator/register", "Node sends its ed25519 public key, hardware report and model list. Node id = hash of the key; the id is bound to the key on first use."],
+  ["POST", "/api/coordinator/heartbeat", `Every ${DEFAULTS.heartbeatMs / 1000}s with telemetry. Silent for ${DEFAULTS.offlineAfterMs / 1000}s = OFFLINE and its jobs are re-queued.`],
+  ["POST", "/api/coordinator/work", `Long-poll (≤${DEFAULTS.workPollMs / 1000}s) for an assigned job. Outbound only; nodes open no ports.`],
+  ["POST", "/api/coordinator/jobs/:id/started · progress · completed · failed", "Status, streamed deltas with sequence numbers, final content hash. Every call is signed over method, path, timestamp and body."],
+  ["GET", "/api/coordinator/nodes · /jobs · /signer", "Public registry (no IPs, no keys), public job history, and the key that signs receipts."],
+];
+
+const HEADERS = [
+  ["brain-request-id", "Id of this request; also the receipt lookup key."],
+  ["brain-node-id", "Which Brain Node generated the answer, when one did."],
+  ["brain-region", "The operator label of that node's region."],
+  ["brain-latency", "Wall time of the request in ms, measured by the gateway."],
+  ["x-brain-receipt", "Receipt id. GET /api/receipts/:id for the signed compute receipt."],
+];
+
+const NODE_CURL = `# Same request, pinned to a model served by Brain Nodes.
+curl https://brainnetwork.app/v1/chat/completions \
+  -H "Authorization: Bearer $BRAIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen/qwen2.5-7b-instruct", "stream": true,
+       "messages": [{"role": "user", "content": "Hello from a Brain Node"}]}'
+
+# → brain-node-id: N-3A4F…   brain-region: eu-north   brain-latency: 1184`;
+
 const VERIFICATION: [string, string, "live" | "interface"][] = [
   ["Server-issued challenges", "Benchmarks and jobs are generated server-side from secret seeds. Clients cannot pick their own work.", "live"],
   ["Server-clock scoring", "Compute score = verified ops ÷ server-measured wall time. The client's timing is recorded but never trusted.", "live"],
@@ -153,7 +180,7 @@ export default function DevelopersPage() {
               <div className="label mb-5 flex items-center gap-2.5 text-chalk/55">
                 <Dot color="ok" /> Developers
               </div>
-              <h1 className="display text-[60px] md:text-[120px]">Build on the crowd.</h1>
+              <h1 className="display text-[60px] md:text-[120px]">Change one URL.<br />Run AI on Brain.</h1>
               <p className="mt-7 max-w-[480px] text-[17px] leading-relaxed text-chalk/65">
                 Brain speaks the OpenAI Chat Completions format. Change the base URL, set <span className="font-mono text-[15px] text-chalk">model: &quot;brain/auto&quot;</span>, and the router does the rest.
               </p>
@@ -268,11 +295,66 @@ export default function DevelopersPage() {
         </Container>
       </Section>
 
-      <Section tone="dark" id="protocol" className="py-24">
+      <Section tone="dark" id="nodes" className="py-24">
+        <Container>
+          <div className="grid gap-10 lg:grid-cols-2">
+            <div>
+              <h2 className="display-md text-[32px] md:text-[48px]">Brain Nodes</h2>
+              <p className="mt-4 max-w-[460px] text-[14.5px] leading-relaxed text-chalk/55">
+                Machines running the Brain Node agent serve open-weight models through vLLM. Ask for one of these model ids and the router picks a node by capability, availability, measured speed, reliability and ask price; there is no silent substitution. If no node can serve it you get <span className="font-mono text-chalk">503</span> with the reason. Which nodes are online right now is on{" "}
+                <Link href="/models" className="text-chalk underline decoration-chalk/25 underline-offset-4">
+                  /models
+                </Link>
+                .
+              </p>
+              <div className="mt-8 font-mono text-[12.5px]">
+                {MODEL_ALLOWLIST.filter((m) => !m.mock).map((m) => (
+                  <div key={m.id} className="grid grid-cols-[1fr_90px_90px] gap-3 border-b border-chalk/10 py-2.5">
+                    <span className="text-chalk">{m.id}</span>
+                    <span className="text-chalk/55">{m.params}</span>
+                    <span className="text-right text-chalk/55">{Math.round(m.minVramMb / 1024)} GB+</span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-6 max-w-[460px] text-[13.5px] leading-relaxed text-chalk/45">
+                Node models run on hardware BRAIN does not operate, so they are <span className="font-mono text-chalk/70">privacy: public</span> by default. Receipts for node work say <span className="font-mono text-chalk/70">node-reported</span>: the coordinator checks the response hash, stream consistency and timing, it does not yet re-execute the model.
+              </p>
+              <div className="mt-8 font-mono text-[12.5px]">
+                {HEADERS.map(([h, d]) => (
+                  <div key={h} className="grid grid-cols-[170px_1fr] gap-3 border-b border-chalk/10 py-2.5">
+                    <span className="text-chalk">{h}</span>
+                    <span className="font-sans text-[13.5px] text-chalk/55">{d}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <CodeBlock lang="bash" title="node model · response headers" code={NODE_CURL} />
+          </div>
+          <div className="mt-16 grid gap-10 lg:grid-cols-[360px_1fr]">
+            <div>
+              <h3 className="display-md text-[26px] md:text-[34px]">Node agent protocol</h3>
+              <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
+                <span className="font-mono text-chalk">npm run node</span> on a machine with an NVIDIA GPU and Docker; <span className="font-mono text-chalk">BRAIN_NODE_MODE=mock</span> anywhere to exercise the network without a GPU. Mock nodes are labelled and only ever serve <span className="font-mono text-chalk">brain/mock</span>.
+              </p>
+            </div>
+            <div className="font-mono text-[12.5px]">
+              {NODE_PROTOCOL.map(([m, p, d]) => (
+                <div key={p} className="grid grid-cols-[52px_250px_1fr] items-baseline gap-3 border-b border-chalk/10 py-3 max-lg:grid-cols-[52px_1fr]">
+                  <span className={cx("font-semibold", m === "GET" ? "text-chalk/60" : "text-signal")}>{m}</span>
+                  <span className="break-words">{p}</span>
+                  <span className="font-sans text-[13.5px] text-chalk/55 max-lg:col-span-2">{d}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Container>
+      </Section>
+
+      <Section tone="dark" id="protocol" className="border-t border-chalk/[0.06] py-24">
         <Container>
           <div className="grid gap-10 lg:grid-cols-[360px_1fr]">
             <div>
-              <h2 className="display-md text-[32px] md:text-[48px]">Node protocol</h2>
+              <h2 className="display-md text-[32px] md:text-[48px]">Browser node protocol</h2>
               <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
                 What a contributing browser does. Session tokens are random, stored only as hashes, and bound to one node.
               </p>

@@ -36,11 +36,12 @@ export function workloadFor(model: string, opts: Partial<Workload> = {}): Worklo
 }
 
 /** Routes against the live registry. Never throws on capacity: the caller reads `selected`. */
-export async function routeToNativeNode(model: string, opts: Partial<Workload> & { exclude?: string[] } = {}, now = Date.now()): Promise<RoutingResult & { candidates: RouteCandidate[] }> {
-  const nodes = await routableNativeNodes(now);
+export async function routeToNativeNode(model: string, opts: Partial<Workload> & { exclude?: string[]; only?: string } = {}, now = Date.now()): Promise<RoutingResult & { candidates: RouteCandidate[] }> {
+  const nodes = (await routableNativeNodes(now)).filter((n) => !opts.only || n.nodeId === opts.only);
   const excluded = new Set(opts.exclude ?? []);
   const candidates = nodes.map((n) => candidateOf(n, excluded));
-  const { exclude: _e, ...rest } = opts;
+  const { exclude: _e, only: _o, ...rest } = opts;
   void _e;
+  void _o;
   return { ...scoreNodes(candidates, workloadFor(model, rest)), candidates };
 }

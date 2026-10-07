@@ -6,7 +6,7 @@
   <a href="https://brainnetwork.app/network"><img alt="nodes online" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbrainnetwork.app%2Fapi%2Fstats&query=%24.nodesOnline&label=nodes%20online&color=3d5afe&labelColor=0b0d11&style=flat-square"></a>
   <a href="https://brainnetwork.app/explorer"><img alt="jobs completed" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbrainnetwork.app%2Fapi%2Fstats&query=%24.jobsCompleted&label=jobs%20completed&color=27c46d&labelColor=0b0d11&style=flat-square"></a>
   <a href="https://brainnetwork.app/explorer"><img alt="work units verified" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbrainnetwork.app%2Fapi%2Fstats&query=%24.workUnitsVerified&label=work%20units%20verified&color=27c46d&labelColor=0b0d11&style=flat-square"></a>
-  <img alt="tests" src="https://img.shields.io/badge/tests-102%20passing-27c46d?labelColor=0b0d11&style=flat-square">
+  <img alt="tests" src="https://img.shields.io/badge/tests-177%20passing-27c46d?labelColor=0b0d11&style=flat-square">
   <img alt="stack" src="https://img.shields.io/badge/Next.js%2016%20%C2%B7%20React%2019%20%C2%B7%20WebGPU%20%C2%B7%20Postgres-0b0d11?labelColor=0b0d11&color=1a1e26&style=flat-square">
   <a href="https://x.com/useBrainnetwork"><img alt="X" src="https://img.shields.io/badge/@useBrainnetwork-0b0d11?logo=x&logoColor=e6e9ee&labelColor=0b0d11&style=flat-square"></a>
 </p>
@@ -23,192 +23,148 @@
 
 <img src=".github/assets/divider.svg" width="100%" alt="">
 
-**BRAIN** is a distributed AI compute network. Requests are routed by BRAIN AUTO across browser compute, native GPUs, operator cloud and external models to the cheapest path that meets their constraints, and every response carries a receipt showing how it ran. The same network is powered by ordinary computers: open a tab, the server measures and verifies your WebGPU compute, and verified work offsets what you use. Developers get the same engine through an OpenAI-compatible API.
+# BRAIN — The Compute Layer for Autonomous AI
 
-Live at [brainnetwork.app](https://brainnetwork.app). Every figure on the site and in this README carries its provenance; the design rules are in [REAL_VS_SIMULATED.md](REAL_VS_SIMULATED.md).
+**BRAIN** is a distributed AI compute network. People run **Brain Nodes**; developers and agents send requests through an **OpenAI-compatible API**; a coordinator routes each request to a node, times it, and signs a compute receipt. The same network is also powered by browsers: open a tab and the server measures and verifies your WebGPU compute.
+
+Live at [brainnetwork.app](https://brainnetwork.app). Source: [github.com/UseBrainNetwork/brain](https://github.com/UseBrainNetwork/brain). Every figure on the site carries its provenance (LIVE, DEMO or PLANNED); the rules are in [REAL_VS_SIMULATED.md](REAL_VS_SIMULATED.md) and [docs/architecture.md](docs/architecture.md).
 
 <img src=".github/assets/divider.svg" width="100%" alt="">
 
-## Quickstart
+## Run a Node
 
-### Use it
+A Brain Node is an outbound-only agent. It generates an ed25519 identity, reports its hardware, heartbeats every 15 s, long-polls for work, and runs allowlisted open-weight models in an isolated vLLM container. It opens no ports.
+
+```bash
+git clone https://github.com/UseBrainNetwork/brain && cd brain && npm install
+
+# NVIDIA GPU + Docker: serves the allowlist in node/models.ts through vLLM
+npm run node
+
+# Any machine, no GPU: a labelled mock node that only ever serves brain/mock
+BRAIN_NODE_MODE=mock npm run node
+```
+
+| Variable | Effect |
+| --- | --- |
+| `BRAIN_COORDINATOR_URL` | Coordinator to join (default `https://brainnetwork.app`) |
+| `BRAIN_NODE_MODE` | `vllm` or `mock` (auto: vllm when `nvidia-smi` is present) |
+| `BRAIN_NODE_MODELS` | Comma-separated subset of the allowlist to serve (default: everything the reported VRAM fits) |
+| `BRAIN_NODE_REGION` | Operator label shown to developers, e.g. `eu-north` |
+| `BRAIN_NODE_CONCURRENCY` | Parallel jobs (1–16) |
+| `BRAIN_NODE_ASK_USD_PER_1M` | Optional ask price per 1M tokens; a routing input |
+| `BRAIN_NODE_WALLET` | Solana address to associate (ownership verified separately) |
+| `BRAIN_NODE_HOME` | Where `identity.json` lives (default `~/.brain-node`) |
+| `HF_TOKEN` | For gated model repositories |
+
+The node appears on [/network](https://brainnetwork.app/network) within one heartbeat, is benchmarked by the coordinator with a timed job, and shows up on [/provider](https://brainnetwork.app/provider) with its state, load, jobs, uptime, reliability score and ledger earnings. Hardware figures are labelled **reported**; everything else is coordinator-measured.
+
+## Use the API
+
+Change one URL. Run AI on Brain.
 
 ```bash
 curl https://brainnetwork.app/v1/chat/completions \
+  -H "Authorization: Bearer $BRAIN_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "brain/auto",
-    "mode": "CHEAP",
+    "model": "qwen/qwen2.5-7b-instruct",
+    "stream": true,
     "messages": [{ "role": "user", "content": "explain entropy in one line" }]
   }'
 ```
 
-Same wire format as the OpenAI API, so existing SDKs work by changing `base_url`. Set `stream: true` for SSE. Optional fields: `mode` (`AUTO` · `CHEAP` · `FAST` · `QUALITY` · `BROWSER_ONLY`), `privacy` (`PUBLIC` · `STANDARD` · `PRIVATE`), `maxCost` (USD), `maxLatency` (ms).
-
-Every response carries a `brain` object and an `x-brain-receipt` header. Streams end with `event: brain` before `data: [DONE]`.
-
-```json
-"brain": {
-  "mode": "CHEAP",
-  "privacy": "STANDARD",
-  "target": "EXTERNAL_MODEL",
-  "provider": "external",
-  "model": "meta-llama/llama-3.1-8b-instruct",
-  "nodesUsed": 0,
-  "latencyMs": 874,
-  "cost": { "amount": 0.000003, "currency": "USD", "basis": "list-price" },
-  "verification": "unverified-provider-response",
-  "verified": false,
-  "receiptId": "r-c-muuhiedx-pxal"
-}
+```python
+from openai import OpenAI
+client = OpenAI(base_url="https://brainnetwork.app/v1", api_key="brain_sk_...")
+r = client.chat.completions.create(model="brain/auto", messages=[{"role": "user", "content": "hi"}])
+print(r.choices[0].message.content, r.model_extra["brain"]["target"])
 ```
 
-If nothing can run the request, you get `503 no_provider_available` with every target's exclusion reason. BRAIN never answers from a target it did not select.
+```js
+import OpenAI from "openai";
+const client = new OpenAI({ baseURL: "https://brainnetwork.app/v1", apiKey: process.env.BRAIN_API_KEY });
+const r = await client.chat.completions.create({ model: "brain/auto", messages: [{ role: "user", content: "hi" }] });
+console.log(r.choices[0].message.content);
+```
 
-### Power it
+- `model`: a node model id from [/models](https://brainnetwork.app/models) to run on Brain Nodes, or `brain/auto` to let BRAIN AUTO choose across browser compute, Brain Nodes, operator cloud and external models. Optional fields: `mode` (`AUTO` · `CHEAP` · `FAST` · `QUALITY` · `BROWSER_ONLY`), `privacy` (`PUBLIC` · `STANDARD` · `PRIVATE`), `maxCost` (USD), `maxLatency` (ms).
+- Response headers: `brain-request-id`, `brain-target`, `brain-latency`, `x-brain-receipt`, and for node work `brain-node-id`, `brain-region`. Streams end with `event: brain` carrying route, model, cost and receipt id.
+- Node models run on hardware BRAIN does not operate, so they are `privacy: public`; a `standard` or `private` request pinned to a node model returns `400 privacy_conflict` instead of being routed somewhere else.
+- If nothing can run the request you get `503` with every target's exclusion reason. BRAIN never answers from a target it did not select.
 
-Open [brainnetwork.app/earn](https://brainnetwork.app/earn) in Chrome, Edge, Safari 26+ or Firefox 141+ (Windows) and press **Join network**. Nothing is installed. Your GPU is benchmarked by the server, joins the pool, and receives verified work. Verified work earns credits you can spend on BRAIN today, and USDC or SOL to your Solana wallet when payouts are enabled. [/node](https://brainnetwork.app/node) is the full-screen worker; [/demo](https://brainnetwork.app/demo) runs a job across every device in the room.
+Keys: [Account → API keys](https://brainnetwork.app/account). Full reference: [/developers](https://brainnetwork.app/developers).
 
-### Run it
+## How Routing Works
+
+Two routers, both deterministic and both explained on the receipt.
+
+**BRAIN AUTO** (`engine/router.ts`) picks a resource class: hard filters for capability, privacy and budget, then a weighted score over cost, latency, reliability and quality. Unknown values stay UNKNOWN and are penalised, never guessed. Weights per mode: [ROUTING.md](ROUTING.md).
+
+**Node router** (`services/router/score.ts`) picks a Brain Node for a job:
+
+```
+eligible  = ONLINE or BUSY with a free slot, serves the model, reported VRAM ≥ requirement,
+            region match when required, ask ≤ budget when set
+score     = 0.30·capability + 0.25·availability + 0.15·latency + 0.20·reputation + 0.10·price
+```
+
+Capability, latency and reputation come only from coordinator measurements (tok/s, heartbeat round trip, completion rate, uptime). Unmeasured inputs score 0.5 with a note. Ties break on node id so the same registry always gives the same answer. When no node is eligible the error names each node and its reason, for example `0 of 3 nodes can serve qwen/qwen2.5-7b-instruct right now (N-3A4F…: VRAM 8 GB < 20 GB required; N-9B12…: offline)`.
+
+## How Compute Is Verified
+
+Contributors are adversarial. The server does not trust any client-reported GPU model, compute units, job completion, benchmark score or uptime.
+
+| Work | Verification | Label on receipt |
+| --- | --- | --- |
+| Browser WebGPU jobs | Server-seeded challenges, secret spot-checks recomputed on the server, canaries, plausibility bounds; integer kernels, bit-exact | `spot-check` / `canary`, `verified: true` |
+| Brain Node inference | Response hash matches text received, streamed text equals final text, token count plausible for the output, wall time on the coordinator's clock. The model is **not** re-executed | `node-reported`, `verified: false` |
+| Upstream providers | None beyond transport | `unverified-provider-response`, `verified: false` |
+
+Benchmarks are coordinator-issued, pinned jobs timed on the coordinator's clock; the compute class (`EDGE` · `CONSUMER` · `PRO` · `DATACENTER`) follows from measured decode speed, never from the GPU name. The **Brain Reliability Score** (0–100) is computed from recorded outcomes, belongs to the node id and feeds routing.
+
+Every completed job produces a `ComputeReceipt` whose canonical body (`jobId, nodeId, model, inputTokens, outputTokens, executionMs, timestamp, requestHash, responseHash, hardwareClass, cost`) is hashed and signed with the coordinator's ed25519 key. Verify any receipt against `GET /api/coordinator/signer`. Zero verified compute always produces zero reward: benchmark jobs issue no receipt, and the ledger accrues only from receipts. Redundant execution and on-chain anchoring of receipt batches are planned and labelled as such.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  dev[Developer / agent] --> v1["/v1 gateway<br/>keys · limits · headers"] --> auto["BRAIN AUTO<br/>resource-class router"]
+  auto -->|NATIVE_NETWORK| jobs["Coordinator<br/>registry · node router · job state machine"]
+  auto --> other["CLOUD_GPU · EXTERNAL_MODEL · BROWSER_NETWORK"]
+  node["Brain Node agent<br/>signed outbound HTTP · heartbeat"] -->|register · heartbeat · poll work| jobs
+  node -->|started · progress · completed| jobs
+  node --> vllm["vLLM in Docker<br/>allowlisted models"]
+  jobs -->|COMPLETED| rcpt["Signed receipt"] --> ledger["Accounting ledger"]
+  jobs --> db[(Postgres / MemoryStore)]
+  rcpt -.->|planned| sol[(Solana anchor)]
+```
+
+Job states: `QUEUED → MATCHING → ASSIGNED → STARTING → RUNNING → VERIFYING → COMPLETED`, plus `FAILED` and `CANCELLED`; every transition is recorded with a timestamp and shown on `/network`. Node states: `ONLINE · BUSY · DRAINING · DEGRADED · OFFLINE`, derived server-side (offline after 45 s without a heartbeat; its jobs are re-queued).
+
+Component-by-component description with LIVE / DEMO / PLANNED labels: [docs/architecture.md](docs/architecture.md).
+
+## Local Development
+
+One command, the whole flow:
 
 ```bash
-git clone https://github.com/UseBrainNetwork/brain && cd brain
+docker compose up            # Postgres + web (gateway, coordinator, frontend) + a mock Brain Node
+npm run demo:request         # sends a request, prints the answer, route, job timeline, receipt hash + signature
+```
+
+Without Docker:
+
+```bash
 npm install
-npm run dev          # http://localhost:3000
-npm test             # 102 tests
+npm run dev                  # http://localhost:3000, in-memory store, BRAIN_OPEN_V1=1 for a keyless local API
+npm run node:mock            # a mock Brain Node joining localhost
+npm run demo:request
+npm test                     # 177 tests: routing, job transitions, node auth and replay, heartbeat/offline, receipts, benchmarks
 npm run typecheck && npm run build
 ```
 
-Node 20+. With no configuration the app runs on an in-memory store and the inference API returns an honest `503`. Copy `.env.example` to `.env.local` to configure a provider, prices or Postgres. Every variable is server-only except `NEXT_PUBLIC_BRAIN_WS_URL` and `NEXT_PUBLIC_PRIVY_APP_ID`. The full table is in [the environment reference](#environment) below.
-
-<img src=".github/assets/divider.svg" width="100%" alt="">
-
-## How a request runs
-
-<p align="center"><img src=".github/assets/trace.svg" alt="A request passing through the gateway, router, four verified nodes, merge and response" width="100%"></p>
-
-```
-REQUEST → CLASSIFY → PLAN → ESTIMATE → SELECT → EXECUTE → VERIFY → MERGE → RESPONSE → RECEIPT → LEARN
-```
-
-| Stage | What happens | Code |
-| --- | --- | --- |
-| Gateway | Account or API key, plan rate limit, schema validation | `api/gateway.ts`, `app/api/chat`, `app/api/v1` |
-| Classify · Plan | Capability, whether the request carries plaintext, a single-step plan (compound DAG plans supported) | `engine/plan.ts` |
-| Estimate | Each resource class returns cost, latency, reliability, capacity, model, quality tier and the basis for each. Unmeasured = `UNKNOWN`, never guessed | `engine/providers.ts` |
-| Select | Hard constraints (supported, available, privacy, budget) then a published weighted score per mode | `engine/router.ts` |
-| Execute | Selected provider runs it; fallback to the next eligible target if it fails before the first byte | `engine/orders.ts` |
-| Verify | Browser-network work is spot-checked against secret rows or a canary; upstream model output is marked unverified | `services/verification.ts` |
-| Response · Receipt | OpenAI-shaped response or reframed stream; `ComputeReceipt` with route, cost, verification; credits consumed; accounting accrued | `api/chatStream.ts`, `services/receipts.ts` |
-
-Routing weights, the privacy matrix and fallback semantics: [ROUTING.md](ROUTING.md). Components and data flow: [BRAIN_ARCHITECTURE.md](BRAIN_ARCHITECTURE.md).
-
-### Resource classes
-
-| Class | Trust | Today |
-| --- | --- | --- |
-| `BROWSER_NETWORK` | untrusted, verified | Live. WebGPU nodes run integer kernels verified bit-exactly by the server |
-| `NATIVE_NETWORK` | untrusted, verified | Roadmap: native GPU clients |
-| `CLOUD_GPU` | operator | Available when `BRAIN_FALLBACK_*` is configured |
-| `EXTERNAL_MODEL` | third-party | Live. Provider-reported cost is recorded per request |
-
-<img src=".github/assets/divider.svg" width="100%" alt="">
-
-## Security model
-
-Contributors are assumed adversarial. The server does not trust any client-reported GPU model, compute units, job completion, benchmark score or uptime.
-
-- **Benchmark** is the server's clock between issuing a seeded challenge and receiving a verified answer. Scores drive placement; the GPU name is display-only.
-- **Completion** counts only after a canary or secret spot-check passes within plausibility bounds. Expected outputs and sampled indices never leave the server. Kernels are integer, so verification is bit-exact.
-- **Reputation** is an EWMA where failures weigh double; nodes below 0.35 are banned. **Uptime** comes from server-received heartbeats.
-- **Secrets** live in server env only. Upstream vendor fields and prices are stripped from streamed chunks. Session and API-key material is stored as hashes. Public pages show 4-hex node ids, never wallets, IPs or device names; public order endpoints carry no prompts or outputs.
-- **Wallets** prove ownership by signing a server nonce (ed25519).
-
-Report a vulnerability: [SECURITY.md](SECURITY.md).
-
-<img src=".github/assets/divider.svg" width="100%" alt="">
-
-## Economics
-
-One subscription, one ledger. A **BRAIN credit** is a unit of real cost (`1 credit = $0.001`), consumed from each receipt's list price. Plans: Free (500 credits/month), Pro and Max. Verified compute from nodes your wallet powers is credited to your account and offsets what you use.
-
-Contributor rewards (`rewards/engine.ts`):
-
-```
-weight_i = verifiedCompute_i × min(1 + α·ln(1 + normalizedHoldings_i), M) × reputation_i × reliability_i
-share_i  = weight_i / Σ weight, water-filled under a per-account cap
-```
-
-Token contract (Solana, pump.fun): `FiJ4gnd4dhqNeBKfS4E8wnERMEpjMPdUfJhu8foipump`. The site reads the mint's on-chain status and shows NOT LIVE until it exists; no price or market data is displayed from any source we don't verify.
-
-Protocol wallet (creator fees land here, read on-chain at `/economics` and `/rewards`): `HZLev74M3ATV5jQJsoN8FcJAKx3RUefAobhcXr3egxwa`. The server never holds its key. Creator-fee claims are read from chain by signature and enter the treasury ledger automatically; the daily settle cron turns the contributors' share into claimable SOL.
-
-Tested properties: zero verified compute earns zero regardless of holdings; the holding multiplier is capped (1.35×) and concave, so splitting compute across sybil nodes gains nothing; no account exceeds the pool cap; allocations never exceed the pool. No emissions, no staking yield, no projected returns. Prices, splits and how list prices were derived: [ECONOMICS.md](ECONOMICS.md).
-
-<img src=".github/assets/divider.svg" width="100%" alt="">
-
-## Repository
-
-```
-app/          Next.js routes (pages + /api handlers)
-components/   UI by page; components/ui.tsx holds primitives
-domain/       Shared types: ExecutionRequest, ExecutionEstimate, ComputeReceipt, ComputeNode, …
-engine/       BRAIN AUTO: providers, router, plan, orders (streaming + fallback), learning
-api/          Gateway (validation, reframed streams, API keys), chat event stream
-services/     Server: nodes, distributed jobs, verification, reputation, receipts, accounting,
-              accounts, credits, capability, store (memory | Postgres), event bus, mock/
-webgpu/       Browser: device detection, WGSL kernels (matmul, Q4_0/Q8_0 LLM stage), ComputeBackend, benchmark
-inference/    Network LLM inference: GGUF loader, Qwen3 config + stage plan, tokenizer, CPU reference, wire protocol
-relay/        Cloudflare Worker + Durable Object that moves hidden states node → node (deployed separately)
-network/      Deterministic workloads, contributor engine (jobs + inference stage), realtime sources
-rewards/      Reward formula and engine, config, simulator
-providers/    OpenAI-compatible upstream client
-lib/          Non-secret config, plans, pricing, formatting, wallet adapters
-db/           Postgres schema (self-applied on first connection)
-scripts/      Headless-Chrome e2e with real WebGPU, screenshots, mock upstream
-```
-
-<details>
-<summary><b>Pages</b></summary>
-
-| Route | What it is |
-| --- | --- |
-| `/` | Use BRAIN / Power BRAIN, live metrics strip, resource classes, network panel |
-| `/chat` | Streaming chat through BRAIN AUTO; "Powered by BRAIN" expands to route, model, nodes, cost, latency, verification, receipt |
-| `/pricing` · `/account` | Plans and credits; your plan, usage, compute earnings, net, credit ledger |
-| `/earn` · `/node` · `/demo` | Contributor flow, full-screen worker, multi-device room |
-| `/developers` | Quickstart (Python / JS / cURL), request path, routing, response format, node protocol, verification |
-| `/auto` | Routing console: every resource class estimated for one request, decision, receipt |
-| `/network` · `/explorer` · `/capacity` · `/economics` | Operations, jobs and nodes, what can run today, where the money goes |
-| `/receipt/[id]` · `/node/[id]` · `/epoch/[id]` | Proof-of-compute receipt, node reputation, immutable reward epoch |
-| `/rewards` · `/brain` | Reward formula and claims; the network as one machine |
-
-</details>
-
-<details>
-<summary><b>Contributor protocol</b></summary>
-
-```
-browser                                         server
-───────                                         ──────
-detectDevice()  adapter.info, limits, WebGL renderer, navigator.*
-                every field tagged with its source; unknowns = "unavailable"
-probeThroughput() ── hint ──────────────────▶  POST /api/benchmark/challenge
-                                                 issues mix_u32 spec, secret seed,
-                                                 rounds sized to ~400 ms. Clock starts.
-run WGSL kernel  ── block hashes ───────────▶  POST /api/nodes/register
-                                                 recompute 3 secret blocks on CPU
-                                                 score = ops / server-measured seconds / 1e7
-JOIN NETWORK     ───────────────────────────▶  POST /api/nodes/join → node.joined event
-loop:            ───────────────────────────▶  POST /api/jobs/next   (seeded spec only)
-  run kernel     ── row/block hashes ───────▶  POST /api/jobs/result
-                                                 canary (full answer) or secret spot-check,
-                                                 plausibility bound, reputation EWMA,
-                                                 compute credited, job.completed event
-heartbeat 5 s    ───────────────────────────▶  POST /api/nodes/heartbeat (offline after 20 s)
-```
-
-</details>
+Node 20+. With no configuration the app runs on an in-memory store and the inference API returns an honest `503` until a node joins or a provider is configured. Copy `.env.example` to `.env.local` for providers, prices or Postgres.
 
 <details id="environment">
 <summary><b>Environment</b></summary>
@@ -254,26 +210,71 @@ BRAIN_RELAY_URL=http://127.0.0.1:8787 BRAIN_RELAY_SECRET=<same value> npm run de
 
 </details>
 
-<img src=".github/assets/divider.svg" width="100%" alt="">
+## Repository
 
-## Documentation
+```
+app/          Next.js routes (pages + /api handlers)
+components/   UI by page; components/ui.tsx holds primitives
+domain/       Shared types: ExecutionRequest, ExecutionEstimate, ComputeReceipt, ComputeNode, …
+engine/       BRAIN AUTO: providers, router, plan, orders (streaming + fallback), learning
+api/          Gateway (validation, reframed streams, API keys), chat event stream
+services/     Server: nodes, distributed jobs, verification, reputation, receipts, accounting,
+              accounts, credits, capability, store (memory | Postgres), event bus, mock/
+webgpu/       Browser: device detection, WGSL kernels (matmul, Q4_0/Q8_0 LLM stage), ComputeBackend, benchmark
+inference/    Network LLM inference: GGUF loader, Qwen3 config + stage plan, tokenizer, CPU reference, wire protocol
+relay/        Cloudflare Worker + Durable Object that moves hidden states node → node (deployed separately)
+network/      Deterministic workloads, contributor engine (jobs + inference stage), realtime sources
+rewards/      Reward formula and engine, config, simulator
+providers/    OpenAI-compatible upstream client
+lib/          Non-secret config, plans, pricing, formatting, wallet adapters
+db/           Postgres schema (self-applied on first connection)
+scripts/      Headless-Chrome e2e with real WebGPU, screenshots, mock upstream
+```
 
-| | |
+<details>
+<summary><b>Pages</b></summary>
+
+| Route | What it is |
 | --- | --- |
-| [BRAIN_ARCHITECTURE.md](BRAIN_ARCHITECTURE.md) | BRAIN · NETWORK · AUTO · POWER BRAIN · RECEIPT; request flow, resource classes, privacy, accounts and credits |
-| [ROUTING.md](ROUTING.md) | Estimation, constraints, published weights per mode, fallback |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Modules, data flow, store and locking, event bus |
-| [ECONOMICS.md](ECONOMICS.md) | Pricing config, plans and credits, pay with compute, splits |
-| [REAL_VS_SIMULATED.md](REAL_VS_SIMULATED.md) | Provenance of every number and the rule that they are never mixed |
-| [CURRENT_STATE.md](CURRENT_STATE.md) | Audit and current status |
-| [NEXT_30_DAYS.md](NEXT_30_DAYS.md) | Validation-first plan |
-| [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) | How to contribute · how to report |
+| `/` | Use BRAIN / Power BRAIN, live metrics strip, resource classes, network panel |
+| `/chat` | Streaming chat through BRAIN AUTO; "Powered by BRAIN" expands to route, model, nodes, cost, latency, verification, receipt |
+| `/pricing` · `/account` | Plans and credits; your plan, usage, compute earnings, net, credit ledger |
+| `/earn` · `/node` · `/demo` | Contributor flow, full-screen worker, multi-device room |
+| `/developers` | Quickstart (Python / JS / cURL), request path, routing, response format, node protocol, verification |
+| `/auto` | Routing console: every resource class estimated for one request, decision, receipt |
+| `/network` · `/explorer` · `/capacity` · `/economics` | Operations, jobs and nodes, what can run today, where the money goes |
+| `/receipt/[id]` · `/node/[id]` · `/epoch/[id]` | Proof-of-compute receipt, node reputation, immutable reward epoch |
+| `/rewards` · `/brain` | Reward formula and claims; the network as one machine |
+
+</details>
+
+## Security
+
+- Nothing client-reported is trusted; reported and measured values are stored and labelled separately.
+- Node requests are ed25519-signed over method, path, timestamp and body hash; ids derive from keys; replays and stale timestamps are refused.
+- Nodes run only the allowlist, in Docker with dropped capabilities, loopback-only, outbound-only.
+- Public endpoints and the event stream carry no prompts, outputs, IPs, wallets or keys.
+- Secrets live in server env only. Keys and tokens are stored as hashes. The receipt signing key is never served; only its public half is.
+
+Threat model, residual risks and planned controls: [docs/security.md](docs/security.md). Report a vulnerability: [SECURITY.md](SECURITY.md).
+
+## Roadmap
+
+| | Status |
+| --- | --- |
+| Node agent, coordinator, node router, job state machine, OpenAI API, signed receipts, ledger, `/network` `/provider` `/models`, Docker Compose | **Shipped** |
+| vLLM backend on real NVIDIA hardware in CI | Shipped in code, not yet exercised by CI |
+| Persistent WebSocket transport (QUIC-ready interface) | Planned — V1 is HTTP long-poll because the coordinator runs serverless |
+| Sampled redundant execution and canary prompts for node inference | Planned |
+| NVML/DCGM telemetry attestation | Planned |
+| Solana receipt anchoring and provider settlement | Planned; the ledger's `settled` is 0 until it runs |
+| Multi-node sharding (EXO-style) for models larger than one GPU | Planned |
 
 ## Principles
 
 - Nothing client-reported is trusted. Only server-verified compute earns.
 - Unknown is a valid value. Prices, latencies and hardware are measured or configured, never estimated.
-- Real and simulated records never share a total. The site is real-only by default; demo data lives in `services/mock/`, appears only behind the footer's "Show simulated data" button, and is labelled SIM.
+- Real and simulated records never share a total. Demo data is labelled DEMO or SIM everywhere it appears.
 - No token emissions, staking yield, points, quests, licenses, NFTs, projected returns or "cheaper than X" claims.
 
 ## Community

@@ -6,10 +6,12 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
- * Orders carry customer prompts and outputs. The public stream only ever sees the order's
- * routing facts, never its content.
+ * Orders carry customer prompts and outputs, and native-node progress events carry streamed
+ * output text (the in-process observer needs it). The public stream only ever sees routing
+ * facts and sizes, never content.
  */
 function redact(e: NetworkEvent): NetworkEvent | { type: "order.updated"; at: number; order: Pick<ComputeOrder, "orderId" | "status" | "mode" | "privacy" | "workload" | "model" | "createdAt" | "completedAt" | "receiptId" | "decisionId" | "error"> } {
+  if (e.type === "njob.progress") return { ...e, delta: "" };
   if (e.type !== "order.updated") return e;
   const { orderId, status, mode, privacy, workload, model, createdAt, completedAt, receiptId, decisionId, error } = e.order;
   return { type: "order.updated", at: e.at, order: { orderId, status, mode, privacy, workload, model, createdAt, completedAt, receiptId, decisionId, error } };

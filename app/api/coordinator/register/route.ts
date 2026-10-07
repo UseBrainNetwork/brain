@@ -1,6 +1,7 @@
 import { nodeRoute } from "@/api/http";
 import { DEFAULTS, type RegisterBody } from "@/node/protocol";
 import { authenticateSigned, readSigned } from "@/services/coordinator/auth";
+import { scheduleBenchmark } from "@/services/coordinator/benchmark";
 import { getNativeNode, registerNativeNode } from "@/services/coordinator/registry";
 import { NodeError } from "@/services/nodes";
 import { json } from "@/services/security";
@@ -21,5 +22,7 @@ export const POST = nodeRoute(async (req, { ip }) => {
   authenticateSigned(s, key);
   if (body.protocol !== 1) throw new NodeError("unsupported_protocol", 426);
   const n = await registerNativeNode(body, ip);
+  // Benchmark on join: a pinned, coordinator-timed job the node will pick up on its first work poll.
+  await scheduleBenchmark(n.nodeId);
   return json({ nodeId: n.nodeId, state: n.state, heartbeatMs: DEFAULTS.heartbeatMs, workPollMs: DEFAULTS.workPollMs, acceptedModels: n.reported.capabilities.supportedModels });
 }, 60);

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { NetworkOps } from "@/components/economy/NetworkOps";
+import { NativeFleet } from "@/components/network/NativeFleet";
 import { PageHead, Shell, SourceBadge } from "@/components/economy/parts";
 
 export const metadata: Metadata = { title: "Network operations", description: "Is this real? Is compute happening? Is someone paying? Who is doing the work? Where is the money going?" };
@@ -26,9 +27,14 @@ export default function NetworkPage() {
           </div>
         }
       >
-        Five questions, answered only from this server&apos;s real records. Simulated demo data never appears here.
+        Brain Nodes, the jobs flowing through them, and five questions about the browser network, all answered only from this server&apos;s real records. Hardware figures are what nodes reported; everything else the coordinator measured.
       </PageHead>
-      <NetworkOps />
+      <div className="mt-10">
+        <NativeFleet />
+      </div>
+      <div className="mt-10">
+        <NetworkOps />
+      </div>
     </Shell>
   );
 }

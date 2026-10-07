@@ -120,7 +120,7 @@ async function build(): Promise<Ops> {
 function events() {
   return eventBus
     .history(Date.now() - 15 * 60_000)
-    .filter((e) => e.type !== "node.heartbeat")
+    .filter((e) => e.type !== "node.heartbeat" && e.type !== "njob.progress")
     .slice(-40)
     .reverse()
     .map(describe);
@@ -138,9 +138,15 @@ function median(xs: number[]) {
 /** Compact, client-safe description of a bus event (no payload bodies). */
 function describe(e: { type: string; at: number } & Record<string, unknown>) {
   const job = e.job as { id?: string | number; status?: string; totals?: { verified: number; units: number } } | undefined;
-  const nodeId = (e.nodeId as string | undefined) ?? (e.node as { id?: string } | undefined)?.id;
+  const nodeId = (e.nodeId as string | undefined) ?? (e.node as { id?: string; nodeId?: string } | undefined)?.id ?? (e.node as { nodeId?: string } | undefined)?.nodeId;
   const unitId = e.unitId as string | undefined;
   let detail = "";
+  if (e.type === "njob.updated") {
+    const nj = e.job as { jobId: string; state: string; model: string; assignedNode: string | null };
+    return { at: e.at, type: e.type, detail: `${nj.model} · ${nj.state}${nj.assignedNode ? ` · ${nj.assignedNode}` : ""}` };
+  }
+  if (e.type === "nnode.updated") return { at: e.at, type: e.type, detail: `${nodeId} · ${String(e.change)} · ${(e.node as { state: string }).state}` };
+  if (e.type === "njob.progress") return { at: e.at, type: e.type, detail: `${nodeId} · ${String(e.outputChars)} chars` };
   if (job?.id != null) detail = `job #${job.id}${job.status ? ` · ${job.status}` : ""}${job.totals ? ` · ${job.totals.verified}/${job.totals.units} verified` : ""}`;
   if (unitId) detail = `unit ${unitId}${nodeId ? ` · node ${nodeId}` : ""}`;
   else if (nodeId && !detail) detail = `node ${nodeId}`;

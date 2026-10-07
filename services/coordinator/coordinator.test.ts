@@ -6,7 +6,8 @@ import type { ComputeReceipt } from "@/domain/economy";
 import { DEFAULTS, signingString, type HardwareReport, type NodeCapabilities, type RegisterBody, type Telemetry } from "@/node/protocol";
 import { MemoryStore } from "@/services/store";
 import { authenticateSigned, checkReplay, nodeIdFor, verifyNodeSignature, type SignedRequest } from "./auth";
-import { TRANSITIONS, createInferenceJob, getInferenceJob, matchJob, observeJob, reportCompleted, reportFailed, reportProgress, reportStarted, sweepInferenceJobs, transition, type InferenceJob } from "./jobs";
+import { classify, scheduleBenchmark } from "./benchmark";
+import { TRANSITIONS, createInferenceJob, getInferenceJob, matchJob, observeJob, publicInferenceJob, reportCompleted, reportFailed, reportProgress, reportStarted, sweepInferenceJobs, transition, type InferenceJob } from "./jobs";
 import { canonicalJson, receiptHash, verifyReceipt } from "./receipts";
 import { getNativeNode, heartbeatNativeNode, listNativeNodes, registerNativeNode, reliabilityScore, sweepNativeNodes } from "./registry";
 
@@ -263,5 +264,45 @@ describe("listing", () => {
     await registerMock();
     await registerMock();
     expect((await listNativeNodes(0)).length).toBe(2);
+  });
+});
+
+describe("benchmark on join", () => {
+  it("classifies by coordinator-measured speed only, never for mock nodes", () => {
+    expect(classify(5, false)).toBe("EDGE");
+    expect(classify(20, false)).toBe("CONSUMER");
+    expect(classify(50, false)).toBe("PRO");
+    expect(classify(200, false)).toBe("DATACENTER");
+    expect(classify(200, true)).toBeNull();
+    expect(classify(Number.NaN, false)).toBeNull();
+  });
+
+  it("schedules one pinned, unpaid benchmark job per node and records the measured speed", async () => {
+    const { n } = await registerMock(false);
+    const t = Date.now();
+    const job = await scheduleBenchmark(n.nodeId, t);
+    expect(job?.state).toBe("ASSIGNED");
+    expect(job?.assignedNode).toBe(n.nodeId);
+    expect(job?.jobId.startsWith("bj-")).toBe(true);
+    expect(publicInferenceJob(job!).kind).toBe("benchmark");
+    // Idempotent while one is pending.
+    expect(await scheduleBenchmark(n.nodeId, t + 1)).toBeNull();
+
+    await reportStarted(n.nodeId, job!.jobId, { backend: "vllm", loaded: true }, t + 100);
+    const content = "x".repeat(400);
+    await reportProgress(n.nodeId, job!.jobId, { seq: 0, delta: content, tokens: 100 }, t + 200);
+    const done = await reportCompleted(n.nodeId, job!.jobId, { content, finishReason: "stop", usage: { prompt: 20, completion: 100 }, durationMs: 2000, responseHash: sha(content) }, t + 2_200);
+    expect(done.state).toBe("COMPLETED");
+    expect(done.receiptId).toBeNull();
+    expect(done.finalCost).toBeNull();
+    const after = (await getNativeNode(n.nodeId))!;
+    expect(after.benchmark.basis).toBe("coordinator-timed");
+    expect(after.benchmark.score).toBe(50); // 100 tokens over 2.0 s of coordinator time
+    expect(after.benchmark.computeClass).toBe("PRO");
+    expect(after.activeJobIds).toEqual([]);
+    // No receipt, no accounting: zero paid compute from a benchmark.
+    expect((await g.__brainStore!.listDocs<ComputeReceipt>("receipt", { limit: 10 })).length).toBe(0);
+    // A real node that is already measured is not re-benchmarked.
+    expect(await scheduleBenchmark(n.nodeId, t + 3_000)).toBeNull();
   });
 });

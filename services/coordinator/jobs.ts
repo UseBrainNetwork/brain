@@ -9,6 +9,7 @@ import { sha256, token } from "@/services/security";
 import { getStore } from "@/services/store";
 import { updateNativeNode } from "./registry";
 import { issueNodeReceipt } from "./receipts";
+import { isBenchmarkJob, recordBenchmark } from "./benchmark";
 
 /**
  * Inference job state machine for native Brain Nodes.
@@ -73,15 +74,17 @@ export interface InferenceJob {
   modelLoaded: boolean | null;
   orderId?: string;
   decisionId?: string;
+  /** Coordinator-pinned target (benchmarks). The router still applies every hard filter to it. */
+  pinnedNode?: string;
 }
 
 /** Job as shown publicly: no prompt, no output text, lengths only. */
-export type PublicInferenceJob = Omit<InferenceJob, "request" | "output" | "requesterId"> & { request: { messages: number; chars: number; maxTokens: number }; outputChars: number };
+export type PublicInferenceJob = Omit<InferenceJob, "request" | "output" | "requesterId"> & { request: { messages: number; chars: number; maxTokens: number }; outputChars: number; kind: "inference" | "benchmark" };
 
 export function publicInferenceJob(j: InferenceJob): PublicInferenceJob {
   const { request, output, requesterId: _r, ...rest } = j;
   void _r;
-  return { ...rest, request: { messages: request.messages.length, chars: request.messages.reduce((s, m) => s + m.content.length, 0), maxTokens: request.maxTokens }, outputChars: output.length };
+  return { ...rest, request: { messages: request.messages.length, chars: request.messages.reduce((s, m) => s + m.content.length, 0), maxTokens: request.maxTokens }, outputChars: output.length, kind: isBenchmarkJob(j) ? "benchmark" : "inference" };
 }
 
 const KIND = "njob" as const;
@@ -129,6 +132,9 @@ export interface CreateJobInput {
   decisionId?: string;
   /** Hard ceiling on wall time; default 120 s. */
   ttlMs?: number;
+  pinnedNode?: string;
+  /** "ij" for inference, "bj" for coordinator benchmarks. */
+  idPrefix?: "ij" | "bj";
 }
 
 export async function createInferenceJob(input: CreateJobInput, now = Date.now()): Promise<InferenceJob> {
@@ -136,7 +142,7 @@ export async function createInferenceJob(input: CreateJobInput, now = Date.now()
   if (!spec) throw new NodeError("model_not_allowlisted", 404);
   const request = { messages: input.messages, maxTokens: input.maxTokens, temperature: input.temperature, ...(input.stop?.length ? { stop: input.stop } : {}) };
   const j: InferenceJob = {
-    jobId: `ij-${now.toString(36)}-${token(4)}`,
+    jobId: `${input.idPrefix ?? "ij"}-${now.toString(36)}-${token(4)}`,
     requesterId: input.requesterId,
     model: input.model,
     requirements: { minVramMb: spec.minVramMb || null, region: input.region ?? null },
@@ -170,6 +176,7 @@ export async function createInferenceJob(input: CreateJobInput, now = Date.now()
     modelLoaded: null,
     ...(input.orderId ? { orderId: input.orderId } : {}),
     ...(input.decisionId ? { decisionId: input.decisionId } : {}),
+    ...(input.pinnedNode ? { pinnedNode: input.pinnedNode } : {}),
   };
   await save(j);
   publish(j, now);
@@ -186,7 +193,7 @@ export async function matchJob(jobId: string, now = Date.now()): Promise<Inferen
     if (!j) throw new NodeError("unknown_job", 404);
     if (j.state !== "QUEUED") return j;
     transition(j, "MATCHING", now);
-    const r = await routeToNativeNode(j.model, { region: j.requirements.region, exclude: j.excludedNodes }, now);
+    const r = await routeToNativeNode(j.model, { region: j.requirements.region, exclude: j.excludedNodes, only: j.pinnedNode }, now);
     j.routing = { reason: r.reason, eligible: r.ranked.filter((x) => x.eligible).length, considered: r.ranked.length };
     if (!r.selected) {
       transition(j, "QUEUED", now, r.reason);
@@ -400,9 +407,13 @@ export async function reportCompleted(nodeId: string, jobId: string, body: Compl
     j.completedAt = now;
     j.responseHash = body.responseHash;
     transition(j, "COMPLETED", now);
-    const receipt = await issueNodeReceipt(j, now);
-    j.receiptId = receipt.receiptId;
-    j.finalCost = receipt.customerCost;
+    const benchmark = isBenchmarkJob(j);
+    if (!benchmark) {
+      // Coordinator-initiated benchmark work issues no receipt and earns nothing.
+      const receipt = await issueNodeReceipt(j, now);
+      j.receiptId = receipt.receiptId;
+      j.finalCost = receipt.customerCost;
+    }
     await save(j);
     const tokPerSec = completion / Math.max(0.001, (j.computeDurationMs ?? 1) / 1000);
     const firstByte = j.firstByteAt && j.assignedAt ? j.firstByteAt - j.assignedAt : null;
@@ -418,6 +429,7 @@ export async function reportCompleted(nodeId: string, jobId: string, body: Compl
         if (firstByte != null) n.measured.firstByteMs = [...n.measured.firstByteMs, firstByte].slice(-20);
       }),
     );
+    if (benchmark) after.push(() => recordBenchmark(j.jobId, tokPerSec, firstByte, now));
     publish(j, now);
     return j;
   });

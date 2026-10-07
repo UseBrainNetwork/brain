@@ -50,13 +50,25 @@ export interface NativeNode {
     firstByteMs: number[];
     consecutiveFailures: number;
   };
-  benchmark: { score: number | null; computeClass: ComputeClass | null; basis: "unmeasured" | "coordinator-timed"; at: number | null };
+  /** Coordinator-timed benchmark (services/coordinator/benchmark.ts). score = decode tokens/s on the coordinator's clock. */
+  benchmark: { score: number | null; computeClass: ComputeClass | null; basis: "unmeasured" | "coordinator-timed"; at: number | null; firstByteMs?: number | null; model?: string };
   /** 0–100 Brain Reliability Score, computed from `measured` and uptime. Starts neutral. */
   reputation: number;
   activeJobIds: string[];
+  /** Last ~2 h of heartbeat samples (one per heartbeat, capped) for the provider dashboard charts. */
+  history: TelemetrySample[];
   ipHash: string;
   banReason?: string;
 }
+
+export interface TelemetrySample {
+  at: number;
+  gpuUtilPct: number | null;
+  vramUsedMb: number | null;
+  load: number;
+  activeJobs: number;
+}
+const HISTORY_MAX = 480;
 
 /** What leaves the server. No key material, no ip hash. */
 export interface PublicNativeNode {
@@ -67,6 +79,8 @@ export interface PublicNativeNode {
   backend: string;
   supportedModels: string[];
   loadedModels: string[];
+  /** Operator-set ask, USD per 1M tokens; null = accepts network list price. A routing input. */
+  askUsdPer1MTokens: number | null;
   telemetry: Telemetry | null;
   registeredAt: number;
   lastHeartbeatAt: number;
@@ -76,6 +90,7 @@ export interface PublicNativeNode {
   reputation: number;
   activeJobs: number;
   walletLinked: boolean;
+  history: TelemetrySample[];
   /** Always true; here so UI code cannot forget to say so. */
   hardwareIsReported: true;
 }
@@ -90,6 +105,7 @@ export function publicNativeNode(n: NativeNode, now = Date.now()): PublicNativeN
     backend: n.reported.capabilities.backend,
     supportedModels: n.reported.capabilities.supportedModels,
     loadedModels: n.reported.capabilities.loadedModels,
+    askUsdPer1MTokens: n.reported.capabilities.askUsdPer1MTokens,
     telemetry: n.reported.telemetry,
     registeredAt: n.registeredAt,
     lastHeartbeatAt: n.lastHeartbeatAt,
@@ -99,6 +115,7 @@ export function publicNativeNode(n: NativeNode, now = Date.now()): PublicNativeN
     reputation: n.reputation,
     activeJobs: n.activeJobIds.length,
     walletLinked: Boolean(n.wallet?.verified),
+    history: n.history ?? [],
     hardwareIsReported: true,
   };
 }
@@ -214,6 +231,7 @@ export async function registerNativeNode(body: RegisterBody, ipHash: string, now
     benchmark: existing?.benchmark ?? { score: null, computeClass: null, basis: "unmeasured", at: null },
     reputation: existing?.reputation ?? 70,
     activeJobIds: [],
+    history: existing?.history ?? [],
     ipHash,
   };
   await save(n);
@@ -242,6 +260,7 @@ export async function heartbeatNativeNode(nodeId: string, telemetry: Telemetry, 
   n.heartbeats++;
   n.lastHeartbeatAt = now;
   n.reported.telemetry = sanitizeTelemetry(telemetry);
+  n.history = [...(n.history ?? []), { at: now, gpuUtilPct: n.reported.telemetry.gpuUtilPct, vramUsedMb: n.reported.telemetry.vramUsedMb, load: n.reported.telemetry.load, activeJobs: n.reported.telemetry.activeJobs }].slice(-HISTORY_MAX);
   if (caps) {
     const c = sanitizeCaps(caps);
     if (n.reported.hardware.mock) c.supportedModels = c.supportedModels.filter((m) => m === "brain/mock");
