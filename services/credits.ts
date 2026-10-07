@@ -14,7 +14,7 @@ import { getStore } from "./store";
  *   CONSUME          one request; credits = customerCost / creditUsd, or UNKNOWN (0 deducted, flagged)
  *   COMPUTE_OFFSET   REAL earnings from nodes this account's wallet powers, credited as usage offset.
  *                    Ledger primitive only: it never becomes a payout and is never counted as revenue.
- *   PURCHASE         reserved; no payment processor is connected, so it is never written.
+ *   PURCHASE         a bought plan period's credits, one line per confirmed on-chain payment (services/payments.ts)
  */
 export type CreditEventType = "GRANT_INCLUDED" | "CONSUME" | "COMPUTE_OFFSET" | "PURCHASE";
 
@@ -80,13 +80,23 @@ export async function creditEvents(accountId: string, limit = 500) {
 /** Grants the plan's monthly allowance once per calendar month. Idempotent via a deterministic id. */
 export async function ensureMonthlyGrant(account: Account, now = Date.now()) {
   const period = monthKey(now);
-  const plan = planById(account.plan);
+  // A bought plan's credits arrive as a PURCHASE line per payment (services/subscriptions.ts), not monthly.
+  // FREE and holder plans get their monthly allowance here.
+  const plan = account.planBasis === "paid" ? planById("FREE") : planById(account.plan);
   if (plan.includedCredits <= 0) return null;
-  const id = `grant:${account.accountId}:${period}`;
+  // The grant id carries the plan, so a holder unlocked mid-month receives that plan's allowance less
+  // whatever FREE already granted this month: the month's total is the plan's allowance, never more.
+  const id = plan.id === "FREE" ? `grant:${account.accountId}:${period}` : `grant:${account.accountId}:${period}:${plan.id}`;
   const store = getStore();
   const existing = await store.getDoc<CreditEvent>("credit", id);
   if (existing) return existing;
-  const ev: CreditEvent = { id, accountId: account.accountId, at: now, type: "GRANT_INCLUDED", credits: plan.includedCredits, usd: plan.includedCredits * creditUsd(), period, source: "REAL" };
+  let credits = plan.includedCredits;
+  if (plan.id !== "FREE") {
+    const free = await store.getDoc<CreditEvent>("credit", `grant:${account.accountId}:${period}`);
+    if (free) credits = Math.max(0, credits - free.credits);
+    if (credits <= 0) return null;
+  }
+  const ev: CreditEvent = { id, accountId: account.accountId, at: now, type: "GRANT_INCLUDED", credits, usd: credits * creditUsd(), period, source: "REAL" };
   await store.putDoc("credit", ev.id, ev, { at: ev.at, key: ev.accountId });
   return ev;
 }

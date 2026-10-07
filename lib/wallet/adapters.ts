@@ -15,6 +15,11 @@ export interface WalletAdapter {
   connect(): Promise<string>;
   /** null when the adapter cannot sign (demo). */
   signMessage: ((message: Uint8Array) => Promise<Uint8Array>) | null;
+  /**
+   * Sign and broadcast a serialized, unsigned transaction built by the server (plan purchases).
+   * Resolves to the base58 signature. Absent when the adapter cannot send transactions.
+   */
+  signAndSendTransaction?: (transaction: Uint8Array) => Promise<string>;
   disconnect(): Promise<void>;
   /** Email the login provider knows for this user (Privy email login), used for payout notifications. */
   email?: () => string | null;
@@ -24,6 +29,8 @@ interface InjectedProvider {
   connect(): Promise<{ publicKey: { toString(): string } }>;
   disconnect(): Promise<void>;
   signMessage(message: Uint8Array, encoding?: string): Promise<{ signature: Uint8Array } | Uint8Array>;
+  /** Phantom, Solflare and Backpack all accept a web3.js Transaction and return the signature. */
+  signAndSendTransaction?(transaction: unknown, options?: unknown): Promise<{ signature: string }>;
   publicKey?: { toString(): string } | null;
 }
 
@@ -51,6 +58,14 @@ function injected(id: string, name: string, get: () => InjectedProvider | undefi
       if (!p) throw new Error(`${name} not installed`);
       const out = await p.signMessage(message, "utf8");
       return out instanceof Uint8Array ? out : out.signature;
+    },
+    signAndSendTransaction: async (bytes) => {
+      const p = get();
+      if (!p?.signAndSendTransaction) throw new Error(`${name} cannot send transactions`);
+      // web3.js is loaded only here; the rest of the wallet layer has no need for it.
+      const { Transaction } = await import("@solana/web3.js");
+      const { signature } = await p.signAndSendTransaction(Transaction.from(bytes));
+      return signature;
     },
     async disconnect() {
       await get()?.disconnect().catch(() => {});

@@ -141,6 +141,19 @@ class WalletStore {
     return btoa(String.fromCharCode(...sig));
   }
 
+  /**
+   * Sign and send a server-built transaction with the connected wallet (plan purchases). Returns the
+   * base58 signature. Requires a verified (signature-proven) wallet so the paying address is known.
+   */
+  async payTransaction(transactionBase64: string): Promise<string> {
+    const a = this.adapter(this.state.adapterId);
+    if (!a?.signAndSendTransaction || !this.state.verified) throw new Error("This wallet cannot send transactions");
+    const bin = atob(transactionBase64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return a.signAndSendTransaction(bytes);
+  }
+
   dismissError() {
     if (this.state.status === "error") this.set({ status: "disconnected", error: null, adapterId: null });
   }

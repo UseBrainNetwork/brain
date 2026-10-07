@@ -17,6 +17,15 @@ export interface Account {
   createdAt: number;
   lastSeenAt: number;
   plan: PlanId;
+  /**
+   * How the current paid plan was obtained and until when it runs. Absent for FREE.
+   *   paid    bought on-chain (services/payments.ts); `planUntil` is the end of the paid period
+   *   holder  unlocked by holding BRAIN tokens; re-checked against the chain while active
+   */
+  planBasis?: "paid" | "holder";
+  planUntil?: number;
+  /** Last time a holder plan's balance was re-read from the chain. */
+  holderCheckedAt?: number;
   /** Solana address proven by signature, if attached. */
   wallet?: string;
   /** API customer this account owns (created lazily when the first key is issued). */
@@ -68,10 +77,27 @@ export async function createAccount(): Promise<Account> {
   return a;
 }
 
+/**
+ * A paid or holder plan past its end date is FREE again. Applied on every request-path read so a
+ * lapsed plan never keeps its limits for a single call longer than it was paid for.
+ */
+export async function expirePlanIfDue(account: Account, now = Date.now()): Promise<Account> {
+  if (account.plan !== "FREE" && account.planBasis && account.planUntil != null && now > account.planUntil) {
+    account.plan = "FREE";
+    delete account.planBasis;
+    delete account.planUntil;
+    delete account.holderCheckedAt;
+    await saveAccount(account);
+    await syncCustomerLimit(account);
+  }
+  return account;
+}
+
 /** Resolve the account for a request without creating one. */
 export async function currentAccount(req: Request): Promise<Account | null> {
   const id = verifySession(readSessionCookie(req));
-  return id ? getAccount(id) : null;
+  const a = id ? await getAccount(id) : null;
+  return a ? expirePlanIfDue(a) : null;
 }
 
 /** Resolve or create the account for a request. Returns the Set-Cookie header when a new session was started. */
@@ -99,8 +125,29 @@ export async function attachWallet(account: Account, wallet: string) {
   return account;
 }
 
-export async function setPlan(account: Account, plan: PlanId) {
+/** The account's API customer record (if any key was ever issued) follows the plan's rate limit. */
+async function syncCustomerLimit(account: Account) {
+  const store = getStore();
+  const id = `acct:${account.accountId}`;
+  const c = await store.getDoc<{ customerId: string; createdAt: number; rateLimit: number }>("customer", id);
+  if (!c) return;
+  const limit = planById(account.plan).rateLimit;
+  if (c.rateLimit !== limit) await store.putDoc("customer", id, { ...c, rateLimit: limit }, { at: c.createdAt });
+}
+
+export async function setPlan(account: Account, plan: PlanId, basis?: { basis: "paid" | "holder"; until: number; checkedAt?: number }) {
   account.plan = planById(plan).id;
+  if (account.plan === "FREE" || !basis) {
+    delete account.planBasis;
+    delete account.planUntil;
+    delete account.holderCheckedAt;
+  } else {
+    account.planBasis = basis.basis;
+    account.planUntil = basis.until;
+    if (basis.checkedAt != null) account.holderCheckedAt = basis.checkedAt;
+    else delete account.holderCheckedAt;
+  }
   await saveAccount(account);
+  await syncCustomerLimit(account);
   return account;
 }

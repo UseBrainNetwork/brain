@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Button, Container, Section } from "@/components/ui";
 import { comingSoon, creditUsd, paymentsConnected, plans } from "@/lib/plans";
+import { ChoosePlan } from "@/components/pricing/ChoosePlan";
 import { NotifyButton } from "@/components/pricing/NotifyButton";
 import { earn } from "@/lib/site";
 import { snapshot } from "@/services/accounting";
@@ -70,14 +71,12 @@ export default async function PricingPage() {
                   {p.rateLimit} requests / min · private routing {p.privateRouting ? "yes" : "no"}
                 </div>
                 <div className="mt-auto pt-7">
-                  {!soon ? (
+                  {p.id === "FREE" ? (
                     <Button href="/chat" arrow className="w-full">
                       Use BRAIN free
                     </Button>
-                  ) : payments ? (
-                    <Button disabled className="w-full" variant="secondary">
-                      Choose {p.name}
-                    </Button>
+                  ) : !soon ? (
+                    <ChoosePlan plan={p.id} planName={p.name} priceUsd={p.priceUsd ?? 0} holdTokens={p.holdTokens} dark={dark} />
                   ) : (
                     <NotifyButton plan={p.id} planName={p.name} dark={dark} />
                   )}
@@ -86,7 +85,12 @@ export default async function PricingPage() {
             );
           })}
         </div>
-        {!payments && (
+        {payments ? (
+          <p className="mt-4 font-mono text-[11.5px] leading-relaxed text-ink/50">
+            Paid plans are bought on Solana: the USD price in USDC, or in SOL at a live quoted rate, sent to the protocol wallet and verified on chain before the plan activates. 30 days per payment, no card, no auto-renew.
+            {ps.some((p) => p.holdTokens != null) && " Holding BRAIN above a plan's threshold in a linked wallet includes that plan while the holding lasts; nothing is locked."} Model names are not listed because BRAIN routes by capability and the set changes; the receipt on every answer names the exact model that ran.
+          </p>
+        ) : (
           <p className="mt-4 font-mono text-[11.5px] leading-relaxed text-ink/50">
             Coming-soon plans show their intended price and what they will include. Nothing can be purchased yet and no one is charged. Model names are not listed because BRAIN routes by capability and the set changes; the receipt on every answer names the exact model that ran.
           </p>

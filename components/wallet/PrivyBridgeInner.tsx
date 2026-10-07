@@ -1,9 +1,10 @@
 "use client";
 
 import { PrivyProvider, useConnectWallet, useLogin, useLogout, usePrivy } from "@privy-io/react-auth";
-import { toSolanaWalletConnectors, useSignMessage, useWallets } from "@privy-io/react-auth/solana";
+import { toSolanaWalletConnectors, useSignAndSendTransaction, useSignMessage, useWallets } from "@privy-io/react-auth/solana";
 import { useEffect, useRef } from "react";
-import type { WalletAdapter } from "@/lib/wallet/adapters";
+import { protocolWallet } from "@/lib/site";
+import { base58Encode, type WalletAdapter } from "@/lib/wallet/adapters";
 import { PRIVY_ADAPTER_ID, PRIVY_APP_ID } from "@/lib/wallet/privy";
 import { walletStore } from "@/lib/wallet/store";
 
@@ -43,6 +44,7 @@ function Bridge() {
   const { authenticated, ready, user } = usePrivy();
   const { wallets } = useWallets();
   const { signMessage } = useSignMessage();
+  const { signAndSendTransaction } = useSignAndSendTransaction();
   const { logout } = useLogout();
   const waiters = useRef<Waiter[]>([]);
   const settle = (fn: (w: Waiter) => void) => {
@@ -59,8 +61,8 @@ function Bridge() {
 
   // Hooks are re-created every render; the adapter is registered once and reads the latest through this ref.
   const email = user?.email?.address ?? null;
-  const latest = useRef({ authenticated, ready, wallets, signMessage, logout, login, connectWallet, email });
-  latest.current = { authenticated, ready, wallets, signMessage, logout, login, connectWallet, email };
+  const latest = useRef({ authenticated, ready, wallets, signMessage, signAndSendTransaction, logout, login, connectWallet, email });
+  latest.current = { authenticated, ready, wallets, signMessage, signAndSendTransaction, logout, login, connectWallet, email };
 
   useEffect(() => {
     const w = wallets[0];
@@ -109,6 +111,20 @@ function Bridge() {
           options: { uiOptions: { title: "Prove wallet ownership", description: "Signing links this wallet to your BRAIN rewards. It moves no funds." } },
         });
         return signature;
+      },
+      async signAndSendTransaction(transaction) {
+        const L = latest.current;
+        const current = walletStore.getSnapshot().address;
+        const wallet = L.wallets.find((x) => x.address === current) ?? L.wallets[0];
+        if (!wallet) throw new Error("No Solana wallet connected.");
+        const chain = protocolWallet.cluster === "mainnet-beta" ? "solana:mainnet" : protocolWallet.cluster === "devnet" ? "solana:devnet" : "solana:testnet";
+        const { signature } = await L.signAndSendTransaction({
+          transaction,
+          wallet,
+          chain,
+          options: { uiOptions: { description: "Pays for your BRAIN plan. The transfer goes to the BRAIN protocol wallet, which funds the people powering the network.", buttonText: "Pay" } },
+        });
+        return base58Encode(signature);
       },
       async disconnect() {
         await latest.current.logout();

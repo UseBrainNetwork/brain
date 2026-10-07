@@ -40,18 +40,32 @@ export function AccountDashboard() {
     <div className="mt-10 space-y-5">
       <div className="grid gap-5 lg:grid-cols-4">
         <Panel title="Your plan" right={<SourceBadge source="REAL" />}>
-          <Metric k="Plan" v={s.plan.name} sub={s.plan.priceUsd === 0 ? "free" : `$${s.plan.priceUsd}/mo`} />
+          <Metric
+            k="Plan"
+            v={s.plan.name}
+            sub={s.status.basis === "paid" && s.status.until ? `paid · until ${new Date(s.status.until).toISOString().slice(0, 10)}` : s.status.basis === "holder" ? "included · holding BRAIN" : s.plan.priceUsd === 0 ? "free" : `$${s.plan.priceUsd}/mo`}
+          />
           <div className="mt-5 font-mono text-[11px] text-chalk/50">
             {s.plan.includedCredits.toLocaleString("en-US")} credits / month · {s.plan.rateLimit} req/min
             <br />
             modes {s.plan.modes.filter((m) => m !== "BROWSER_ONLY").join(" · ")}
+            {s.status.basis === "holder" && s.status.holder.checkedAt != null && (
+              <>
+                <br />
+                balance re-read {when(s.status.holder.checkedAt)}
+              </>
+            )}
           </div>
           <Link href="/pricing" className="mt-4 inline-block font-mono text-[11.5px] text-chalk/70 underline decoration-chalk/25 underline-offset-4 hover:text-chalk">
-            Plans →
+            {s.status.basis === "paid" ? "Extend or change plan →" : "Plans →"}
           </Link>
         </Panel>
         <Panel title="Subscription" right={<SourceBadge source="REAL" />}>
-          <Metric k="Paid this month" v={s.paymentsConnected ? usd(0) : "$0"} sub={s.paymentsConnected ? "settled payments" : "nothing has been charged"} />
+          <Metric
+            k="Paid, last 30 days"
+            v={usd(s.payments.filter((p) => p.confirmedAt && Date.now() - p.confirmedAt < 30 * 86400_000).reduce((t, p) => t + p.amountUsd, 0), 2)}
+            sub={s.payments.length ? `${s.payments.length} on-chain payment${s.payments.length === 1 ? "" : "s"}` : s.paymentsConnected ? "no payments yet" : "nothing has been charged"}
+          />
           <div className="mt-5 grid grid-cols-2 gap-4">
             <Metric k="Credits left" v={Math.max(0, Math.floor(c.balance)).toLocaleString("en-US")} sub={`of ${Math.floor(c.granted).toLocaleString("en-US")} granted`} />
             <Metric k="Used" v={usageUsd == null ? (s.usage.requests ? "UNKNOWN" : "$0") : usd(usageUsd)} sub={`${s.usage.requests} request${s.usage.requests === 1 ? "" : "s"}${c.unknownCostRequests ? ` · ${c.unknownCostRequests} unpriced` : ""}`} />
@@ -224,7 +238,9 @@ function LedgerRow({ e }: { e: CreditEvent }) {
         ? `${e.period} included credits`
         : e.type === "COMPUTE_OFFSET"
           ? `node ${e.detail?.nodeId ?? "—"} earned ${usd(e.usd)}`
-          : "";
+          : e.type === "PURCHASE"
+            ? `plan bought on chain · ${usd(e.usd, 2)} · 30 days`
+            : "";
   return (
     <div className="grid grid-cols-[150px_110px_1fr_90px] items-center gap-3 border-b border-chalk/[0.06] py-2 text-chalk/75 max-md:grid-cols-[1fr_80px]">
       <span className="text-chalk/45 max-md:hidden">{when(e.at)}</span>

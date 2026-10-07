@@ -4,7 +4,9 @@ import type { Account } from "./accounts";
 import { listEvents } from "./accounting";
 import { balance, type CreditBalance, offsetFromEarning } from "./credits";
 import { usage } from "./customers";
+import { type PaymentIntent, paymentsFor } from "./payments";
 import { getStore } from "./store";
+import { type PlanStatus, planStatus } from "./subscriptions";
 
 /**
  * One view that joins the two sides of a person: what they use (credits, requests) and what
@@ -17,6 +19,10 @@ import { getStore } from "./store";
 export interface AccountSummary {
   account: Account;
   plan: Plan;
+  /** Plan basis (free / paid / holder), end date, and holder-access thresholds and balance. */
+  status: PlanStatus;
+  /** Confirmed on-chain purchases, newest first. */
+  payments: PaymentIntent[];
   paymentsConnected: boolean;
   credits: CreditBalance;
   usage: Awaited<ReturnType<typeof usage>>;
@@ -33,7 +39,7 @@ export interface AccountSummary {
   netUsd: number | null;
 }
 
-export async function accountSummary(account: Account): Promise<AccountSummary> {
+export async function accountSummary(account: Account, opts: { holderBalance?: number | null } = {}): Promise<AccountSummary> {
   const store = getStore();
   const plan = planById(account.plan);
   let nodeIds: string[] = [];
@@ -50,13 +56,15 @@ export async function accountSummary(account: Account): Promise<AccountSummary> 
       for (const e of earningEvents) await offsetFromEarning(account, e);
     }
   }
-  const [credits, use] = await Promise.all([balance(account.accountId), usage(`acct:${account.accountId}`, 200)]);
+  const [credits, use, status, payments] = await Promise.all([balance(account.accountId), usage(`acct:${account.accountId}`, 200), planStatus(account, { balance: opts.holderBalance }), paymentsFor(account.accountId)]);
   const earnedUsd = account.wallet ? earningEvents.reduce((s, e) => s + e.amount, 0) : null;
   const usageUsd = use.cost;
   const netUsd = earnedUsd == null || (use.requests > 0 && usageUsd == null) ? null : earnedUsd - (usageUsd ?? 0);
   return {
     account,
     plan,
+    status,
+    payments,
     paymentsConnected: paymentsConnected(),
     credits,
     usage: use,

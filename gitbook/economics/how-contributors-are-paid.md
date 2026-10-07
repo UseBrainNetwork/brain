@@ -35,7 +35,7 @@ Two sources feed the payout wallet.
 
 **Creator fees.** Trading the BRAIN token on pump.fun generates creator fees, which accrue in a vault. The operator claims them on-chain to the protocol wallet and moves SOL from there to the payout wallet. All three steps are ordinary Solana transactions you can read on any explorer; the [treasury page](treasury-and-runway.md) explains how BRAIN reads them back.
 
-**People using the GPUs.** Developers who send work to the network, through the API or the chat, pay for the compute they consume, and that revenue goes to the same payout wallet. Every receipt already records the customer-funded amount each node earned, so the figure is tracked per job and per node ([pricing and credits](pricing-and-credits.md)). Today the Free plan is live and paid plans are opening; as usage grows this becomes the larger of the two sources, which is the point: the people powering the network are paid by the people using it.
+**People using the GPUs.** Developers who send work to the network, through the API or the chat, pay for the compute they consume, and that revenue goes to the same payout wallet. Every receipt already records the customer-funded amount each node earned, so the figure is tracked per job and per node ([pricing and credits](pricing-and-credits.md)). Paid plans are bought on Solana and paid straight into that wallet; as usage grows this becomes the larger of the two sources, which is the point: the people powering the network are paid by the people using it.
 
 ## What counts as verified work
 
