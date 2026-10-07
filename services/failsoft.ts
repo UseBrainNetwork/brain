@@ -22,9 +22,17 @@ export class StoreUnavailableError extends Error {
   }
 }
 
+/**
+ * Structural check, not `instanceof`: the bundler can place this module in more than one chunk
+ * (route layer and store layer), and then two StoreUnavailableError classes exist at runtime.
+ */
+export function isStoreUnavailable(e: unknown): e is StoreUnavailableError {
+  return typeof e === "object" && e != null && (e as { code?: unknown }).code === "database_unavailable" && (e as { status?: unknown }).status === 503;
+}
+
 /** Connection-level failures (not SQL errors): the database or pooler is not answering. */
 export function isConnectivityError(e: unknown): boolean {
-  if (e instanceof StoreUnavailableError) return true;
+  if (isStoreUnavailable(e)) return true;
   const err = e as { code?: string; message?: string } | null;
   if (!err) return false;
   const code = String(err.code ?? "");
