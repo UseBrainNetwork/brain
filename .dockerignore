@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.shots
+.vercel
+.env*
+relay/.wrangler
+relay/node_modules
+node/node_modules
+*.log

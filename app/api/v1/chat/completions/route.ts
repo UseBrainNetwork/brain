@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { brainHeaders } from "@/api/brainHeaders";
 import { chatEventStream, finalize, sseHeaders } from "@/api/chatStream";
 import { validateChat } from "@/api/gateway";
 import { body, nodeRoute } from "@/api/http";
@@ -10,6 +11,7 @@ import { getAccount } from "@/services/accounts";
 import { balance, consumeForReceipt, ensureMonthlyGrant, mayConsume } from "@/services/credits";
 import { MISSING_KEY, authenticate, customerRateLimit, openAccess, recordRequest } from "@/services/customers";
 import { planById } from "@/lib/plans";
+import { isAllowedModel } from "@/node/models";
 import { bearer, json, tooMany } from "@/services/security";
 
 export const dynamic = "force-dynamic";
@@ -39,8 +41,13 @@ export const POST = nodeRoute(async (req) => {
   const raw = await body<Record<string, unknown>>(req, 128 * 1024);
   const chat = validateChat(raw);
   const mode = normalizeMode(String(raw.mode ?? raw.priority ?? "auto"));
-  const privacyRaw = String(raw.privacy ?? "standard").toUpperCase() as PrivacyRequirement;
+  // Allowlisted node models exist only on community Brain Nodes, whose operators can read the
+  // prompt. Naming one is choosing that; the default privacy for such a request is PUBLIC and the
+  // response says so. Asking for STANDARD/PRIVATE with a node model is a contradiction, not a fallback.
+  const nodeModel = isAllowedModel(chat.model);
+  const privacyRaw = String(raw.privacy ?? (nodeModel ? "public" : "standard")).toUpperCase() as PrivacyRequirement;
   const privacy = PRIVACY.has(privacyRaw) ? privacyRaw : "STANDARD";
+  if (nodeModel && privacy !== "PUBLIC") return json({ error: { code: "privacy_conflict", message: `${chat.model} runs on community Brain Nodes whose operators can read prompts. Send privacy: "public" (the default for this model), or use brain/auto with your privacy level.` } }, 400);
   if (account) {
     const plan = planById(account.plan);
     if (!plan.modes.includes(mode)) return json({ error: { code: "mode_not_in_plan", message: `${mode} routing is not included in the ${plan.name} plan.` } }, 403);
@@ -74,15 +81,16 @@ export const POST = nodeRoute(async (req) => {
 
   if (chat.stream) {
     const stream = await chatEventStream({ input: { request, mode, privacy }, customerId: customer.customerId, chatId, t0, mode, privacy, onComplete: record });
-    return new Response(stream, { headers: sseHeaders });
+    return new Response(stream, { headers: { ...sseHeaders, "brain-request-id": chatId } });
   }
 
   const order = await placeOrder({ request, mode, privacy }, customer.customerId);
   const s = await finalize(order, t0, mode, privacy);
   await record(order, s);
+  const headers = await brainHeaders(chatId, s.brain, s.receipt?.nodesUsed ?? []);
   if (order.status !== "COMPLETED") {
     const status = order.status === "REJECTED" ? 503 : 502;
-    return json({ error: { code: order.status === "REJECTED" ? "no_provider_available" : "upstream_failed", message: order.error ?? "execution failed" }, brain: s.brain }, status);
+    return json({ error: { code: order.status === "REJECTED" ? "no_provider_available" : "upstream_failed", message: order.error ?? "execution failed" }, brain: s.brain }, { status, headers });
   }
   return json(
     {
@@ -99,6 +107,6 @@ export const POST = nodeRoute(async (req) => {
       ],
       brain: s.brain,
     },
-    { headers: { "x-brain-receipt": order.receiptId ?? "" } },
+    { headers },
   );
 }, networkConfig.rateLimit.inferenceRequests * 3);

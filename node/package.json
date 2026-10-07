@@ -1,0 +1,15 @@
+{
+  "name": "@brain/node",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Brain Node agent: contributes a GPU to the Brain compute network. Outbound-only, signed protocol, vLLM in Docker or mock mode.",
+  "type": "module",
+  "engines": { "node": ">=20.9" },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "mock": "BRAIN_NODE_MODE=mock tsx src/main.ts"
+  },
+  "dependencies": {
+    "tsx": "^4.20.0"
+  }
+}

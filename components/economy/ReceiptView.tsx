@@ -10,6 +10,7 @@ const VERIFICATION_TEXT: Record<ComputeReceipt["verificationMethod"], string> = 
   "redundant+spot-check": "Every work unit was computed by two different nodes and their outputs compared, then spot-checked by the server.",
   canary: "The server already knew the full answer and compared it to the node's output.",
   "unverified-provider-response": "An external model provider returned this result. BRAIN did not and could not verify the computation; the hash only fixes the response text.",
+  "node-reported": "A native Brain Node produced this result. The coordinator checked that the response hash matches the text, that the final text equals what was streamed, that token counts are plausible and that the claimed duration fits the observed wall time. It did not re-run the model; token counts are the node's claim. The receipt is signed by the coordinator.",
 };
 
 export function ReceiptView({ receipt: r, job, decision }: { receipt: ComputeReceipt; job: DistributedJob | null; decision: RouteDecision | null }) {

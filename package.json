@@ -8,7 +8,10 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "node:mock": "BRAIN_NODE_MODE=mock BRAIN_COORDINATOR_URL=${BRAIN_COORDINATOR_URL:-http://localhost:3000} tsx node/src/main.ts",
+    "node": "tsx node/src/main.ts",
+    "demo:request": "node scripts/demo-request.mjs"
   },
   "engines": {
     "node": ">=20.9"
@@ -40,6 +43,7 @@
     "@webgpu/types": "^0.1.74",
     "puppeteer-core": "^24.43.1",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"
   },

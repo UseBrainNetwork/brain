@@ -5,7 +5,9 @@ import type { Capability, ComputeReceipt, ExecutionEstimate, ExecutionRequest, E
 import { networkConfig } from "@/lib/config";
 import { priceForComputeUnits, priceForTokens, tokenListPricePer1MUsd, upstreamPricePer1MUsd } from "@/lib/pricing";
 import { workloadUnits } from "@/network/workloads";
+import { isAllowedModel } from "@/node/models";
 import { OpenAICompatibleProvider } from "@/providers/openaiCompatible";
+import { NativeNetworkExecutionProvider } from "./nativeProvider";
 import { logProviderError, safeProviderError } from "./errors";
 import { accrueReceipt } from "@/services/accounting";
 import { createJob, getJob, listJobs } from "@/services/distributed";
@@ -152,28 +154,7 @@ export class BrowserNetworkExecutionProvider implements IntelligenceProvider {
   }
 }
 
-/* ------------------------------------------------------------ native network (not connected) */
-
-/**
- * Community machines running a native worker. The protocol does not exist yet, so this provider
- * is honest about it: never supported, never available, health UNCONFIGURED. It exists so the
- * router, the topology and /capacity show the slot without faking supply.
- */
-export class NativeNetworkExecutionProvider implements IntelligenceProvider {
-  readonly id = "brain-native-pool";
-  readonly type = "NATIVE_NETWORK" as const;
-  readonly capabilities = [] as const;
-  readonly trust = "untrusted-distributed" as const;
-  async estimate(): Promise<ExecutionEstimate> {
-    return { provider: this.id, target: this.type, model: null, supported: false, available: false, estimatedCost: null, costBasis: null, estimatedLatency: null, latencyBasis: null, estimatedReliability: 0, availableCapacity: 0, qualityTier: null, confidence: 0, notes: ["native worker protocol not implemented; no native nodes can connect yet"] };
-  }
-  async execute(): Promise<ExecutionResult> {
-    throw new Error("native network: not connected");
-  }
-  async health(): Promise<ProviderHealth> {
-    return { provider: this.id, target: this.type, status: "UNCONFIGURED", detail: "native worker protocol not implemented", checkedAt: Date.now() };
-  }
-}
+/* ------------------------------------------------------------ native network: engine/nativeProvider.ts */
 
 /* ------------------------------------------------------------ OpenAI-compatible upstreams */
 
@@ -239,6 +220,10 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
     if (req.kind !== "chat") {
       notes.push("upstream providers execute chat models only");
       return { ...base, model: null, supported: false, estimatedCost: null, costBasis: null, estimatedLatency: null, latencyBasis: null, confidence: 0, estimatedReliability: st.reliability ?? 0, notes };
+    }
+    if (isAllowedModel(req.model)) {
+      notes.push(`${req.model} is a Brain Node model; upstream providers never substitute for it`);
+      return { ...base, model: this.model, supported: false, estimatedCost: null, costBasis: null, estimatedLatency: null, latencyBasis: null, confidence: 0, estimatedReliability: st.reliability ?? 0, notes };
     }
     if (wantsTools(req.tools, req.tool_choice) && !this.supportsTools) {
       notes.push("request needs tool calling; disabled for this upstream");

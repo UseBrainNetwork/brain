@@ -1,5 +1,7 @@
 import "server-only";
 import { inferenceModels } from "@/services/mock/mockData";
+import { MODEL_ALLOWLIST } from "@/node/models";
+import { routableNativeNodes } from "@/services/coordinator/registry";
 import type { ChatMessage, ChatRequest } from "@/providers/types";
 import { chatChars, type ResponseFormat, type ToolChoice, type ToolDefinition } from "@/domain/chat";
 
@@ -18,7 +20,8 @@ export class GatewayError extends Error {
   }
 }
 
-const MODEL_IDS = new Set(inferenceModels.map((m) => m.id));
+// brain/* aliases route through BRAIN AUTO; allowlisted native ids pin the request to Brain Nodes serving that model.
+const MODEL_IDS = new Set([...inferenceModels.map((m) => m.id), ...MODEL_ALLOWLIST.map((m) => m.id)]);
 const MAX_MESSAGES = 40;
 const MAX_CHARS = 24_000;
 
@@ -178,10 +181,33 @@ export function reframeStream(upstream: ReadableStream<Uint8Array>, id: string, 
   );
 }
 
-export function listModels() {
+/**
+ * GET /v1/models. `brain/*` entries are routing aliases. Allowlisted native models are listed with
+ * live counts from the coordinator: `nodes_online` is how many Brain Nodes serve the model right
+ * now and `available` is false when that is zero. Nothing here is a catalogue promise.
+ */
+export async function listModels() {
+  const nodes = await routableNativeNodes().catch(() => []);
+  const live = nodes.filter((n) => n.state === "ONLINE" || n.state === "BUSY");
+  const native = MODEL_ALLOWLIST.map((m) => {
+    const serving = live.filter((n) => n.reported.capabilities.supportedModels.includes(m.id));
+    return {
+      id: m.id,
+      object: "model",
+      owned_by: m.mock ? "brain-mock" : "brain-nodes",
+      context_length: m.context,
+      status: m.mock ? "mock" : serving.length ? "available" : "no_nodes",
+      available: serving.length > 0,
+      nodes_online: serving.length,
+      nodes_loaded: serving.filter((n) => n.reported.capabilities.loadedModels.includes(m.id)).length,
+      min_vram_mb: m.minVramMb,
+      params: m.params,
+      license: m.license,
+    };
+  });
   return {
     object: "list",
-    data: inferenceModels.map((m) => ({ id: m.id, object: "model", owned_by: "brain", context_length: m.context, status: m.status })),
+    data: [...inferenceModels.map((m) => ({ id: m.id, object: "model", owned_by: "brain", context_length: m.context, status: m.status })), ...native],
   };
 }
 

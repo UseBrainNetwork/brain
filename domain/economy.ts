@@ -20,7 +20,33 @@ export type VerificationMethod =
   /** The server knew the full answer in advance. */
   | "canary"
   /** External model provider response. BRAIN did not and cannot verify the computation. */
-  | "unverified-provider-response";
+  | "unverified-provider-response"
+  /**
+   * A native Brain Node produced this. The coordinator checked the response hash, that the final
+   * text equals the streamed text, token-count plausibility and wall time; it did not re-run the
+   * model. Token counts are the node's claim.
+   */
+  | "node-reported";
+
+/**
+ * Canonical body of a Brain Compute Receipt for native-node work. Serialised with sorted keys
+ * (`canonicalReceipt()`), hashed with sha256 and signed by the coordinator's ed25519 key. Built
+ * so a batch of these hashes can later be anchored on Solana without putting tokens on-chain.
+ */
+export interface CanonicalReceiptBody {
+  v: 1;
+  jobId: string;
+  nodeId: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  executionMs: number;
+  timestamp: number;
+  requestHash: string;
+  responseHash: string;
+  hardwareClass: string;
+  cost: { amount: number; currency: "USD" } | null;
+}
 
 export interface ComputeReceipt {
   receiptId: string;
@@ -47,9 +73,14 @@ export interface ComputeReceipt {
    * proof of execution and is NOT signed or anchored yet; see `attestation`.
    */
   resultHash: string;
-  resultHashLabel: "sha256 of verified unit outputs" | "sha256 of provider response";
-  /** Reserved for future signatures / chain anchoring. Always `{ kind: "none" }` today. */
+  resultHashLabel: "sha256 of verified unit outputs" | "sha256 of provider response" | "sha256 of node response";
+  /**
+   * `none` for browser-pool and upstream receipts. Native-node receipts carry the coordinator's
+   * ed25519 signature over `canonical.hash`; `signer` is the raw public key, base64. Chain anchoring is planned.
+   */
   attestation: { kind: "none" } | { kind: "signature"; signer: string; signature: string } | { kind: "anchor"; chain: string; txId: string };
+  /** Native-node receipts only: the exact bytes that were hashed and signed. */
+  canonical?: { body: CanonicalReceiptBody; hash: string };
   source: Source;
   /** Money. null = unpriced / UNKNOWN. Never fabricated. */
   customerCost: Money | null;
@@ -62,7 +93,7 @@ export interface ComputeReceipt {
   planId?: string;
   stepId?: string;
   /** Chat receipts: token usage as the upstream reported it, or estimated from characters. */
-  tokens?: { prompt: number; completion: number; basis: "provider-reported" | "estimated-from-chars" };
+  tokens?: { prompt: number; completion: number; basis: "provider-reported" | "estimated-from-chars" | "node-reported" };
   /**
    * Set on receipts for compute attached to a chat/inference request. The nodes on this receipt ran a
    * verification workload sized by that request; they did not produce the request's answer.

@@ -6,6 +6,8 @@
  */
 
 import type { AccountingEvent, ComputeOrder, ComputeReceipt } from "./economy";
+import type { PublicInferenceJob } from "@/services/coordinator/jobs";
+import type { PublicNativeNode } from "@/services/coordinator/registry";
 
 export type DeviceClass =
   | "M4_MAX"
@@ -338,6 +340,11 @@ export type NetworkEvent =
   | { type: "work.failed"; at: number; jobId: string; unitId: string; nodeId: string; reason: string; job: DistributedJob }
   | { type: "work.reassigned"; at: number; jobId: string; unitId: string; fromNodeId: string; toNodeId: string; job: DistributedJob }
   | { type: "djob.completed"; at: number; job: DistributedJob }
-  | { type: "djob.failed"; at: number; job: DistributedJob };
+  | { type: "djob.failed"; at: number; job: DistributedJob }
+  // Native Brain Nodes (node/) and their inference jobs (services/coordinator).
+  | { type: "nnode.updated"; at: number; node: PublicNativeNode; change: "registered" | "rejoined" | "state" | "offline" }
+  | { type: "njob.updated"; at: number; job: PublicInferenceJob }
+  | { type: "njob.assigned"; at: number; jobId: string; nodeId: string }
+  | { type: "njob.progress"; at: number; jobId: string; nodeId: string; seq: number; delta: string; outputChars: number };
 
 export type NetworkEventType = NetworkEvent["type"];

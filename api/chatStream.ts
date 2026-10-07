@@ -79,7 +79,8 @@ export async function summarize(order: ComputeOrder, t0: number, mode: RoutingMo
       latencyMs: Date.now() - t0,
       cost: receipt?.customerCost ?? null,
       verification: receipt?.verificationMethod ?? null,
-      verified: receipt ? receipt.verificationMethod !== "unverified-provider-response" : false,
+      // Only server-verified work counts: spot-checks, canaries, redundancy. Node-reported and upstream answers do not.
+      verified: receipt ? receipt.verificationMethod !== "unverified-provider-response" && receipt.verificationMethod !== "node-reported" : false,
       usage: receipt?.tokens ? { inputUnits: receipt.tokens.prompt, outputUnits: receipt.tokens.completion } : undefined,
       status: order.status,
       error: order.error,
