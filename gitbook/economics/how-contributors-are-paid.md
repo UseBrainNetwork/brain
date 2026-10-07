@@ -5,8 +5,9 @@ One rule, stated plainly: **every hour, a fixed amount of SOL is split among the
 ```mermaid
 flowchart LR
   fees["Creator fees from token trades<br/>accrue in the pump.fun vault"] -->|claimed on-chain| proto["Protocol wallet<br/>HZLe…gxwa"]
+  usage["Developers paying to use<br/>the network's GPUs"] --> proto
   proto -->|transfer| payout["Payout wallet<br/>7TSA…axVF"]
-  payout -->|0.15 SOL per epoch| epoch["Hourly epoch<br/>split by verified compute"]
+  payout -->|fixed SOL per epoch| epoch["Hourly epoch<br/>split by verified compute"]
   epoch -->|claim by signed message| w1["Wallet A"]
   epoch --> w2["Wallet B"]
   epoch --> w3["…"]
@@ -24,13 +25,17 @@ Each wallet's allocation becomes claimable immediately.
 
 ## The pool
 
-The pool is a fixed operator setting, `BRAIN_EPOCH_POOL_SOL`, currently **0.15 SOL per epoch** (3.6 SOL per day). It is not a share of fees, not a percentage of anything, not derived from a price. It is a number the operator sets and the site displays on [/economics](https://brainnetwork.app/economics) along with how many epochs the payout wallet can fund at that rate.
+The pool is a **fixed amount of SOL per epoch**, set by the operator (`BRAIN_EPOCH_POOL_SOL`). It is not a share of fees, not a percentage of anything, not derived from a price. The current amount is always shown live on [/economics](https://brainnetwork.app/economics), together with how many epochs the payout wallet can fund at that rate. The operator raises it as funding grows; this book deliberately does not print a number, because the live page is the only place it is true.
 
 If the setting is absent, nothing live is settled. The pool never falls back to an estimate.
 
 ## Where the SOL comes from
 
-Trading the BRAIN token on pump.fun generates creator fees, which accrue in a vault. The operator claims them on-chain to the protocol wallet and moves SOL from there to the payout wallet. The payout wallet is what funds epochs. All three steps are ordinary Solana transactions you can read on any explorer; the [treasury page](treasury-and-runway.md) explains how BRAIN reads them back.
+Two sources feed the payout wallet.
+
+**Creator fees.** Trading the BRAIN token on pump.fun generates creator fees, which accrue in a vault. The operator claims them on-chain to the protocol wallet and moves SOL from there to the payout wallet. All three steps are ordinary Solana transactions you can read on any explorer; the [treasury page](treasury-and-runway.md) explains how BRAIN reads them back.
+
+**People using the GPUs.** Developers who send work to the network, through the API or the chat, pay for the compute they consume, and that revenue goes to the same payout wallet. Every receipt already records the customer-funded amount each node earned, so the figure is tracked per job and per node ([pricing and credits](pricing-and-credits.md)). Today the Free plan is live and paid plans are opening; as usage grows this becomes the larger of the two sources, which is the point: the people powering the network are paid by the people using it.
 
 ## What counts as verified work
 

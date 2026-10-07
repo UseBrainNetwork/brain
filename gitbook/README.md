@@ -2,6 +2,22 @@
 description: >-
   BRAIN turns ordinary computers into one AI compute network. This book explains
   exactly how, what is real today, and what happens as the crowd grows.
+cover: .gitbook/assets/cover.png
+coverY: 0
+layout:
+  cover:
+    visible: true
+    size: hero
+  title:
+    visible: true
+  description:
+    visible: true
+  tableOfContents:
+    visible: true
+  outline:
+    visible: true
+  pagination:
+    visible: true
 ---
 
 # The crowd is the GPU

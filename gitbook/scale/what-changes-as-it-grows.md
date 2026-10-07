@@ -27,7 +27,7 @@ Nothing on this page is a projection of revenue, token price or earnings. It des
 
 **What it makes possible.** Continuous availability of small-model inference from the crowd rather than intermittent. Batch workloads (embed this corpus, score these candidates) with a clear completion time. Enough measured history per node that the reliability score means something.
 
-**What does not change.** The pool. A thousand wallets split the same 0.15 SOL unless the operator raises it, and the operator can only raise it as far as fees fund. Growth in supply without growth in demand means less per wallet, and the site will show exactly that.
+**What does not change by itself.** The pool. A thousand wallets split the same fixed amount unless the operator raises it, and the operator can only raise it as far as creator fees and paying usage fund it. Growth in supply without growth in demand means less per wallet, and the site will show exactly that.
 
 ## Stage 2: tens of thousands
 

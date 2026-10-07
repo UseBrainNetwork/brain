@@ -45,7 +45,6 @@ Runway is the honest number: how many more hours the current wallet can pay at t
 | Allocated across live epochs | 14.09 |
 | Claimed by contributors | 11.10 |
 | Owed, unclaimed | 2.99 |
-| Pool per epoch | 0.15 |
 | Runway | ≈ 7 epochs |
 | Unclaimed in the pump.fun vault (not counted) | ≈ 25.6 |
 

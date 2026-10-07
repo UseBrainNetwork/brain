@@ -4,7 +4,7 @@
 Real by default. The site shows only server-measured figures unless you turn on "Show simulated data" in the footer, and then every simulated figure carries a SIM badge. 11.10 SOL has been paid to contributors on-chain as of 7 October 2026. The full list of what is real, simulated and estimated is in [Real vs simulated](real-vs-simulated.md).
 
 **How much will I earn?**
-Unknown, and anyone who gives you a number is guessing. A fixed pool (0.15 SOL per hour at the time of writing) is split by verified work among everyone who did any. More contributors means less each. The site shows the pool, the runway, and your accrued share this hour so you can see the arithmetic for yourself.
+Unknown, and anyone who gives you a number is guessing. A fixed pool of SOL per hour, shown live on /economics, is split by verified work among everyone who did any. More contributors means less each. The site shows the pool, the runway, and your accrued share this hour so you can see the arithmetic for yourself.
 
 **Do I need to hold the token to earn?**
 No. Holding raises your weight by at most 1.35× and only on work you actually verified. A wallet full of tokens that did no work earns zero. A wallet with no tokens that did work earns in proportion to it.

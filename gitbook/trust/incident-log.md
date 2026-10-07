@@ -20,7 +20,7 @@ A long day. Three distinct problems, in sequence.
 
 **18:38 to 19:14: no scheduled work dispatched.** The role migration moved the tables but not the job-number sequence, so job creation failed with `permission denied for sequence`. **Fix:** sequence ownership moved. Scheduled job #6218944 dispatched 20 seconds later: 64 units on 42 nodes.
 
-**Epochs.** The 17:00 epoch settled at 18:35 as soon as the database returned (207 wallets, 0.15 SOL). No epoch was skipped; the cron catches up any epoch whose window has closed.
+**Epochs.** The 17:00 epoch settled at 18:35 as soon as the database returned (207 wallets). No epoch was skipped; the cron catches up any epoch whose window has closed.
 
 **Open follow-ups.** Prune `brain_jobs` history older than a few days (1.9 GB, the main CPU load). Rotate the credentials that were handled during the incident. Replicate the database or move the pooler dependency behind the store interface.
 

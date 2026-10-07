@@ -57,16 +57,16 @@ No wallet takes more than `maxNodeShareOfPool` = 2 % of an epoch once the networ
 
 ## Worked example
 
-Three wallets in one hour, pool 0.15 SOL, all with perfect quality:
+Three wallets in one hour, with a pool of **P** SOL (whatever the operator has set that hour), all with perfect quality:
 
 | Wallet | Verified units | Tokens | normCompute | multiplier | score | share | payout |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 600 | 0 | 1.80 | 1.00 | 1.273 | 0.543 | 0.0815 SOL |
-| B | 300 | large | 0.90 | 1.35 | 0.859 | 0.366 | 0.0550 SOL |
-| C | 100 | 0 | 0.30 | 1.00 | 0.212 | 0.090 | 0.0136 SOL |
+| A | 600 | 0 | 1.80 | 1.00 | 1.273 | 0.543 | 0.543 P |
+| B | 300 | large | 0.90 | 1.35 | 0.859 | 0.366 | 0.366 P |
+| C | 100 | 0 | 0.30 | 1.00 | 0.212 | 0.090 | 0.090 P |
 | D | 0 | enormous | 0 | — | 0 | 0 | 0 |
 
-A does twice B's work and gets about 1.5× B's pay, because B's holdings earn the capped multiplier. D holds the most tokens of anyone and receives nothing. (Scores shown use √0.5 ≈ 0.707 and are rounded; the per-wallet cap of 25 % for three eligible wallets then water-fills A down to 0.0375 SOL and redistributes the rest to B and C in production, which the example omits for readability.)
+A does twice B's work and gets about 1.5× B's pay, because B's holdings earn the capped multiplier. D holds the most tokens of anyone and receives nothing. (Scores shown use √0.5 ≈ 0.707 and are rounded; the per-wallet cap of 25 % for three eligible wallets then water-fills A down to 0.25 P and redistributes the rest to B and C in production, which the example omits for readability.)
 
 ## What the formula does not do
 
