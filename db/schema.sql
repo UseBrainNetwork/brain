@@ -14,13 +14,19 @@ CREATE TABLE IF NOT EXISTS brain_nodes (
 
 CREATE TABLE IF NOT EXISTS brain_jobs (
   id            TEXT PRIMARY KEY,
-  assigned_to   TEXT NOT NULL REFERENCES brain_nodes(id),
+  -- A browser node id (brain_nodes) or a native Brain Node id (brain_documents, kind 'nnode').
+  -- Not a foreign key: the two kinds of node live in different tables and both settle from here.
+  assigned_to   TEXT NOT NULL,
   status        TEXT NOT NULL,
   submitted_at  BIGINT NOT NULL,
   -- Contains secret verification material (sample indices, canary expectations).
   -- Never expose this column through a read API.
   data          JSONB NOT NULL
 );
+-- Until 2026-10-07 assigned_to referenced brain_nodes(id), which silently rejected every native
+-- node's work record (the insert failed inside a deferred callback and was only logged), so no
+-- native GPU could ever enter settlement.
+ALTER TABLE brain_jobs DROP CONSTRAINT IF EXISTS brain_jobs_assigned_to_fkey;
 CREATE INDEX IF NOT EXISTS brain_jobs_recent ON brain_jobs (submitted_at DESC);
 CREATE INDEX IF NOT EXISTS brain_jobs_pending ON brain_jobs (assigned_to) WHERE status = 'assigned';
 -- Per-node history (node pages, reputation): without this every lookup walked the recent index.
