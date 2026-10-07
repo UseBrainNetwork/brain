@@ -93,6 +93,14 @@ export class PgStore implements NetworkStore {
         `SELECT pg_terminate_backend(a.pid) FROM pg_locks l JOIN pg_stat_activity a USING (pid)
          WHERE l.locktype = 'advisory' AND a.pid <> pg_backend_pid() AND a.state_change < now() - interval '60 seconds'`,
       );
+      // Work aggregates from before they had a statement timeout can run for many minutes and starve
+      // everything else. Anything from this app older than a minute is stale by definition (results are
+      // cached per minute); end it.
+      await this.pool.query(
+        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+         WHERE datname = current_database() AND pid <> pg_backend_pid() AND state = 'active'
+           AND now() - query_start > interval '60 seconds' AND query LIKE '%SELECT assigned_to AS node_id, status%'`,
+      );
     } catch (e) {
       this.migrationError = (e as Error).message;
       console.error("[pgStore] schema migration failed:", (e as Error).message);
@@ -299,16 +307,64 @@ export class PgStore implements NetworkStore {
     const r = await this.q(`SELECT data FROM brain_challenges WHERE id = $1`, [id]);
     return (r.rows[0]?.data as StoredChallenge) ?? null;
   }
+  /**
+   * The most expensive query in the system: a 24 h epoch is hundreds of thousands of job rows grouped
+   * with array_agg(DISTINCT …). Under load, dozens of viewers each triggered one (per wallet page, per
+   * serverless instance), they spilled to disk at the default 5 MB work_mem and ran for minutes with
+   * no effective statement timeout behind the transaction pooler. That took the database down.
+   *
+   * Now: results are cached in brain_documents at one-minute granularity so every instance shares one
+   * computation per minute (closed windows: one per day); an in-process single-flight memo stops one
+   * instance running it twice; the query itself runs in a transaction with SET LOCAL so the timeout
+   * and work_mem actually apply on the pooled backend.
+   */
   async aggregateWork(from: number, to: number, bucketMs: number) {
-    const r = await this.q<{ node_id: string; status: string; verified: boolean | null; fail_reason: string | null; jobs: number; units: string; buckets: number[] }>(
-      `SELECT assigned_to AS node_id, status, (data->>'verified')::boolean AS verified, data->>'failReason' AS fail_reason, count(*)::int AS jobs,
-              coalesce(sum((data->>'computeUnits')::numeric), 0)::text AS units,
-              array_agg(DISTINCT floor(submitted_at / $3)::bigint) AS buckets
-         FROM brain_jobs WHERE submitted_at >= $1 AND submitted_at < $2
-        GROUP BY 1, 2, 3, 4`,
-      [from, to, bucketMs],
-    );
-    return r.rows.map<WorkAggregate>((x) => ({ nodeId: x.node_id, status: x.status, verified: Boolean(x.verified), failReason: x.fail_reason ?? null, jobs: Number(x.jobs), computeUnits: Number(x.units), buckets: x.buckets.map(Number) }));
+    const now = Date.now();
+    const closed = to <= now - 3_600_000;
+    const slotMs = closed ? 86_400_000 : 60_000;
+    const key = `agg:${from}:${closed ? to : "live"}:${bucketMs}:${Math.floor(now / slotMs)}`;
+    const memo = this.aggMemo.get(key);
+    if (memo) return memo;
+    const p = (async () => {
+      const hit = await this.getDoc<{ rows: WorkAggregate[] }>("meta", key).catch(() => null);
+      if (hit?.rows) return hit.rows;
+      const rows = await this.aggregateWorkUncached(from, closed ? to : now, bucketMs);
+      await this.putDoc("meta", key, { rows, from, to: closed ? to : now, bucketMs }, { at: now }).catch(() => undefined);
+      return rows;
+    })();
+    this.aggMemo.set(key, p);
+    p.catch(() => this.aggMemo.delete(key));
+    // Memo lives for the slot; keep the map from growing.
+    setTimeout(() => this.aggMemo.delete(key), slotMs).unref?.();
+    if (this.aggMemo.size > 64) this.aggMemo.delete(this.aggMemo.keys().next().value as string);
+    return p;
+  }
+  private aggMemo = new Map<string, Promise<WorkAggregate[]>>();
+
+  private async aggregateWorkUncached(from: number, to: number, bucketMs: number) {
+    await this.ready;
+    const c = await this.breaker.run(() => this.pool.connect());
+    try {
+      await c.query("BEGIN");
+      // SET LOCAL survives the transaction pooler (the whole transaction is pinned to one backend).
+      await c.query("SET LOCAL statement_timeout = '30s'");
+      await c.query("SET LOCAL work_mem = '64MB'");
+      const r = await c.query<{ node_id: string; status: string; verified: boolean | null; fail_reason: string | null; jobs: number; units: string; buckets: number[] }>(
+        `/* aggregateWork */ SELECT assigned_to AS node_id, status, (data->>'verified')::boolean AS verified, data->>'failReason' AS fail_reason, count(*)::int AS jobs,
+                coalesce(sum((data->>'computeUnits')::numeric), 0)::text AS units,
+                array_agg(DISTINCT floor(submitted_at / $3)::bigint) AS buckets
+           FROM brain_jobs WHERE submitted_at >= $1 AND submitted_at < $2
+          GROUP BY 1, 2, 3, 4`,
+        [from, to, bucketMs],
+      );
+      await c.query("COMMIT");
+      return r.rows.map<WorkAggregate>((x) => ({ nodeId: x.node_id, status: x.status, verified: Boolean(x.verified), failReason: x.fail_reason ?? null, jobs: Number(x.jobs), computeUnits: Number(x.units), buckets: x.buckets.map(Number) }));
+    } catch (e) {
+      await c.query("ROLLBACK").catch(() => undefined);
+      throw e;
+    } finally {
+      c.release();
+    }
   }
   async listOpenJobs(limit: number, since: number) {
     // Bounded by the recent-index range so this never walks the whole table looking for open rows.

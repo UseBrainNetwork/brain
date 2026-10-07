@@ -398,7 +398,8 @@ export async function settleEpoch(opts: SettleOptions): Promise<{ epoch: RewardE
  * to elapsed time. Uses holdings snapshotted at wallet link time. ESTIMATE, never claimable.
  */
 /** Network-wide open-epoch picture; identical for every wallet, so shared per instance for a few seconds. */
-const PROGRESS_TTL_MS = 15_000;
+/** Matches the store's one-minute aggregate cache; a shorter TTL only re-reads the same cached rows. */
+const PROGRESS_TTL_MS = 60_000;
 let progressCache: { at: number; value: Promise<{ e: ReturnType<typeof epochAt>; now: number; inputs: ReturnType<typeof toInput>[]; networkVerifiedCompute: number; result: ReturnType<typeof computeEpoch> }> } | null = null;
 
 async function networkProgress(now: number) {

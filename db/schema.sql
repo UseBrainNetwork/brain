@@ -1,5 +1,6 @@
 -- BRAIN network store. Postgres 14+ (or any Postgres-compatible: Neon, Supabase, CockroachDB*).
 -- Documents are stored as JSONB with the columns we query on lifted out and indexed.
+-- Work aggregates (services/pgStore.ts aggregateWork) are cached in brain_documents as kind 'meta', id 'agg:*'.
 
 CREATE SEQUENCE IF NOT EXISTS brain_job_seq START 5000001;
 
