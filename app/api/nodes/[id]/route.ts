@@ -8,14 +8,16 @@ export const dynamic = "force-dynamic";
 
 /**
  * Every open node tab asks for its own profile every so often. Building it reads a few hundred job
- * rows plus the open-epoch dry run, which is far too much to do per request: with 40 tabs this one
- * route was most of the database's load. Each instance keeps the answer for a minute per node.
+ * rows plus the open-epoch dry run, which is far too much to do per request: this one route was most
+ * of the database's load. Each instance keeps the answer for five minutes per node.
  */
-const TTL_MS = 60_000;
+const TTL_MS = 5 * 60_000;
 const cache = globalThis as typeof globalThis & { __brainNodeView?: Map<string, { at: number; value: Promise<unknown | null> }> };
 
 async function build(id: string) {
-  const jobs = await getStore().listJobsForNode(id, 200);
+  // 60 recent rows are enough for median latency and reassignment rate; 200 full JSON rows per tab per
+  // poll was the single largest load on the database (433k calls, 192 ms each).
+  const jobs = await getStore().listJobsForNode(id, 60);
   const profile = await nodeProfile(id, Date.now(), jobs);
   if (!profile) return null;
   const economics = await nodeEconomics(id, Date.now(), jobs);

@@ -205,7 +205,7 @@ function NodeDashboard({ s, onWallet }: { s: ContributorState; onWallet: () => v
         .then((d) => !stop && d?.economics && setEco(d.economics))
         .catch(() => {});
     void load();
-    const t = setInterval(load, 90_000);
+    const t = setInterval(load, 5 * 60_000);
     return () => {
       stop = true;
       clearInterval(t);
@@ -223,7 +223,7 @@ function NodeDashboard({ s, onWallet }: { s: ContributorState; onWallet: () => v
         .then((d) => !stop && d?.current && setRw(d))
         .catch(() => {});
     void load();
-    const t = setInterval(load, 90_000);
+    const t = setInterval(load, 5 * 60_000);
     return () => {
       stop = true;
       clearInterval(t);
