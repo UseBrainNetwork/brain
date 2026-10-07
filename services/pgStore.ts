@@ -69,10 +69,19 @@ export class PgStore implements NetworkStore {
       // One cheap read decides whether the DDL needs to run at all. Every cold start used to replay
       // all fifteen IF NOT EXISTS statements (catalog locks on busy tables, hundreds of times a day).
       const version = schemaVersion(sql);
-      const marker = await this.pool
-        .query<{ v: string }>(`SELECT data->>'version' AS v FROM brain_documents WHERE kind = 'meta' AND id = 'schema' LIMIT 1`)
-        .then((r) => r.rows[0]?.v ?? null)
-        .catch(() => null); // table missing on a fresh database: run the DDL
+      let marker: string | null = null;
+      try {
+        const r = await this.pool.query<{ v: string }>(`SELECT data->>'version' AS v FROM brain_documents WHERE kind = 'meta' AND id = 'schema' LIMIT 1`);
+        marker = r.rows[0]?.v ?? null;
+      } catch (e) {
+        // Database not answering: tell the breaker and stop here. Replaying the DDL would just be
+        // another 8 s connect timeout on every cold start during an outage.
+        if (this.breaker.failure(e)) {
+          this.migrationError = (e as Error).message;
+          return;
+        }
+        marker = null; // table missing on a fresh database: run the DDL
+      }
       if (marker === version) return;
       await this.pool.query(sql);
       await this.pool.query(
