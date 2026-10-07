@@ -2,6 +2,25 @@ import type { ComputeJob, ComputeNode, DistributedJob, RewardAllocation, RewardC
 import type { WorkloadResult, WorkloadSpec } from "@/network/workloads";
 import { PgStore } from "./pgStore";
 
+/**
+ * Server-maintained counters on a node row only ever go up. Several handlers read a node, do work,
+ * then write the whole row back (heartbeat, result verification, job dispatch over every online
+ * node), and under a slow database a writer holding a stale copy used to overwrite increments
+ * another writer had just made: a contributor's "verified compute" would visibly fall. A save may
+ * therefore never roll one of these counters backwards; the larger value is the newer one.
+ * Reputation (an EWMA, not monotonic) follows whichever writer has seen more checked jobs.
+ */
+export const MONOTONIC_NODE_COUNTERS = ["verifiedComputeUnits", "verifiedJobs", "failedJobs", "heartbeats"] as const;
+
+export function mergeNodeCounters(prev: StoredNode | null | undefined, next: StoredNode): StoredNode {
+  if (!prev) return next;
+  const out: StoredNode = { ...next };
+  for (const k of MONOTONIC_NODE_COUNTERS) out[k] = Math.max(prev[k] ?? 0, next[k] ?? 0);
+  const checked = (n: StoredNode) => (n.verifiedJobs ?? 0) + (n.failedJobs ?? 0);
+  if (checked(prev) > checked(next)) out.reputation = prev.reputation;
+  return out;
+}
+
 export interface StoredNode extends ComputeNode {
   sessionHash: string;
   ipHash: string;
@@ -195,7 +214,7 @@ export class MemoryStore implements NetworkStore {
   private jobSeq = 5_000_000;
 
   async saveNode(n: StoredNode) {
-    this.nodes.set(n.id, { ...n });
+    this.nodes.set(n.id, mergeNodeCounters(this.nodes.get(n.id), n));
   }
   async getNode(id: string) {
     return this.nodes.get(id) ?? null;

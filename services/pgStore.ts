@@ -4,7 +4,10 @@ import { createHash } from "node:crypto";
 import { Pool, type QueryConfig } from "pg";
 import type { DistributedJob, RewardAllocation, RewardClaim, RewardEpoch } from "@/domain/types";
 import { Breaker, isPoolerRejection, StoreUnavailableError } from "./failsoft";
-import { KeyedMutex, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode, type WorkAggregate, type WorkRecord } from "./store";
+import { KeyedMutex, MONOTONIC_NODE_COUNTERS, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode, type WorkAggregate, type WorkRecord } from "./store";
+
+/** `(jsonb->>'k')::numeric`, 0 when absent. Only ever called with the fixed counter names above. */
+const numField = (col: string, key: string) => `coalesce((${col}->>'${key}')::numeric, 0)`;
 
 /** Postgres implementation of NetworkStore. Schema: db/schema.sql. */
 /** Content hash of schema.sql: the DDL re-runs only when the file changes. */
@@ -264,10 +267,19 @@ export class PgStore implements NetworkStore {
   }
 
   async saveNode(n: StoredNode) {
+    // Same rule as mergeNodeCounters (store.ts), applied inside the upsert so it holds across
+    // server instances: a counter never goes backwards, and reputation follows the writer that
+    // has seen more checked jobs. Without this a stale read-modify-write erased other writers' increments.
     await this.q(
       `INSERT INTO brain_nodes (id, session_hash, status, data, updated_at)
-       VALUES ($1, $2, $3, $4, now())
-       ON CONFLICT (id) DO UPDATE SET session_hash = $2, status = $3, data = $4, updated_at = now()`,
+       VALUES ($1, $2, $3, $4::jsonb, now())
+       ON CONFLICT (id) DO UPDATE SET session_hash = $2, status = $3, updated_at = now(),
+         data = EXCLUDED.data
+           || jsonb_build_object(${MONOTONIC_NODE_COUNTERS.map((k) => `'${k}', GREATEST(${numField("brain_nodes.data", k)}, ${numField("EXCLUDED.data", k)})`).join(", ")})
+           || CASE WHEN brain_nodes.data ? 'reputation'
+                    AND ${numField("brain_nodes.data", "verifiedJobs")} + ${numField("brain_nodes.data", "failedJobs")}
+                      > ${numField("EXCLUDED.data", "verifiedJobs")} + ${numField("EXCLUDED.data", "failedJobs")}
+                   THEN jsonb_build_object('reputation', brain_nodes.data->'reputation') ELSE '{}'::jsonb END`,
       [n.id, n.sessionHash, n.status, JSON.stringify(n)],
     );
   }
