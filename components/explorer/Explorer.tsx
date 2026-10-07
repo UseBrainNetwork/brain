@@ -53,7 +53,7 @@ export function JobSearch() {
       }}
       className="w-full max-w-[460px]"
     >
-      <div className="flex h-12 items-center gap-3 rounded-full bg-paper px-5 shadow-[inset_0_0_0_1px_rgba(17,17,16,0.12)] focus-within:shadow-[inset_0_0_0_1px_rgba(17,17,16,0.5)]">
+      <div className="flex h-12 items-center gap-3 rounded-full bg-paper px-5 ring-1 ring-inset ring-ink/15 focus-within:ring-ink/50">
         <span className="font-mono text-[12px] text-fog">JOB #</span>
         <input
           value={q}

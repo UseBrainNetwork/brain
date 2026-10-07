@@ -3,6 +3,7 @@ import { Stupified } from "@/components/layout/Stupified";
 import { Chrome } from "@/components/layout/Chrome";
 import { Footer } from "@/components/layout/Footer";
 import { Nav } from "@/components/layout/Nav";
+import { MODE_BOOT_SCRIPT } from "@/lib/colorMode";
 import { RevealObserver } from "@/components/layout/RevealObserver";
 import { PrivyBridge } from "@/components/wallet/PrivyBridge";
 import { siteUrl, social } from "@/lib/site";
@@ -20,7 +21,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#e9ebef",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#e9ebef" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0d11" },
+  ],
   width: "device-width",
   initialScale: 1,
 };
@@ -29,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.add('rv')" }} />
+        <script dangerouslySetInnerHTML={{ __html: `document.documentElement.classList.add('rv');${MODE_BOOT_SCRIPT}` }} />
       </head>
       <body className="min-h-dvh">
         <Chrome>

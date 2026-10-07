@@ -41,7 +41,7 @@ export default async function PricingPage() {
             const soon = comingSoon(p);
             const dark = p.id === "MAX";
             return (
-              <div key={p.id} className={cx("flex flex-col p-7", dark ? "bg-ink text-chalk" : p.id === "CODE" ? "bg-white" : "bg-paper")}>
+              <div key={p.id} className={cx("flex flex-col p-7", dark ? "bg-ink text-chalk" : p.id === "CODE" ? "bg-paper" : "bg-bone")}>
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.14em]">{p.name}</span>
                   {soon ? (

@@ -43,6 +43,44 @@
   }
 }
 
+/*
+  Dark mode. The site is built from light and dark surfaces; sections that are
+  already dark (.surface-dark / [data-theme="dark"]) never change. Dark mode
+  re-maps the light-surface palette so bone becomes graphite and ink becomes
+  chalk, keeping every ink/chalk pairing in contrast. The mode is set on <html>
+  as data-mode by the inline script in app/layout.tsx and by ModeToggle.
+*/
+[data-mode="dark"],
+[data-mode="dark"] .surface-light,
+[data-mode="dark"] [data-theme="light"] {
+  color-scheme: dark;
+  --color-bone: #0b0d11;
+  --color-bone-2: #11141a;
+  --color-bone-3: #1a1e26;
+  --color-paper: #11141a;
+  --color-ink: #e6e9ee;
+  --color-ink-2: #dde0e6;
+  --color-ink-3: #c9ced6;
+  --color-ink-4: #b3b9c3;
+  --color-fog: #8a919e;
+  --color-fog-2: #a7adb8;
+  --color-chalk: #0b0d11;
+}
+[data-mode="dark"] .surface-dark,
+[data-mode="dark"] [data-theme="dark"] {
+  --color-bone: #e9ebef;
+  --color-bone-2: #dde0e6;
+  --color-bone-3: #c9ced6;
+  --color-paper: #f4f5f7;
+  --color-ink: #0b0d11;
+  --color-ink-2: #11141a;
+  --color-ink-3: #1a1e26;
+  --color-ink-4: #272c36;
+  --color-fog: #7d8491;
+  --color-fog-2: #5d646f;
+  --color-chalk: #e6e9ee;
+}
+
 @layer base {
   html {
     background: var(--color-bone);

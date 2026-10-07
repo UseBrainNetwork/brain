@@ -27,7 +27,7 @@ export function StepShell({
     <div
       className={cx(
         "rounded-[20px] transition-[background,box-shadow,opacity] duration-300",
-        open ? "bg-paper shadow-[0_1px_0_rgba(255,255,255,0.8)_inset,0_20px_50px_-30px_rgba(17,17,16,0.35)]" : "bg-bone-2/60",
+        open ? "bg-paper shadow-[0_20px_50px_-30px_rgba(0,0,0,0.35)] ring-1 ring-inset ring-ink/[0.06]" : "bg-bone-2/60",
         state === "locked" && "opacity-55",
       )}
     >

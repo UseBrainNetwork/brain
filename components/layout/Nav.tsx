@@ -8,6 +8,7 @@ import { cx } from "@/lib/format";
 import { Logo } from "./Logo";
 import { SocialLinks } from "./SocialLinks";
 import { openStupified } from "@/components/layout/Stupified";
+import { ModeToggle, useColorMode } from "@/components/layout/ModeToggle";
 
 const links = [
   { href: "/chat", label: "Chat" },
@@ -60,7 +61,10 @@ function useSurfaceTheme() {
 
 export function Nav() {
   const path = usePathname();
-  const dark = useSurfaceTheme();
+  const surfaceDark = useSurfaceTheme();
+  const { mode } = useColorMode();
+  // In dark mode every surface reads dark, so the nav keeps its dark variant throughout.
+  const dark = surfaceDark || mode === "dark";
   const [open, setOpen] = useState(false);
   const [more, setMore] = useState(false);
   useEffect(() => {
@@ -75,7 +79,7 @@ export function Nav() {
   }, [more]);
 
   return (
-    <header className="pointer-events-none fixed inset-x-0 top-0 z-50">
+    <header data-theme={mode === "dark" ? "dark" : undefined} className="pointer-events-none fixed inset-x-0 top-0 z-50">
       <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between gap-4 px-5 md:px-10">
         <Link href="/" aria-label="BRAIN home" className={cx("pointer-events-auto transition-colors duration-300", dark ? "text-chalk" : "text-ink")}>
           <Logo />
@@ -152,6 +156,10 @@ export function Nav() {
                     ))}
                   </div>
                 </div>
+                <div className="mt-1 flex items-center justify-between border-t border-chalk/10 px-3 pb-1 pt-2.5">
+                  <div className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-chalk/40">Appearance</div>
+                  <ModeToggle />
+                </div>
               </div>
             )}
           </div>
@@ -192,7 +200,8 @@ export function Nav() {
               </Link>
             ))}
           </div>
-          <div className="flex items-center justify-end px-4 py-3">
+          <div className="flex items-center justify-between px-4 py-3">
+            <ModeToggle size="md" />
             <SocialLinks dark size="md" />
           </div>
         </div>

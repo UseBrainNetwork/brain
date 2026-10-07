@@ -114,7 +114,7 @@ function Detail({ job, now }: { job: ComputeJob; now: number }) {
                 <span
                   className={cx(
                     "relative mt-0.5 grid size-[27px] place-items-center rounded-full font-mono text-[10px] font-semibold",
-                    reached ? (current ? "bg-signal text-white" : "bg-ink text-chalk") : "bg-transparent text-fog shadow-[inset_0_0_0_1px_rgba(17,17,16,0.2)]",
+                    reached ? (current ? "bg-signal text-white" : "bg-ink text-chalk") : "bg-transparent text-fog ring-1 ring-inset ring-ink/20",
                   )}
                 >
                   {current && <span className="absolute inset-0 animate-ping rounded-full bg-signal/40" />}

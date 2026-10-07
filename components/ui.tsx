@@ -32,11 +32,11 @@ export function Button({
   const base =
     "group inline-flex items-center justify-center gap-2 rounded-full h-11 px-5 text-[14px] font-semibold tracking-[-0.01em] transition-[background,color,transform,box-shadow] duration-200 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none select-none whitespace-nowrap";
   const styles = {
-    primary: tone === "light" ? "bg-ink text-chalk hover:bg-ink-3" : "bg-chalk text-ink hover:bg-white",
+    primary: tone === "light" ? "bg-ink text-chalk hover:bg-ink-3" : "bg-chalk text-ink hover:bg-bone",
     secondary:
       tone === "light"
-        ? "bg-transparent text-ink shadow-[inset_0_0_0_1px_rgba(11,13,17,0.18)] hover:shadow-[inset_0_0_0_1px_rgba(11,13,17,0.5)]"
-        : "bg-transparent text-chalk shadow-[inset_0_0_0_1px_rgba(230,233,238,0.2)] hover:shadow-[inset_0_0_0_1px_rgba(230,233,238,0.55)]",
+        ? "bg-transparent text-ink ring-1 ring-inset ring-ink/20 hover:ring-ink/50"
+        : "bg-transparent text-chalk ring-1 ring-inset ring-chalk/20 hover:ring-chalk/55",
     signal: "bg-signal text-white hover:bg-signal-2",
   }[variant];
   const inner = (

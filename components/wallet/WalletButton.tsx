@@ -118,7 +118,7 @@ export function WalletModal({ onClose }: { onClose: () => void }) {
   if (privy) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] grid place-items-center bg-ink/50 p-4 backdrop-blur-[2px]" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/50 p-4 backdrop-blur-[2px]" onClick={onClose}>
       <div
         role="dialog"
         aria-label="Connect a Solana wallet"
