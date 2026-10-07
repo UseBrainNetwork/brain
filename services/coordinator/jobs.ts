@@ -343,13 +343,17 @@ async function fail(j: InferenceJob, reason: string, note: string | undefined, n
     after.push(() =>
       updateNativeNode(nodeId, (n) => {
         n.activeJobIds = n.activeJobIds.filter((id) => id !== j.jobId);
+        // A failed benchmark is counted on its own. It is the coordinator's capability probe, usually
+        // failing while weights load on first start; it is retried every five minutes, and a node that
+        // has not passed one never receives customer work ("not yet benchmarked"). It is not evidence
+        // about how the node serves work, so it enters neither the reliability score nor DEGRADED.
+        if (kind === "benchmark") {
+          n.measured.benchmarkFailed = (n.measured.benchmarkFailed ?? 0) + 1;
+          return;
+        }
         if (timedOut) n.measured.jobsTimedOut++;
         else n.measured.jobsFailed++;
-        // A failed benchmark is recorded (it lowers reliability) but does not degrade the node: it is
-        // the coordinator's warm-up probe, retried every five minutes, and a node that cannot pass it
-        // never receives customer work anyway ("not yet benchmarked"). DEGRADED comes from failing
-        // real work or canaries.
-        if (kind !== "benchmark") n.measured.consecutiveFailures++;
+        n.measured.consecutiveFailures++;
       }),
     );
   }

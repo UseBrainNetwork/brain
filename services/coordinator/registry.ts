@@ -56,6 +56,8 @@ export interface NativeNode {
     canaryPassed?: number;
     canaryFailed?: number;
     canaryFailStreak?: number;
+    /** Benchmark probes that did not complete (usually: weights still loading). Shown, never scored. */
+    benchmarkFailed?: number;
   };
   lastCanaryAt?: number;
   jobsAtLastCanary?: number;
@@ -289,9 +291,19 @@ export async function heartbeatNativeNode(nodeId: string, telemetry: Telemetry, 
   }
   if (draining != null) n.draining = draining;
   // A node that has never been benchmarked has never been routed customer work ("not yet benchmarked")
-  // and no canaries (those follow the benchmark), so any failure streak it carries came from benchmark
-  // probes, which no longer count. Clear it; the counter restarts from real work.
-  if (n.benchmark.basis === "unmeasured" && n.measured.jobsCompleted === 0 && n.measured.consecutiveFailures > 0 && !(n.measured.canaryFailStreak ?? 0)) n.measured.consecutiveFailures = 0;
+  // and no canaries (those follow the benchmark), so every failure it carries came from benchmark
+  // probes, which are counted separately and not scored. Move them there; reliability restarts from
+  // real work.
+  if (n.benchmark.basis === "unmeasured" && n.measured.jobsCompleted === 0 && !(n.measured.canaryFailStreak ?? 0)) {
+    const probes = n.measured.jobsFailed + n.measured.jobsTimedOut;
+    if (probes > 0) {
+      n.measured.benchmarkFailed = (n.measured.benchmarkFailed ?? 0) + probes;
+      n.measured.jobsFailed = 0;
+      n.measured.jobsTimedOut = 0;
+    }
+    n.measured.consecutiveFailures = 0;
+    n.reputation = reliabilityScore(n, now);
+  }
   const prev = n.state;
   n.state = deriveState(n);
   await save(n);

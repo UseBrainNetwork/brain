@@ -72,7 +72,10 @@ export const CANARIES: readonly Canary[] = [
   { id: "word", prompt: "Reply with exactly the single word PINEAPPLE in capital letters and nothing else.", check: (o) => /PINEAPPLE/.test(o) && o.trim().length <= 40 },
   { id: "sum", prompt: "What is 17 + 26? Reply with only the number.", check: (o) => /\b43\b/.test(o) && o.trim().length <= 20 },
   { id: "list", prompt: "List the three primary colours of light, comma separated, lowercase, nothing else.", check: (o) => /red/i.test(o) && /green/i.test(o) && /blue/i.test(o) && o.trim().length <= 60 },
-  { id: "reverse", prompt: "Spell the word 'brain' backwards. Reply with only the reversed word.", check: (o) => /niarb/i.test(o) && o.trim().length <= 20 },
+  // A canary must be something every allowlisted model answers reliably, or it measures the model,
+  // not the node. "Spell 'brain' backwards" was removed after an honest RTX 3060 running a 3B model
+  // failed it: small models get letter-level tasks wrong routinely.
+  { id: "capital", prompt: "What is the capital city of France? Reply with only the city name.", check: (o) => /paris/i.test(o) && o.trim().length <= 30 },
 ];
 
 const pickCanary = (seed: number) => CANARIES[Math.abs(seed) % CANARIES.length];

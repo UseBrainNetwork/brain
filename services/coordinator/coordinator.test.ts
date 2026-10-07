@@ -480,7 +480,7 @@ describe("verification probes", () => {
     // Correct answer (forced, since DEGRADED nodes are not due by schedule).
     const c3 = (await scheduleCanary(n.nodeId, t + 2000, true))!;
     const right = CANARIES.find((c) => c.id === c3.canaryId)!;
-    const answer = right.id === "word" ? "PINEAPPLE" : right.id === "sum" ? "43" : right.id === "list" ? "red, green, blue" : "niarb";
+    const answer = right.id === "word" ? "PINEAPPLE" : right.id === "sum" ? "43" : right.id === "list" ? "red, green, blue" : "Paris";
     expect(right.check(answer)).toBe(true);
     void canary;
     await runJob(n.nodeId, c3, answer, t + 2000);

@@ -42,7 +42,13 @@ export function classify(tokPerSec: number, mock: boolean): ComputeClass | null 
   return CLASS_THRESHOLDS.find((t) => tokPerSec >= t.minTokPerSec)?.cls ?? "EDGE";
 }
 
-const needsBenchmark = (n: NativeNode, now: number) => n.benchmark.basis === "unmeasured" || (n.benchmark.at != null && now - n.benchmark.at > BENCHMARK_TTL_MS);
+/** A benchmark whose first byte took this long was timed against a cold model load, not the GPU. */
+const COLD_TTFB_MS = 10_000;
+const needsBenchmark = (n: NativeNode, now: number) =>
+  n.benchmark.basis === "unmeasured" ||
+  (n.benchmark.at != null && now - n.benchmark.at > BENCHMARK_TTL_MS) ||
+  // Re-run once the model is resident so the recorded speed and TTFB describe the warm node.
+  (n.benchmark.at != null && (n.benchmark.firstByteMs ?? 0) > COLD_TTFB_MS && n.benchmark.model != null && n.reported.telemetry?.loadedModels.includes(n.benchmark.model) === true);
 const hasPendingBenchmark = (n: NativeNode) => n.activeJobIds.some((id) => id.startsWith("bj-"));
 const recentlyAttempted = (n: NativeNode, now: number) => n.lastBenchmarkAttemptAt != null && now - n.lastBenchmarkAttemptAt < BENCHMARK_RETRY_MS;
 
