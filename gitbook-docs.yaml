@@ -1,0 +1,12 @@
+$schema: https://api.gitbook.com/gitbook-docs.yaml
+site:
+  title: BRAIN
+  structure:
+    - type: space
+      key: space-brain
+      title: BRAIN
+      path: docs
+      default: true
+      content:
+        directory: ./gitbook
+        language: en
