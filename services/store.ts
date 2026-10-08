@@ -138,6 +138,10 @@ export interface NetworkStore {
   claimsForWallet(wallet: string): Promise<RewardClaim[]>;
   /** Sum of non-failed claims created since `since`, across all wallets. */
   claimedSince(since: number): Promise<number>;
+  /** Paid claims (sent or confirmed) across all wallets, newest first. For the public payouts page. */
+  listPaidClaims(limit: number): Promise<RewardClaim[]>;
+  /** Totals over paid claims. Zero/null when nothing has been paid; never estimated. */
+  paidClaimTotals(): Promise<PaidClaimTotals>;
 
   saveDistributedJob(j: DistributedJob): Promise<void>;
   getDistributedJob(id: string): Promise<DistributedJob | null>;
@@ -161,6 +165,15 @@ export interface NetworkStore {
    * job (several nodes report results at the same instant) must go through this, or updates are lost.
    */
   withLock<T>(key: string, fn: () => Promise<T>): Promise<T>;
+}
+
+export const isPaidClaim = (c: RewardClaim) => c.status === "sent" || c.status === "confirmed";
+export interface PaidClaimTotals {
+  lamports: number;
+  count: number;
+  wallets: number;
+  firstAt: number | null;
+  lastAt: number | null;
 }
 
 export type DocKind = "nnode" | "njob" | "receipt" | "accounting" | "order" | "decision" | "plan" | "customer" | "apikey" | "request" | "treasury" | "epochv2" | "metric" | "account" | "credit" | "session" | "interest" | "notify" | "meta" | "shard" | "hop" | "isession" | "payment";
@@ -329,6 +342,19 @@ export class MemoryStore implements NetworkStore {
     let sum = 0;
     for (const c of this.claims.values()) if (c.status !== "failed" && c.createdAt >= since) sum += c.lamports;
     return sum;
+  }
+  async listPaidClaims(limit: number) {
+    return [...this.claims.values()].filter(isPaidClaim).sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
+  }
+  async paidClaimTotals() {
+    const paid = [...this.claims.values()].filter(isPaidClaim);
+    return {
+      lamports: paid.reduce((s, c) => s + c.lamports, 0),
+      count: paid.length,
+      wallets: new Set(paid.map((c) => c.wallet)).size,
+      firstAt: paid.length ? Math.min(...paid.map((c) => c.createdAt)) : null,
+      lastAt: paid.length ? Math.max(...paid.map((c) => c.createdAt)) : null,
+    };
   }
   async saveDistributedJob(j: DistributedJob) {
     this.djobs.set(j.id, structuredClone(j));

@@ -542,6 +542,18 @@ export class PgStore implements NetworkStore {
     const r = await this.q(`SELECT data FROM brain_reward_claims WHERE wallet = $1 ORDER BY created_at DESC`, [wallet]);
     return r.rows.map((x) => x.data as RewardClaim);
   }
+  async listPaidClaims(limit: number) {
+    const r = await this.q(`SELECT data FROM brain_reward_claims WHERE status IN ('sent', 'confirmed') ORDER BY created_at DESC LIMIT $1`, [limit]);
+    return r.rows.map((x) => x.data as RewardClaim);
+  }
+  async paidClaimTotals() {
+    const r = await this.q<{ lamports: string; count: string; wallets: string; first_at: string | null; last_at: string | null }>(
+      `SELECT COALESCE(SUM(lamports), 0) AS lamports, COUNT(*) AS count, COUNT(DISTINCT wallet) AS wallets, MIN(created_at) AS first_at, MAX(created_at) AS last_at
+       FROM brain_reward_claims WHERE status IN ('sent', 'confirmed')`,
+    );
+    const x = r.rows[0];
+    return { lamports: Number(x?.lamports ?? 0), count: Number(x?.count ?? 0), wallets: Number(x?.wallets ?? 0), firstAt: x?.first_at ? Number(x.first_at) : null, lastAt: x?.last_at ? Number(x.last_at) : null };
+  }
   async saveDistributedJob(j: DistributedJob) {
     await this.q(
       `INSERT INTO brain_distributed_jobs (id, status, created_at, data) VALUES ($1, $2, $3, $4)

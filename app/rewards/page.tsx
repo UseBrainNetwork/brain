@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { EarningsCalculator } from "@/components/economics/EarningsCalculator";
 import { FlowChain } from "@/components/economics/FlowChain";
 import { ProtocolWalletCard, TokenCard } from "@/components/economics/ProtocolWallet";
@@ -35,9 +36,12 @@ export default function RewardsPage() {
                 GPU earns.
               </h1>
             </div>
-            <p className="max-w-[400px] text-[15.5px] leading-relaxed text-chalk/60">
-              Verified compute earns a share of a fixed SOL pool every hour, funded by creator fees. Claim any time once payouts are open; SOL is sent straight to your wallet.
-            </p>
+            <div className="max-w-[400px]">
+              <p className="text-[15.5px] leading-relaxed text-chalk/60">Verified compute earns a share of a fixed SOL pool every hour, funded by creator fees. Claim any time once payouts are open; SOL is sent straight to your wallet.</p>
+              <Link href="/payouts" className="mt-4 inline-block font-mono text-[12px] text-chalk/70 underline decoration-chalk/25 underline-offset-4 hover:text-chalk">
+                Every payout so far, with its transaction →
+              </Link>
+            </div>
           </div>
           <RewardsDashboard />
         </Container>

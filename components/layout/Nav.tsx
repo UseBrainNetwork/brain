@@ -23,6 +23,7 @@ const secondary = [
   { href: "/economics", label: "Economics", hint: "Where the money moves" },
   { href: "/auto", label: "BRAIN AUTO", hint: "Routing console" },
   { href: "/rewards", label: "Rewards", hint: "Contributor epochs" },
+  { href: "/payouts", label: "Payouts", hint: "Every SOL payout, on chain" },
 ];
 const accountLinks = [
   { href: "/account", label: "Account" },
