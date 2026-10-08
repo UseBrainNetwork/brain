@@ -38,7 +38,7 @@ export default function RewardsPage() {
               </h1>
             </div>
             <div className="max-w-[400px]">
-              <p className="text-[15.5px] leading-relaxed text-chalk/60">Verified compute earns a share of a SOL pool every hour: a fixed amount funded by creator fees, plus {Math.round(defaultRevenueSplit.inferenceRevenue.contributors * 100)}% of that hour&apos;s plan purchases. Claim any time once payouts are open; SOL is sent straight to your wallet.</p>
+              <p className="text-[15.5px] leading-relaxed text-chalk/60">Verified compute earns a share of a SOL pool every hour: a fixed amount funded by creator fees, plus {Math.round(defaultRevenueSplit.inferenceRevenue.contributors * 100)}% of that hour&apos;s plan purchases. Claim any time after an epoch settles; SOL is sent straight to your wallet.</p>
               <Link href="/payouts" className="mt-4 inline-block font-mono text-[12px] text-chalk/70 underline decoration-chalk/25 underline-offset-4 hover:text-chalk">
                 Every payout so far, with its transaction →
               </Link>
@@ -54,7 +54,7 @@ export default function RewardsPage() {
             <div>
               <h2 className="display-md text-[36px] md:text-[56px]">Estimate your earnings</h2>
               <p className="mt-5 max-w-[520px] text-[15.5px] leading-relaxed text-chalk/60">
-                Pick your hardware, how long it stays online and what you hold. The estimate runs the production reward formula; it needs a funded pool to mean anything.
+                Pick your hardware, how long it stays online and what you hold. The estimate runs the production reward formula against a modelled network; the real pool each epoch is on the payouts page.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">

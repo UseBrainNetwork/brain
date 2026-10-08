@@ -48,7 +48,7 @@ export default function EarnPage() {
                 </dd>
               </div>
             </dl>
-            <p className="mt-3 text-[11.5px] leading-relaxed text-fog">{earn.how} Earnings accrue at list price as REAL ledger lines; payouts are not enabled yet and no return is promised.</p>
+            <p className="mt-3 text-[11.5px] leading-relaxed text-fog">{earn.how} Earnings accrue at list price as REAL ledger lines; SOL is paid from the epoch pool to wallets that claim it. No return is promised.</p>
           </div>
         </div>
         <ContributeFlow />

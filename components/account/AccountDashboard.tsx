@@ -93,7 +93,7 @@ export function AccountDashboard() {
         </Panel>
         <Panel title="Net" right={<SourceBadge source="REAL" />}>
           <Metric k="Earned − used" v={s.netUsd == null ? NO_DATA : usd(s.netUsd)} tone={s.netUsd == null ? "muted" : s.netUsd >= 0 ? "ok" : undefined} big sub={s.netUsd == null ? (s.compute.wallet ? "a side is UNKNOWN" : "attach a wallet to compute") : s.netUsd >= 0 ? "your compute covers your usage" : "usage exceeds compute earned"} />
-          <p className="mt-4 text-[11.5px] leading-relaxed text-chalk/45">Ledger primitive: nothing is paid out and nothing is charged. Figures are accrued at list price from REAL receipts.</p>
+          <p className="mt-4 text-[11.5px] leading-relaxed text-chalk/45">Figures are accrued at list price from REAL receipts. Nothing is charged beyond credits; SOL earned by your nodes is claimed on the rewards page, not paid from here.</p>
         </Panel>
       </div>
 

@@ -154,7 +154,7 @@ const VERIFICATION: [string, string, "live" | "interface"][] = [
   ["Plausibility bounds", "Results returned faster than physically possible for the workload are rejected.", "live"],
   ["Reputation", `EWMA over outcomes; failures weigh double. Below ${networkConfig.reputation.banBelow} the node is banned.`, "live"],
   ["Rate limiting", `Per hashed IP, per minute: ${networkConfig.rateLimit.nodeRequests} node calls, ${networkConfig.rateLimit.inferenceRequests * 3} API calls, ${networkConfig.rateLimit.inferenceRequests} playground runs.`, "live"],
-  ["Redundant execution", "Same unit to N nodes, majority result wins. Policy + comparison implemented; dispatcher wiring lands with LLM shards.", "interface"],
+  ["Redundant execution", "Browser jobs can send each unit to two nodes and compare the outputs (receipts say redundant+spot-check). A sample of node inference is re-run on a second node; a mismatch disputes the first node's pay.", "live"],
 ];
 
 export default function DevelopersPage() {

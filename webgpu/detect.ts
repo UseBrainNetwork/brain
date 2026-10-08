@@ -76,8 +76,12 @@ function detectBrowser(): { browser: string | null; os: string | null } {
     userAgentData?: { brands: { brand: string; version: string }[]; platform: string };
   }).userAgentData;
   let browser: string | null = null;
-  if (uaData?.brands?.length) {
-    const b = uaData.brands.find((x) => !/Not.?A.?Brand|Chromium/i.test(x.brand)) ?? uaData.brands[0];
+  // Client Hints list a GREASE entry ("Not/A)Brand") plus the engine ("Chromium") plus, in branded
+  // builds, the product. Prefer the product, then the engine; never the GREASE entry. Embedded
+  // browsers often ship only GREASE + Chromium.
+  const real = uaData?.brands?.filter((x) => !/Not.?A.?Brand/i.test(x.brand)) ?? [];
+  const b = real.find((x) => !/Chromium/i.test(x.brand)) ?? real[0];
+  if (b) {
     browser = `${b.brand} ${b.version}`;
   } else if (/Firefox\/(\d+)/.test(ua)) browser = `Firefox ${RegExp.$1}`;
   else if (/Edg\/(\d+)/.test(ua)) browser = `Edge ${RegExp.$1}`;

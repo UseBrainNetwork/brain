@@ -30,8 +30,8 @@ export function FlowChain() {
   if (!sim)
     return (
       <SimFallback
-        title="No creator fees or inference sales recorded yet."
-        body="Creator fees land in the protocol wallet above once the token is live; inference sales need API billing. Until a transaction is recorded in the ledger, every dollar value in this chain is modelled. The split percentages (contributors, buyback, infrastructure, treasury) are the published config and are real."
+        title="The real flows are the transactions above."
+        body="Creator fee claims and payout transfers are read from chain and listed above; epoch payouts are on /payouts. The dollar values in this animated chain are modelled and shown only with simulated data. The split percentages (contributors, buyback, infrastructure, treasury) are the published config and are real."
       />
     );
   const dur = 7;

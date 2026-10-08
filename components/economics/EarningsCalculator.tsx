@@ -163,8 +163,8 @@ export function EarningsCalculator({ compact = false }: { compact?: boolean }) {
   if (!sim)
     return (
       <SimFallback
-        title="No reward estimate yet."
-        body={`The contributor pool is funded by creator fees paid to the protocol wallet and by inference sales. Nothing has been recorded yet, so the real pool today is $0 and any dollar figure here would be made up.${measured != null ? ` Your measured score of ${fmtInt(measured)} is real and recorded.` : " Measuring your GPU on /earn is real and takes about a minute."} The estimator can run against a modelled network, clearly labelled SIM.`}
+        title="Estimates are modelled, not measured."
+        body={`The real pool is a fixed SOL amount per epoch plus a share of plan purchases, and what it paid each epoch is on /payouts. The estimator below runs the production formula against a modelled network, so no dollar figure in it is a forecast of what the real pool pays.${measured != null ? ` Your measured score of ${fmtInt(measured)} is real and recorded.` : " Measuring your GPU on /earn is real and takes about a minute."} The estimator can run against a modelled network, clearly labelled SIM.`}
       />
     );
 

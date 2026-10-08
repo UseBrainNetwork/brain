@@ -188,7 +188,9 @@ export function TokenCard({ className, tone = "dark" }: { className?: string; to
           <p className={cx("mt-3 max-w-[560px] text-[13.5px] leading-relaxed", muted)}>
             {live
               ? "Creator fees from trading go to the protocol wallet and fund the contributor pool. Holding raises the multiplier on verified compute, up to a cap. Holding alone earns nothing."
-              : "This is the contract address. It is not live yet; the site checks the chain and flips this card the moment the mint exists. Anything else using this address before then is not us."}
+              : t == null || t.live == null
+                ? "This is the contract address. The site reads the mint from the chain; its status appears here once that read completes."
+                : "This is the contract address. It is not live yet; the site checks the chain and flips this card the moment the mint exists. Anything else using this address before then is not us."}
           </p>
         </div>
         <div className="text-right">
