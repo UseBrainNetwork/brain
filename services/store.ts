@@ -109,6 +109,10 @@ export interface NetworkStore {
   /** Distinct GPU identities that have ever registered. Cumulative; never pruned. */
   countNodesJoined(): Promise<number>;
   saveJob(j: StoredJob): Promise<void>;
+  /** Insert or replace many jobs in as few round trips as possible (a 64-unit job is 64 rows). */
+  saveJobs(js: StoredJob[]): Promise<void>;
+  /** Set status "computing" on many nodes in one statement, leaving their counters untouched. */
+  markNodesComputing(ids: string[]): Promise<void>;
   getJob(id: string): Promise<StoredJob | null>;
   listRecentJobs(limit: number): Promise<StoredJob[]>;
   pendingJobFor(nodeId: string): Promise<StoredJob | null>;
@@ -257,6 +261,15 @@ export class MemoryStore implements NetworkStore {
     if (this.jobs.size > 5000) {
       const oldest = this.jobs.keys().next().value;
       if (oldest) this.jobs.delete(oldest);
+    }
+  }
+  async saveJobs(js: StoredJob[]) {
+    for (const j of js) await this.saveJob(j);
+  }
+  async markNodesComputing(ids: string[]) {
+    for (const id of ids) {
+      const n = this.nodes.get(id);
+      if (n && n.status !== "banned") this.nodes.set(id, { ...n, status: "computing" });
     }
   }
   async getJob(id: string) {

@@ -174,11 +174,11 @@ async function createJobUnlocked(input: CreateJobInput): Promise<DistributedJob>
     scheduled: input.scheduled,
     lifecycle: [{ stage: "queued", at: now, detail: `${unitCount} work units · ${nodes.length} real nodes${input.attachedTo ? ` · attached to ${input.attachedTo.orderId}` : ""}${input.scheduled ? ` · scheduled by operator (${input.scheduled.reason})` : ""}` }],
   };
-  await store.saveDistributedJob(job);
   eventBus.publish({ type: "djob.created", at: now, job: structuredClone(job) });
 
   setStatus(job, "assigning", now);
   // Round-robin by index; replicas go to a different node than the primary.
+  const unitJobs: StoredJob[] = [];
   for (let i = 0; i < unitCount; i++) {
     const spec = unitSpec(dims, seedB);
     for (let r = 0; r < redundancy; r++) {
@@ -195,10 +195,23 @@ async function createJobUnlocked(input: CreateJobInput): Promise<DistributedJob>
         computeUnits: workloadUnits(spec),
       };
       job.units.push(unit);
-      await store.saveJob(makeUnitJob(job, unit, spec, now));
+      unitJobs.push(makeUnitJob(job, unit, spec, now));
     }
   }
-  for (const n of nodes) await store.saveNode({ ...n, status: "computing" });
+  // The parent is written once, after its units exist: three statements instead of 130, and no
+  // window in which a parent with no units is on record. An order that found such a parent was
+  // refused with job_in_progress until it timed out, and the parent itself could only time out.
+  try {
+    await store.saveJobs(unitJobs);
+    await store.markNodesComputing(nodes.map((n) => n.id));
+  } catch (e) {
+    job.units = [];
+    job.failReason = "could not distribute work units";
+    setStatus(job, "failed", Date.now(), `${job.failReason}: ${e instanceof Error ? e.message.slice(0, 80) : String(e)}`);
+    job.completedAt = Date.now();
+    await store.saveDistributedJob(job).catch(() => undefined);
+    throw e;
+  }
   recomputeTotals(job);
   setStatus(job, "distributed", Date.now(), `${job.units.length} units on ${nodes.length} nodes`);
   await store.saveDistributedJob(job);

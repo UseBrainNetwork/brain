@@ -252,9 +252,13 @@ export class PgStore implements NetworkStore {
         // holding this lock for a read-modify-write of the parent. 3 s was not enough to wait out
         // the queue, and giving up meant proceeding unlocked. The CAS in saveDistributedJob now
         // guards the data either way; the wait keeps contention from turning into retries.
+        // The pool's 15 s statement_timeout and client query_timeout would both cut the wait short
+        // of lock_timeout; lift them for this one statement so lock_timeout is what decides.
         await c.query("SET LOCAL lock_timeout = '20s'");
+        await c.query("SET LOCAL statement_timeout = '25s'");
         try {
-          await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [key]);
+          const lockQuery: QueryConfig & { query_timeout: number } = { text: "SELECT pg_advisory_xact_lock(hashtext($1))", values: [key], query_timeout: 26_000 };
+          await c.query(lockQuery);
           locked = true;
         } catch (e) {
           console.warn(`[pgStore] lock ${key} not acquired (${(e as Error).message}); continuing with in-process lock only`);
@@ -402,6 +406,23 @@ export class PgStore implements NetworkStore {
        ON CONFLICT (id) DO UPDATE SET status = $3, data = $5`,
       [j.id, j.assignedTo, j.status, j.submittedAt, JSON.stringify(j)],
     );
+  }
+  async saveJobs(js: StoredJob[]) {
+    // Multi-row upsert, 100 rows per statement: creating a 64-unit job used to be 64 round trips
+    // through the pooler while holding the create lock.
+    for (let i = 0; i < js.length; i += 100) {
+      const chunk = js.slice(i, i + 100);
+      const values = chunk.map((_, k) => `($${k * 5 + 1}, $${k * 5 + 2}, $${k * 5 + 3}, $${k * 5 + 4}, $${k * 5 + 5})`).join(", ");
+      await this.q(
+        `INSERT INTO brain_jobs (id, assigned_to, status, submitted_at, data) VALUES ${values}
+         ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, data = EXCLUDED.data`,
+        chunk.flatMap((j) => [j.id, j.assignedTo, j.status, j.submittedAt, JSON.stringify(j)]),
+      );
+    }
+  }
+  async markNodesComputing(ids: string[]) {
+    if (ids.length === 0) return;
+    await this.q(`UPDATE brain_nodes SET status = 'computing', data = data || '{"status":"computing"}'::jsonb, updated_at = now() WHERE id = ANY($1) AND status <> 'banned'`, [ids]);
   }
   async getJob(id: string) {
     const r = await this.q(`SELECT data FROM brain_jobs WHERE id = $1`, [id]);
