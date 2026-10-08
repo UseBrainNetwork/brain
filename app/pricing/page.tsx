@@ -6,6 +6,7 @@ import { ChoosePlan } from "@/components/pricing/ChoosePlan";
 import { NotifyButton } from "@/components/pricing/NotifyButton";
 import { earn } from "@/lib/site";
 import { snapshot } from "@/services/accounting";
+import { isTransientDbError } from "@/services/failsoft";
 import { computeUnitListPriceUsd, tokenListPricePer1MUsd } from "@/lib/pricing";
 import { cx } from "@/lib/format";
 
@@ -17,10 +18,15 @@ const fmtUsd = (n: number) => (n === 0 ? "$0" : `$${n.toLocaleString("en-US", { 
 export default async function PricingPage() {
   const ps = plans();
   const cu = creditUsd();
-  const snap = await snapshot("REAL");
-  const avgReq = snap.avgCostPerJob;
+  // The measured average cost per request is a hint on each plan card. If the database is not
+  // answering, the cards fall back to list price rather than failing the whole page.
+  const snap = await snapshot("REAL").catch((e: unknown) => {
+    if (!isTransientDbError(e)) throw e;
+    return null;
+  });
+  const avgReq = snap?.avgCostPerJob;
   const perMonth = (credits: number) =>
-    avgReq && avgReq > 0 ? `≈ ${Math.floor((credits * cu) / avgReq).toLocaleString("en-US")} requests at the measured average (${snap.pricedReceipts} priced receipts)` : `≈ $${(credits * cu).toFixed(2)} of routed requests at list price`;
+    snap && avgReq && avgReq > 0 ? `≈ ${Math.floor((credits * cu) / avgReq).toLocaleString("en-US")} requests at the measured average (${snap.pricedReceipts} priced receipts)` : `≈ $${(credits * cu).toFixed(2)} of routed requests at list price`;
   const token = tokenListPricePer1MUsd();
   const compute = computeUnitListPriceUsd();
   const payments = paymentsConnected();

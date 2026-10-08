@@ -5,6 +5,7 @@ import type { CapabilityState } from "@/domain/economy";
 import { executionProviders } from "@/engine/providers";
 import { cx, fmtInt } from "@/lib/format";
 import { assessCapabilities } from "@/services/capability";
+import { isStoreUnavailable, isTransientDbError } from "@/services/failsoft";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Capacity", description: "What the BRAIN network can execute right now, derived from real nodes and real jobs." };
@@ -12,7 +13,33 @@ export const metadata: Metadata = { title: "Capacity", description: "What the BR
 const STATE: Record<CapabilityState, string> = { AVAILABLE: "text-ok", LIMITED: "text-warn", UNAVAILABLE: "text-signal", EXPERIMENTAL: "text-chalk/40" };
 
 export default async function CapacityPage() {
-  const [caps, health] = await Promise.all([assessCapabilities(), Promise.all(executionProviders().map((p) => p.health()))]);
+  let caps: Awaited<ReturnType<typeof assessCapabilities>>;
+  let health: Awaited<ReturnType<ReturnType<typeof executionProviders>[number]["health"]>>[];
+  try {
+    [caps, health] = await Promise.all([assessCapabilities(), Promise.all(executionProviders().map((p) => p.health()))]);
+  } catch (e) {
+    // Capacity is derived from the nodes and jobs in the database. If the database is not answering,
+    // say so; do not show a capacity that was not read.
+    if (!isTransientDbError(e)) throw e;
+    const retryAfterSec = isStoreUnavailable(e) ? e.retryAfterSec : 15;
+    return (
+      <Shell>
+        <PageHead
+          eyebrow={
+            <>
+              Network capacity <SourceBadge source="REAL" />
+            </>
+          }
+          title="The database is not answering right now."
+        >
+          Capacity is derived from the real nodes and jobs in the server&apos;s store, which cannot be read at the moment. Nothing is shown that was not read; retry in {retryAfterSec} seconds.
+        </PageHead>
+        <Link href="/capacity" className="mt-6 inline-block font-mono text-[12px] text-chalk underline underline-offset-4">
+          Retry →
+        </Link>
+      </Shell>
+    );
+  }
   const reached = caps.levels.filter((l) => l.reached).length;
   return (
     <Shell>
