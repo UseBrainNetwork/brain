@@ -40,6 +40,17 @@ export class PgStore implements NetworkStore {
    * holders exhaust it and every query on the instance (including read-only routes) waits forever.
    */
   private lockPool: Pool;
+  /**
+   * Supabase's transaction-mode pooler (port 6543) intermittently poisons its pool for a user and
+   * then rejects every connection with "Authentication credentials are invalid … reconnect with
+   * fresh credentials" although the credentials are unchanged and the session-mode pooler (5432)
+   * on the same host accepts them. When that happens this instance switches to session mode for a
+   * while instead of taking the site down. Session mode holds one backend per client, so these
+   * pools are tiny and drop idle sockets fast. null when the URL is not a Supabase pooler URL.
+   */
+  private sessionPools: { pool: Pool; lockPool: Pool } | null = null;
+  private sessionUntil = 0;
+  private static readonly SESSION_FALLBACK_MS = 5 * 60_000;
   private ready: Promise<void>;
   constructor(connectionString: string) {
     // Hosted Postgres (Supabase, Neon, Prisma) requires TLS; local docker usually has none.
@@ -68,6 +79,17 @@ export class PgStore implements NetworkStore {
     this.lockPool = new Pool({ ...common, max: 2 });
     // Idle-client errors (pooler closing a socket) must not become unhandled rejections that kill the instance.
     for (const pool of [this.pool, this.lockPool]) pool.on("error", (e) => console.warn("[pgStore] idle client error:", e.message));
+    try {
+      const u = new URL(cs);
+      if (/\.pooler\.supabase\.com$/.test(u.hostname) && u.port === "6543") {
+        u.port = "5432";
+        const session = { ...common, connectionString: u.toString(), idleTimeoutMillis: 10_000 };
+        this.sessionPools = { pool: new Pool({ ...session, max: 2 }), lockPool: new Pool({ ...session, max: 1 }) };
+        for (const pool of [this.sessionPools.pool, this.sessionPools.lockPool]) pool.on("error", (e) => console.warn("[pgStore] idle session client error:", e.message));
+      }
+    } catch {
+      /* not a URL */
+    }
     this.ready = this.migrate();
   }
 
@@ -134,12 +156,41 @@ export class PgStore implements NetworkStore {
    */
   private breaker = new Breaker({ threshold: 2, openMs: 15_000 });
 
+  private inSessionFallback() {
+    return this.sessionPools != null && Date.now() < this.sessionUntil;
+  }
+
+  /**
+   * Run `primary` against the transaction pooler; if it is rejecting this user's credentials and a
+   * session-mode pooler exists, run `fallback` there and stay on session mode for a few minutes.
+   */
+  private async viaPooler<T>(primary: () => Promise<T>, fallback: () => Promise<T>): Promise<T> {
+    if (this.inSessionFallback()) return fallback();
+    try {
+      return await retryPoolerRejection(primary);
+    } catch (e) {
+      if (!this.sessionPools || !isPoolerRejection(e)) throw e;
+      this.sessionUntil = Date.now() + PgStore.SESSION_FALLBACK_MS;
+      console.warn(`[pgStore] transaction pooler rejecting credentials; using session pooler for ${PgStore.SESSION_FALLBACK_MS / 1000}s:`, (e as Error).message.slice(0, 80));
+      return fallback();
+    }
+  }
+
   /** Pool query gated on the schema being applied and on the breaker. */
   private q<T extends Record<string, unknown> = Record<string, unknown>>(text: string, params?: unknown[]) {
     return this.breaker.run(async () => {
       await this.ready;
-      return retryPoolerRejection(() => this.pool.query<T>(text, params));
+      return this.viaPooler(
+        () => this.pool.query<T>(text, params),
+        () => this.sessionPools!.pool.query<T>(text, params),
+      );
     });
+  }
+
+  /** Which pooler mode this instance is on right now. For operational views only. */
+  poolerMode(): "transaction" | "session" | "direct" {
+    if (!this.sessionPools) return this.portNum === 6543 ? "transaction" : "direct";
+    return this.inSessionFallback() ? "session" : "transaction";
   }
 
   /** Whether this instance is currently refusing database work. For status views only. */
@@ -159,7 +210,7 @@ export class PgStore implements NetworkStore {
       // behind transaction-mode poolers (Supabase/pgbouncer): lock and unlock can land on different
       // backends and the lock leaks forever. A transaction is pinned to one backend and the lock
       // is released at COMMIT no matter what.
-      const c = await this.breaker.run(() => retryPoolerRejection(() => this.lockPool.connect()));
+      const c = await this.breaker.run(() => this.viaPooler(() => this.lockPool.connect(), () => this.sessionPools!.lockPool.connect()));
       let locked = false;
       let clean = false;
       try {
