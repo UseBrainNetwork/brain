@@ -59,6 +59,8 @@ export class PgStore implements NetworkStore {
    */
   private lanes: Lane[];
   private static readonly LANE_COOLDOWN_MS = 10 * 60_000;
+  /** How long withLock keeps retrying the advisory lock before proceeding under the in-process lock only. */
+  private static readonly LOCK_WAIT_MS = 8_000;
   private ready: Promise<void>;
   constructor(connectionString: string, alternateConnectionString?: string) {
     // Hosted Postgres (Supabase, Neon, Prisma) requires TLS; local docker usually has none.
@@ -272,24 +274,30 @@ export class PgStore implements NetworkStore {
       // is released at COMMIT no matter what.
       const c = await this.breaker.run(() => this.viaLane((lane) => lane.lockPool.connect()));
       let locked = false;
-      let clean = false;
+      let clean = true;
       try {
-        await c.query("BEGIN");
         // Up to 64 units of one job return within the same second from different instances, each
-        // holding this lock for a read-modify-write of the parent. 3 s was not enough to wait out
-        // the queue, and giving up meant proceeding unlocked. The CAS in saveDistributedJob now
-        // guards the data either way; the wait keeps contention from turning into retries.
-        // The pool's 15 s statement_timeout and client query_timeout would both cut the wait short
-        // of lock_timeout; lift them for this one statement so lock_timeout is what decides.
-        await c.query("SET LOCAL lock_timeout = '20s'");
-        await c.query("SET LOCAL statement_timeout = '25s'");
-        try {
-          const lockQuery: QueryConfig & { query_timeout: number } = { text: "SELECT pg_advisory_xact_lock(hashtext($1))", values: [key], query_timeout: 26_000 };
-          await c.query(lockQuery);
-          locked = true;
-        } catch (e) {
-          console.warn(`[pgStore] lock ${key} not acquired (${(e as Error).message}); continuing with in-process lock only`);
+        // wanting this lock for a read-modify-write of the parent. Waiting inside a transaction
+        // (pg_advisory_xact_lock) pins a pooler backend per waiter; with sixteen waiters the role's
+        // whole backend quota was pinned, the holder's own queries could not get a backend to finish,
+        // and every other query on the site starved behind them. So: try the lock, and if it is
+        // taken, ROLLBACK (which frees the backend), pause, and try again. Only holders pin a
+        // backend. After the deadline the work proceeds under the in-process lock alone; the CAS in
+        // saveDistributedJob guards the data either way.
+        const deadline = Date.now() + PgStore.LOCK_WAIT_MS;
+        for (let attempt = 1; ; attempt++) {
+          await c.query("BEGIN");
+          const r = await c.query<{ ok: boolean }>("SELECT pg_try_advisory_xact_lock(hashtext($1)) AS ok", [key]);
+          if (r.rows[0]?.ok) {
+            locked = true;
+            break;
+          }
           clean = await c.query("ROLLBACK").then(() => true, () => false);
+          if (!clean || Date.now() >= deadline) {
+            console.warn(`[pgStore] lock ${key} not acquired after ${attempt} tries; continuing with in-process lock only`);
+            break;
+          }
+          await new Promise((res) => setTimeout(res, 60 + Math.random() * 140));
         }
         return await fn();
       } finally {
