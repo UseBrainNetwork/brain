@@ -140,7 +140,7 @@ export function createJob(input: CreateJobInput = {}): Promise<DistributedJob> {
 async function createJobUnlocked(input: CreateJobInput): Promise<DistributedJob> {
   const store = getStore();
   if (!input.attachedTo && !input.scheduled && (await activeJob())) throw new NodeError("job_in_progress", 409);
-  let nodes = (await store.listNodes()).filter(live).sort((a, b) => b.computeScore - a.computeScore);
+  let nodes = (await store.listLiveNodes()).filter(live).sort((a, b) => b.computeScore - a.computeScore);
   if (nodes.length === 0) throw new NodeError("no_real_nodes", 409);
   if (input.maxNodes && input.maxNodes > 0 && nodes.length > input.maxNodes) {
     // Attached jobs rotate through the fleet rather than always landing on the strongest nodes.
@@ -330,8 +330,8 @@ async function reassign(job: DistributedJob, failed: WorkUnit, fromNodeId: strin
     failed.status = "failed";
     return;
   }
-  const candidates = (await store.listNodes()).filter((n) => live(n) && n.id !== fromNodeId);
-  const pool = candidates.length ? candidates : (await store.listNodes()).filter(live);
+  const candidates = (await store.listLiveNodes()).filter((n) => live(n) && n.id !== fromNodeId);
+  const pool = candidates.length ? candidates : (await store.listLiveNodes()).filter(live);
   if (pool.length === 0) return; // settle() will fail the job if nothing can take it
   // Least-loaded live node.
   const load = new Map<string, number>();
@@ -440,7 +440,7 @@ export async function nodeLost(nodeId: string) {
 export async function reapStale(knownLive?: Set<string>) {
   const store = getStore();
   const now = Date.now();
-  const liveIds = knownLive ?? new Set((await store.listNodes()).filter(live).map((n) => n.id));
+  const liveIds = knownLive ?? new Set((await store.listLiveNodes()).filter(live).map((n) => n.id));
   for (const listed of await store.listDistributedJobs(25)) {
     if (listed.status === "completed" || listed.status === "failed") continue;
     // Units whose own job already finished but never reached the parent (see reconcile).
@@ -480,7 +480,7 @@ export async function getJob(id: string) {
 /** Real-only network summary for /demo. Nothing simulated contributes. */
 export async function realSummary(knownNodes?: StoredNode[]) {
   const store = getStore();
-  const nodes = (knownNodes ?? (await store.listNodes())).filter(live);
+  const nodes = (knownNodes ?? (await store.listLiveNodes())).filter(live);
   const jobs = await store.listDistributedJobs(100);
   const done = jobs.filter((j) => j.status === "completed");
   const unitsAll = jobs.flatMap((j) => j.units).filter((u) => u.status === "verified" || u.status === "mismatch" || u.status === "failed");

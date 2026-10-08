@@ -98,13 +98,13 @@ export class PgStore implements NetworkStore {
         return null;
       }
     };
-    this.lanes = [lane("primary", this.portNum === 6543 ? "transaction" : "direct", cs, { max: 3, lockMax: 2 })];
+    this.lanes = [lane("primary", this.portNum === 6543 ? "transaction" : "direct", cs, { max: 3, lockMax: 4 })];
     if (alternateConnectionString && alternateConnectionString !== connectionString) {
       try {
         const u = new URL(alternateConnectionString);
         u.searchParams.delete("sslmode");
         u.searchParams.delete("ssl");
-        this.lanes.push(lane("alternate", u.port === "6543" ? "transaction" : "direct", u.toString(), { max: 3, lockMax: 2 }));
+        this.lanes.push(lane("alternate", u.port === "6543" ? "transaction" : "direct", u.toString(), { max: 3, lockMax: 4 }));
       } catch {
         console.warn("[pgStore] DATABASE_URL_ALT is not a URL; ignored");
       }
@@ -393,6 +393,10 @@ export class PgStore implements NetworkStore {
   }
   async listNodes() {
     const r = await this.q(`SELECT data FROM brain_nodes WHERE updated_at > now() - interval '1 day'`);
+    return r.rows.map((x) => x.data as StoredNode);
+  }
+  async listLiveNodes() {
+    const r = await this.q(`SELECT data FROM brain_nodes WHERE status IN ('idle', 'computing') AND updated_at > now() - interval '1 day'`);
     return r.rows.map((x) => x.data as StoredNode);
   }
   async countNodesJoined() {

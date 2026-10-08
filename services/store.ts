@@ -106,6 +106,8 @@ export interface NetworkStore {
   getNodes(ids: string[]): Promise<Map<string, StoredNode>>;
   getNodeBySession(sessionHash: string): Promise<StoredNode | null>;
   listNodes(): Promise<StoredNode[]>;
+  /** Nodes with status idle or computing: the few hundred that scheduling can use, not every row seen in a day. */
+  listLiveNodes(): Promise<StoredNode[]>;
   /** Distinct GPU identities that have ever registered. Cumulative; never pruned. */
   countNodesJoined(): Promise<number>;
   saveJob(j: StoredJob): Promise<void>;
@@ -252,6 +254,9 @@ export class MemoryStore implements NetworkStore {
   }
   async listNodes() {
     return [...this.nodes.values()];
+  }
+  async listLiveNodes() {
+    return [...this.nodes.values()].filter((n) => n.status === "idle" || n.status === "computing");
   }
   async countNodesJoined() {
     return new Set([...this.nodes.values()].map((n) => n.identityHash ?? n.id)).size;

@@ -195,7 +195,8 @@ export async function sweepOffline() {
   if (now - (sweepState.__brainSweepAt ?? 0) < 15_000) return;
   sweepState.__brainSweepAt = now;
   const store = getStore();
-  const nodes = await store.listNodes();
+  // Only nodes still marked live can go offline; the full table is tens of thousands of rows.
+  const nodes = await store.listLiveNodes();
   const liveIds = new Set<string>();
   for (const n of nodes) {
     if (isLive(n) && now - n.lastHeartbeatAt > networkConfig.nodes.offlineAfterMs) {
@@ -258,7 +259,7 @@ export async function liveNodes(): Promise<ComputeNode[]> {
     await sweepOffline();
     const t = Date.now();
     // Filter by heartbeat age as well as status, so a throttled sweep never shows a silent node as online.
-    return (await getStore().listNodes())
+    return (await getStore().listLiveNodes())
       .filter((n) => (n.status === "idle" || n.status === "computing") && t - n.lastHeartbeatAt <= networkConfig.nodes.offlineAfterMs)
       .map(publicNode);
   })();

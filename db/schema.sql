@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS brain_nodes (
   data          JSONB NOT NULL,
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Live nodes are a few hundred rows out of tens of thousands; scheduling reads only those.
+CREATE INDEX IF NOT EXISTS brain_nodes_live_idx ON brain_nodes (status) WHERE status IN ('idle', 'computing');
 
 CREATE TABLE IF NOT EXISTS brain_jobs (
   id            TEXT PRIMARY KEY,
