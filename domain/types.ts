@@ -325,6 +325,12 @@ export interface DistributedJob {
   failReason?: string;
   source: "real";
   lifecycle: { stage: DistributedJobStatus; at: number; detail?: string }[];
+  /**
+   * Write revision, bumped by the store on every save. A save whose `rev` is not the stored one is
+   * refused (StoreConflictError) instead of overwriting another instance's write: units from one
+   * job return from many serverless instances at once, and a lost update here loses verified work.
+   */
+  rev?: number;
   /** Set when the job was created by a compute order through the routing engine. */
   orderId?: string;
   decisionId?: string;

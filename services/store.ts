@@ -1,4 +1,5 @@
 import type { ComputeJob, ComputeNode, DistributedJob, RewardAllocation, RewardClaim, RewardEpoch } from "@/domain/types";
+import { StoreConflictError } from "./failsoft";
 import type { WorkloadResult, WorkloadSpec } from "@/network/workloads";
 import { PgStore } from "./pgStore";
 
@@ -358,6 +359,10 @@ export class MemoryStore implements NetworkStore {
     };
   }
   async saveDistributedJob(j: DistributedJob) {
+    const stored = this.djobs.get(j.id);
+    const expected = j.rev ?? 0;
+    if ((stored?.rev ?? 0) !== expected) throw new StoreConflictError("distributed job", j.id);
+    j.rev = expected + 1;
     this.djobs.set(j.id, structuredClone(j));
     if (this.djobs.size > 200) {
       const oldest = this.djobs.keys().next().value;

@@ -2,6 +2,7 @@ import type { DistributedJob, DistributedJobStatus, WorkUnit, WorkloadSize } fro
 import { networkConfig } from "@/lib/config";
 import { workloadUnits, type WorkloadResult, type WorkloadSpec } from "@/network/workloads";
 import { eventBus } from "./eventBus";
+import { retryOnConflict } from "./failsoft";
 import { issueReceipt } from "./receipts";
 import { NodeError } from "./nodes";
 import { sampleIndices, secureU32 } from "./security";
@@ -207,7 +208,7 @@ async function createJobUnlocked(input: CreateJobInput): Promise<DistributedJob>
 
 /** Node reports it began executing a unit. Display-only; verification never trusts it. */
 export function unitStarted(parentId: string, unitId: string, nodeId: string) {
-  return getStore().withLock(`djob:${parentId}`, () => unitStartedUnlocked(parentId, unitId, nodeId));
+  return getStore().withLock(`djob:${parentId}`, () => retryOnConflict(() => unitStartedUnlocked(parentId, unitId, nodeId)));
 }
 
 async function unitStartedUnlocked(parentId: string, unitId: string, nodeId: string) {
@@ -229,7 +230,9 @@ async function unitStartedUnlocked(parentId: string, unitId: string, nodeId: str
  * sibling replica has returned, records verification metadata, and advances the parent.
  */
 export function unitResult(unitJob: StoredJob, node: StoredNode, result: WorkloadResult, spotOk: boolean, spotReason: string | undefined, checked: number, gpuMs: number) {
-  return getStore().withLock(`djob:${unitJob.parentId}`, () => unitResultUnlocked(unitJob, node, result, spotOk, spotReason, checked, gpuMs));
+  // The lock serializes instances that acquire it; the conflict retry covers the ones that could not
+  // wait. Each attempt re-reads the parent, so a verified unit is never written over a stale copy.
+  return getStore().withLock(`djob:${unitJob.parentId}`, () => retryOnConflict(() => unitResultUnlocked(unitJob, node, result, spotOk, spotReason, checked, gpuMs)));
 }
 
 async function unitResultUnlocked(unitJob: StoredJob, node: StoredNode, result: WorkloadResult, spotOk: boolean, spotReason: string | undefined, checked: number, gpuMs: number) {
@@ -238,6 +241,8 @@ async function unitResultUnlocked(unitJob: StoredJob, node: StoredNode, result: 
   if (!job) return;
   const u = job.units.find((x) => x.id === unitJob.unitId);
   if (!u) return;
+  // A previous attempt of this call already recorded the outcome and lost only a later save.
+  if (u.status === "verified" || u.status === "mismatch") return settle(job);
   const now = Date.now();
   u.returnedAt = now;
   u.gpuMsReported = Math.max(0, Math.round(gpuMs) || 0);
@@ -287,7 +292,7 @@ async function unitResultUnlocked(unitJob: StoredJob, node: StoredNode, result: 
 
 /** A unit's node vanished or its deadline passed. */
 export function unitLost(unitJob: StoredJob, reason: "lost" | "deadline") {
-  return getStore().withLock(`djob:${unitJob.parentId}`, () => unitLostUnlocked(unitJob, reason));
+  return getStore().withLock(`djob:${unitJob.parentId}`, () => retryOnConflict(() => unitLostUnlocked(unitJob, reason)));
 }
 
 async function unitLostUnlocked(unitJob: StoredJob, reason: "lost" | "deadline") {
