@@ -10,6 +10,7 @@ import { classify, scheduleBenchmark } from "./benchmark";
 import { CANARIES, CANARY_TTL_MS, MATCH_THRESHOLD, maybeShadow, scheduleCanary, similarity } from "./verify";
 import { TRANSITIONS, createInferenceJob, getInferenceJob, matchJob, observeJob, publicInferenceJob, reportCompleted, reportFailed, reportProgress, reportStarted, sweepInferenceJobs, transition, type InferenceJob } from "./jobs";
 import { canonicalJson, receiptHash, verifyReceipt } from "./receipts";
+import { nativeComputeUnits } from "./work";
 import { getNativeNode, heartbeatNativeNode, listNativeNodes, registerNativeNode, reliabilityScore, sweepNativeNodes, updateNativeNode } from "./registry";
 
 const g = globalThis as typeof globalThis & { __brainStore?: MemoryStore; __brainNNodes?: unknown; __brainNSweep?: number; __brainNJobSweep?: number };
@@ -173,6 +174,9 @@ describe("job state machine", () => {
 
     const r = (await g.__brainStore!.getDoc<ComputeReceipt>("receipt", done.receiptId!))!;
     expect(r.verificationMethod).toBe("node-reported");
+    // Delivered, not verified: the receipt says COMPLETED, and carries the units settlement credits.
+    expect(r.status).toBe("COMPLETED");
+    expect(r.totalComputeUnits).toBe(nativeComputeUnits(done));
     expect(r.attestation.kind).toBe("signature");
     expect(r.canonical?.body.nodeId).toBe(n.nodeId);
     expect(r.canonical?.body.outputTokens).toBe(2);

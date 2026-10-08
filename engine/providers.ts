@@ -284,7 +284,8 @@ export class UpstreamExecutionProvider implements IntelligenceProvider {
       planId: ctx.planId,
       stepId: ctx.stepId,
       tokens: { prompt: usage.prompt, completion: usage.completion, basis: usage.basis },
-      status: "VERIFIED",
+      // Delivered, not verified: BRAIN cannot check an upstream model's computation.
+      status: "COMPLETED",
     };
     // The receipt is the record; the store writes land concurrently and are tracked so the request's
     // `after()` tail can wait for them. Nothing here holds the answer back from the customer.

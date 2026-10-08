@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { ComputeOrder, ComputeReceipt, CustomerRequestRecord, EconomicsSnapshot, NodeReputation } from "@/domain/economy";
+import { receiptStatus, type ComputeOrder, type ComputeReceipt, type CustomerRequestRecord, type EconomicsSnapshot, type NodeReputation } from "@/domain/economy";
 import type { ComputeNode, DistributedJob } from "@/domain/types";
 import { cx, fmtInt } from "@/lib/format";
 import { useReal } from "@/network/realtime/real";
@@ -125,7 +125,7 @@ export function NetworkOps() {
                   {r.receiptId} <span className="text-chalk/40">· {r.workloadType}</span>
                 </span>
                 <span className="text-chalk/60">{r.nodesUsed.length} nodes · {fmtInt(r.totalComputeUnits)} u</span>
-                <span className={r.status === "VERIFIED" ? "text-ok" : r.status === "PARTIAL" ? "text-warn" : "text-signal"}>{r.status}</span>
+                <span className={receiptStatus(r) === "VERIFIED" ? "text-ok" : receiptStatus(r) === "PARTIAL" ? "text-warn" : receiptStatus(r) === "COMPLETED" ? "text-chalk/70" : "text-signal"}>{receiptStatus(r)}</span>
               </Link>
             ))}
           />

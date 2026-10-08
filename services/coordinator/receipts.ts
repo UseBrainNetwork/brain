@@ -9,6 +9,7 @@ import { serverSecret } from "@/services/security";
 import { getStore } from "@/services/store";
 import type { InferenceJob } from "./jobs";
 import { getNativeNode } from "./registry";
+import { nativeComputeUnits } from "./work";
 
 /**
  * Brain Compute Receipts for native-node inference.
@@ -125,7 +126,9 @@ export async function issueNodeReceipt(j: InferenceJob, now = Date.now()): Promi
     verifiedWorkUnits: 0,
     failedWorkUnits: 0,
     reassignedWorkUnits: Math.max(0, j.attempts - 1),
-    totalComputeUnits: 0,
+    // The units settlement credits for this job: parameters × tokens ÷ 2²⁰, tokens clipped to the
+    // text the coordinator streamed (services/coordinator/work.ts). 0 for mock models.
+    totalComputeUnits: nativeComputeUnits(j),
     executionTimeMs: j.computeDurationMs ?? 0,
     verificationMethod: "node-reported",
     verificationConfidence: 0,
@@ -140,7 +143,8 @@ export async function issueNodeReceipt(j: InferenceJob, now = Date.now()): Promi
     route: { target: "NATIVE_NETWORK", providerId: "brain-native-pool", ...(j.decisionId ? { decisionId: j.decisionId } : {}) },
     ...(j.orderId ? { orderId: j.orderId } : {}),
     tokens: { prompt: usage.prompt, completion: usage.completion, basis: "node-reported" },
-    status: "VERIFIED",
+    // Delivered and checked for consistency, not re-executed: see verificationMethod.
+    status: "COMPLETED",
   };
   await store.putDoc("receipt", id, receipt, { at: receipt.completedAt, key: receipt.source });
   eventBus.publish({ type: "receipt.issued", at: receipt.completedAt, receipt });

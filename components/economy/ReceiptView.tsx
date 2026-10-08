@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { ComputeReceipt, RouteDecision } from "@/domain/economy";
+import { receiptStatus, type ComputeReceipt, type RouteDecision } from "@/domain/economy";
 import type { DistributedJob } from "@/domain/types";
 import { cx, fmtInt } from "@/lib/format";
 import { CopyLink } from "./CopyLink";
@@ -14,13 +14,15 @@ const VERIFICATION_TEXT: Record<ComputeReceipt["verificationMethod"], string> = 
 };
 
 export function ReceiptView({ receipt: r, job, decision }: { receipt: ComputeReceipt; job: DistributedJob | null; decision: RouteDecision | null }) {
-  const statusTone = r.status === "VERIFIED" ? "text-ok" : r.status === "PARTIAL" ? "text-warn" : "text-signal";
+  const status = receiptStatus(r);
+  const statusTone = status === "VERIFIED" ? "text-ok" : status === "PARTIAL" ? "text-warn" : status === "COMPLETED" ? "text-chalk/70" : "text-signal";
+  const chat = r.workloadType === "chat";
   return (
     <Shell>
       <PageHead
         eyebrow={
           <>
-            Compute receipt <SourceBadge source={r.source} /> <span className={cx("font-semibold", statusTone)}>{r.status}</span>
+            Compute receipt <SourceBadge source={r.source} /> <span className={cx("font-semibold", statusTone)}>{status}</span>
           </>
         }
         title={r.receiptId}
@@ -52,8 +54,8 @@ export function ReceiptView({ receipt: r, job, decision }: { receipt: ComputeRec
         <Metric k="Work units" v={r.workUnits} />
         <Metric k="Verified" v={`${r.verifiedWorkUnits} / ${r.workUnits}`} tone={r.verifiedWorkUnits === r.workUnits ? "ok" : "warn"} />
         <Metric k="Failed · reassigned" v={`${r.failedWorkUnits} · ${r.reassignedWorkUnits}`} />
-        <Metric k="Compute units" v={fmtInt(r.totalComputeUnits)} sub="1 unit ≈ 2²⁰ MACs" />
-        <Metric k="Execution time" v={ms(r.executionTimeMs)} sub="request → verified" />
+        <Metric k="Compute units" v={fmtInt(r.totalComputeUnits)} sub={r.verificationMethod === "node-reported" ? "credited for settlement · params × tokens ÷ 2²⁰" : "1 unit ≈ 2²⁰ MACs"} />
+        <Metric k="Execution time" v={ms(r.executionTimeMs)} sub={chat ? "request → response" : "request → verified"} />
       </div>
 
       <div className="mt-10 grid gap-5 lg:grid-cols-[1.4fr_1fr]">

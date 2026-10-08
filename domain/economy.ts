@@ -101,9 +101,22 @@ export interface ComputeReceipt {
   attachedTo?: { orderId: string; model: string };
   /** Operator-scheduled network workload: no customer. */
   scheduled?: { by: "operator"; reason: string };
-  /** Final outcome. A FAILED job also gets a receipt so the failure is auditable. */
-  status: "VERIFIED" | "PARTIAL" | "FAILED";
+  /**
+   * Final outcome. VERIFIED: every unit was checked by this server. PARTIAL: some units failed or
+   * were reassigned. COMPLETED: the result was delivered but BRAIN did not verify the computation
+   * (an external provider's response, or a node-reported result); `verificationMethod` says which.
+   * A FAILED job also gets a receipt so the failure is auditable.
+   */
+  status: "VERIFIED" | "PARTIAL" | "COMPLETED" | "FAILED";
 }
+
+/**
+ * The status to show for a receipt. Receipts issued before COMPLETED existed carry VERIFIED with an
+ * unverified method; they are shown as COMPLETED, which is what they were.
+ */
+export const receiptStatus = (r: Pick<ComputeReceipt, "status" | "verificationMethod">): ComputeReceipt["status"] =>
+  r.status === "VERIFIED" && (r.verificationMethod === "unverified-provider-response" || r.verificationMethod === "node-reported") ? "COMPLETED" : r.status;
+
 
 export interface Money {
   amount: number;
