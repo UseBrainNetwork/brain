@@ -32,27 +32,35 @@ async function retryPoolerRejection<T>(fn: () => Promise<T>, attempts = 2): Prom
   }
 }
 
+/**
+ * One way of reaching the database. `pool` serves ordinary queries; `lockPool` is a separate,
+ * smaller pool for advisory-lock clients: a lock holder pins one client for the whole critical
+ * section while the work inside it queries through `pool`, and sharing one pool let N lock holders
+ * exhaust it so every query on the instance (including read-only routes) waited forever.
+ */
+type Lane = { name: string; mode: "transaction" | "session" | "direct"; pool: Pool; lockPool: Pool; badUntil: number };
+
 export class PgStore implements NetworkStore {
-  private pool: Pool;
   /**
-   * Separate, smaller pool for advisory-lock clients. A lock holder pins one client for the whole
-   * critical section while the work inside it queries through `pool`; sharing one pool lets N lock
-   * holders exhaust it and every query on the instance (including read-only routes) waits forever.
+   * Ordered ways of reaching the database; the first lane that is not cooling down serves.
+   *
+   * Supabase's transaction-mode pooler (port 6543) intermittently poisons the pool it keeps for one
+   * database role and then rejects every connection for that role with "Authentication credentials
+   * are invalid … reconnect with fresh credentials", although the credentials are unchanged and the
+   * same credentials work on the session-mode pooler (5432). The poison is per role: another role's
+   * pool on the same pooler keeps working. So:
+   *   1. primary   – DATABASE_URL, transaction pooler
+   *   2. alternate – DATABASE_URL_ALT, a second role with the same grants, transaction pooler
+   *   3. session   – the primary URL on port 5432 (Supabase pooler URLs only). Session mode admits
+   *                  at most pool_size clients for the whole project (15 on small compute), so this
+   *                  lane is a last resort: one client per pool, released after 3 s idle.
+   * A lane that rejects goes on cooldown and the next one serves; a poisoned pooler pool that sits
+   * idle for the cooldown is rebuilt with fresh credentials when traffic returns to it.
    */
-  private lockPool: Pool;
-  /**
-   * Supabase's transaction-mode pooler (port 6543) intermittently poisons its pool for a user and
-   * then rejects every connection with "Authentication credentials are invalid … reconnect with
-   * fresh credentials" although the credentials are unchanged and the session-mode pooler (5432)
-   * on the same host accepts them. When that happens this instance switches to session mode for a
-   * while instead of taking the site down. Session mode holds one backend per client, so these
-   * pools are tiny and drop idle sockets fast. null when the URL is not a Supabase pooler URL.
-   */
-  private sessionPools: { pool: Pool; lockPool: Pool } | null = null;
-  private sessionUntil = 0;
-  private static readonly SESSION_FALLBACK_MS = 5 * 60_000;
+  private lanes: Lane[];
+  private static readonly LANE_COOLDOWN_MS = 10 * 60_000;
   private ready: Promise<void>;
-  constructor(connectionString: string) {
+  constructor(connectionString: string, alternateConnectionString?: string) {
     // Hosted Postgres (Supabase, Neon, Prisma) requires TLS; local docker usually has none.
     // Hosted providers terminate TLS with their own CA, so `sslmode=require` in the URL must not
     // turn into full chain verification (pg ≥ 8.16 does that). We strip it and set ssl explicitly.
@@ -74,23 +82,37 @@ export class PgStore implements NetworkStore {
     // serverless instance holds its idle connections, so per-instance pools stay small. But every
     // reconnect is a TLS handshake plus pooler auth, and with a 2 s idle timeout the instances were
     // reconnecting on nearly every request: `SELECT 1` measured 6 s under load. Hold sockets for 45 s.
-    const common = { connectionString: cs, ssl, connectionTimeoutMillis: 8_000, idleTimeoutMillis: 45_000, allowExitOnIdle: true, statement_timeout: 15_000, query_timeout: 15_000 };
-    this.pool = new Pool({ ...common, max: 3 });
-    this.lockPool = new Pool({ ...common, max: 2 });
-    // Idle-client errors (pooler closing a socket) must not become unhandled rejections that kill the instance.
-    for (const pool of [this.pool, this.lockPool]) pool.on("error", (e) => console.warn("[pgStore] idle client error:", e.message));
-    try {
-      const u = new URL(cs);
-      if (/\.pooler\.supabase\.com$/.test(u.hostname) && u.port === "6543") {
-        u.port = "5432";
-        // Session mode admits at most pool_size clients for the whole project (15 on small compute),
-        // shared by every warm instance: one client per pool, released after 3 s idle.
-        const session = { ...common, connectionString: u.toString(), idleTimeoutMillis: 3_000 };
-        this.sessionPools = { pool: new Pool({ ...session, max: 1 }), lockPool: new Pool({ ...session, max: 1 }) };
-        for (const pool of [this.sessionPools.pool, this.sessionPools.lockPool]) pool.on("error", (e) => console.warn("[pgStore] idle session client error:", e.message));
+    const common = { ssl, connectionTimeoutMillis: 8_000, idleTimeoutMillis: 45_000, allowExitOnIdle: true, statement_timeout: 15_000, query_timeout: 15_000 };
+    const lane = (name: string, mode: Lane["mode"], connectionString: string, opts: { max: number; lockMax: number; idleTimeoutMillis?: number }): Lane => {
+      const cfg = { ...common, connectionString, ...(opts.idleTimeoutMillis ? { idleTimeoutMillis: opts.idleTimeoutMillis } : {}) };
+      const l: Lane = { name, mode, pool: new Pool({ ...cfg, max: opts.max }), lockPool: new Pool({ ...cfg, max: opts.lockMax }), badUntil: 0 };
+      // Idle-client errors (pooler closing a socket) must not become unhandled rejections that kill the instance.
+      for (const pool of [l.pool, l.lockPool]) pool.on("error", (e) => console.warn(`[pgStore] idle client error (${name}):`, e.message));
+      return l;
+    };
+    const supabasePooler = (s: string) => {
+      try {
+        const u = new URL(s);
+        return /\.pooler\.supabase\.com$/.test(u.hostname) && u.port === "6543" ? u : null;
+      } catch {
+        return null;
       }
-    } catch {
-      /* not a URL */
+    };
+    this.lanes = [lane("primary", this.portNum === 6543 ? "transaction" : "direct", cs, { max: 3, lockMax: 2 })];
+    if (alternateConnectionString && alternateConnectionString !== connectionString) {
+      try {
+        const u = new URL(alternateConnectionString);
+        u.searchParams.delete("sslmode");
+        u.searchParams.delete("ssl");
+        this.lanes.push(lane("alternate", u.port === "6543" ? "transaction" : "direct", u.toString(), { max: 3, lockMax: 2 }));
+      } catch {
+        console.warn("[pgStore] DATABASE_URL_ALT is not a URL; ignored");
+      }
+    }
+    const sessionUrl = supabasePooler(cs);
+    if (sessionUrl) {
+      sessionUrl.port = "5432";
+      this.lanes.push(lane("session", "session", sessionUrl.toString(), { max: 1, lockMax: 1, idleTimeoutMillis: 3_000 }));
     }
     this.ready = this.migrate();
   }
@@ -115,7 +137,7 @@ export class PgStore implements NetworkStore {
       const version = schemaVersion(sql);
       let marker: string | null = null;
       try {
-        const r = await this.pool.query<{ v: string }>(`SELECT data->>'version' AS v FROM brain_documents WHERE kind = 'meta' AND id = 'schema' LIMIT 1`);
+        const r = await this.viaLane((l) => l.pool.query<{ v: string }>(`SELECT data->>'version' AS v FROM brain_documents WHERE kind = 'meta' AND id = 'schema' LIMIT 1`));
         marker = r.rows[0]?.v ?? null;
       } catch (e) {
         // Database not answering: tell the breaker and stop here. Replaying the DDL would just be
@@ -127,24 +149,24 @@ export class PgStore implements NetworkStore {
         marker = null; // table missing on a fresh database: run the DDL
       }
       if (marker === version) return;
-      await this.pool.query(sql);
-      await this.pool.query(
+      await this.viaLane((l) => l.pool.query(sql));
+      await this.viaLane((l) => l.pool.query(
         `INSERT INTO brain_documents (kind, id, key, at, data) VALUES ('meta', 'schema', NULL, $1, $2) ON CONFLICT (kind, id) DO UPDATE SET at = $1, data = $2`,
         [Date.now(), JSON.stringify({ version, appliedAt: Date.now() })],
-      );
+      ));
       // Advisory locks held for more than a minute belong to a frozen or dead instance. Clear them.
-      await this.pool.query(
+      await this.viaLane((l) => l.pool.query(
         `SELECT pg_terminate_backend(a.pid) FROM pg_locks l JOIN pg_stat_activity a USING (pid)
          WHERE l.locktype = 'advisory' AND a.pid <> pg_backend_pid() AND a.state_change < now() - interval '60 seconds'`,
-      );
+      ));
       // Work aggregates from before they had a statement timeout can run for many minutes and starve
       // everything else. Anything from this app older than a minute is stale by definition (results are
       // cached per minute); end it.
-      await this.pool.query(
+      await this.viaLane((l) => l.pool.query(
         `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
          WHERE datname = current_database() AND pid <> pg_backend_pid() AND state = 'active'
            AND now() - query_start > interval '60 seconds' AND query LIKE '%SELECT assigned_to AS node_id, status%'`,
-      );
+      ));
     } catch (e) {
       this.migrationError = (e as Error).message;
       console.error("[pgStore] schema migration failed:", (e as Error).message);
@@ -158,49 +180,50 @@ export class PgStore implements NetworkStore {
    */
   private breaker = new Breaker({ threshold: 2, openMs: 15_000 });
 
-  private inSessionFallback() {
-    return this.sessionPools != null && Date.now() < this.sessionUntil;
+  /** Lanes that are not cooling down, in preference order; the primary alone when every lane is. */
+  private openLanes() {
+    const now = Date.now();
+    const open = this.lanes.filter((l) => l.badUntil <= now);
+    return open.length ? open : [this.lanes[0]];
   }
 
   /**
-   * Run `primary` against the transaction pooler; if it is rejecting this user's credentials and a
-   * session-mode pooler exists, run `fallback` there and stay on session mode for a few minutes.
+   * Run `run` on the first open lane. A lane whose pooler rejects the connection (poisoned pool,
+   * client cap) goes on cooldown and the next lane is tried. Any other error propagates untouched:
+   * a failing statement is the same on every lane.
    */
-  private async viaPooler<T>(primary: () => Promise<T>, fallback: () => Promise<T>): Promise<T> {
-    const viaSession = async () => {
+  private async viaLane<T>(run: (lane: Lane) => Promise<T>): Promise<T> {
+    let last: unknown;
+    for (const lane of this.openLanes()) {
       try {
-        return await retryPoolerRejection(fallback);
+        return await retryPoolerRejection(() => run(lane));
       } catch (e) {
-        console.warn("[pgStore] session pooler failed:", (e as Error).message.slice(0, 120));
-        throw e;
+        if (!isPoolerRejection(e)) throw e;
+        lane.badUntil = Date.now() + PgStore.LANE_COOLDOWN_MS;
+        console.warn(`[pgStore] ${lane.name} lane (${lane.mode} pooler) rejecting connections; cooling down ${PgStore.LANE_COOLDOWN_MS / 1000}s:`, (e as Error).message.slice(0, 100));
+        last = e;
       }
-    };
-    if (this.inSessionFallback()) return viaSession();
-    try {
-      return await retryPoolerRejection(primary);
-    } catch (e) {
-      if (!this.sessionPools || !isPoolerRejection(e)) throw e;
-      this.sessionUntil = Date.now() + PgStore.SESSION_FALLBACK_MS;
-      console.warn(`[pgStore] transaction pooler rejecting credentials; using session pooler for ${PgStore.SESSION_FALLBACK_MS / 1000}s:`, (e as Error).message.slice(0, 80));
-      return viaSession();
     }
+    throw last;
   }
 
   /** Pool query gated on the schema being applied and on the breaker. */
   private q<T extends Record<string, unknown> = Record<string, unknown>>(text: string, params?: unknown[]) {
     return this.breaker.run(async () => {
       await this.ready;
-      return this.viaPooler(
-        () => this.pool.query<T>(text, params),
-        () => this.sessionPools!.pool.query<T>(text, params),
-      );
+      return this.viaLane((lane) => lane.pool.query<T>(text, params));
     });
   }
 
   /** Which pooler mode this instance is on right now. For operational views only. */
   poolerMode(): "transaction" | "session" | "direct" {
-    if (!this.sessionPools) return this.portNum === 6543 ? "transaction" : "direct";
-    return this.inSessionFallback() ? "session" : "transaction";
+    return this.openLanes()[0].mode;
+  }
+
+  /** Lane names and whether each is cooling down. For operational views only; no hosts or credentials. */
+  laneStatus() {
+    const now = Date.now();
+    return this.lanes.map((l) => ({ name: l.name, mode: l.mode, coolingDownSec: l.badUntil > now ? Math.ceil((l.badUntil - now) / 1000) : 0 }));
   }
 
   /** Whether this instance is currently refusing database work. For status views only. */
@@ -220,7 +243,7 @@ export class PgStore implements NetworkStore {
       // behind transaction-mode poolers (Supabase/pgbouncer): lock and unlock can land on different
       // backends and the lock leaks forever. A transaction is pinned to one backend and the lock
       // is released at COMMIT no matter what.
-      const c = await this.breaker.run(() => this.viaPooler(() => this.lockPool.connect(), () => this.sessionPools!.lockPool.connect()));
+      const c = await this.breaker.run(() => this.viaLane((lane) => lane.lockPool.connect()));
       let locked = false;
       let clean = false;
       try {
@@ -313,6 +336,7 @@ export class PgStore implements NetworkStore {
     return {
       pingMs,
       port: this.port(),
+      lanes: this.laneStatus(),
       schema,
       migrationError: this.migrationError,
       tables: tables.rows.map((x) => ({ table: x.relname, liveRows: Number(x.live), deadRows: Number(x.dead), mb: Math.round(Number(x.bytes) / 1048576), lastAutovacuum: x.last_autovacuum, lastAutoanalyze: x.last_autoanalyze })),
@@ -487,7 +511,7 @@ export class PgStore implements NetworkStore {
   /** Returns null (without querying) when another instance holds the lock for this window. */
   private async aggregateWorkUncached(from: number, to: number, bucketMs: number, lockKey: string, closed: boolean): Promise<WorkAggregate[] | null> {
     await this.ready;
-    const c = await this.breaker.run(() => retryPoolerRejection(() => this.pool.connect()));
+    const c = await this.breaker.run(() => this.viaLane((lane) => lane.pool.connect()));
     let failed: Error | undefined;
     try {
       await c.query("BEGIN");
@@ -546,7 +570,7 @@ export class PgStore implements NetworkStore {
   }
   async saveSettlement(epoch: RewardEpoch, allocations: RewardAllocation[]) {
     await this.ready;
-    const c = await this.breaker.run(() => retryPoolerRejection(() => this.pool.connect()));
+    const c = await this.breaker.run(() => this.viaLane((lane) => lane.pool.connect()));
     let destroy: Error | undefined;
     try {
       await c.query("BEGIN");

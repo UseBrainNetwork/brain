@@ -425,7 +425,9 @@ export function getStore(): NetworkStore {
     // DATABASE_URL, or the pooled URL Vercel's Postgres integrations (Supabase, Neon, Prisma) inject.
     const url = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
     if (url) {
-      g.__brainStore = new PgStore(url);
+      // DATABASE_URL_ALT: same database through a second role, used when the pooler poisons the
+      // first role's pool (see PgStore.lanes). Optional.
+      g.__brainStore = new PgStore(url, process.env.DATABASE_URL_ALT || undefined);
     } else {
       g.__brainStore = new MemoryStore();
     }
