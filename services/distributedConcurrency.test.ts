@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 import { referenceResult } from "@/network/workloads";
-import { createJob, getJob } from "./distributed";
+import { createJob, getJob, reconcile } from "./distributed";
 import { StoreConflictError } from "./failsoft";
 import { nextJob, startWork, submitResult } from "./nodes";
 import { MemoryStore, type StoredNode } from "./store";
@@ -55,5 +55,40 @@ describe("distributed job parent updates under concurrency", () => {
     expect(done.units.map((u) => u.status)).toEqual(IDS.map(() => "verified"));
     expect(done.status).toBe("completed");
     expect(done.totals.verified).toBe(IDS.length);
+  });
+
+  it("reconcile folds in units whose own job closed but never reached the parent", async () => {
+    const job = await createJob({ dims: DIMS, unitsPerNode: 1, scheduled: { by: "operator", reason: "test" } });
+    const picked = await Promise.all(IDS.map(async (id) => ({ id, j: (await nextJob(await fresh(id), { distributedOnly: true }))! })));
+    // Seven nodes report normally; the eighth's parent update is "lost": its unit job is closed as
+    // completed with the result attached, exactly as submitResult does before it calls unitResult.
+    const [lost, ...rest] = picked;
+    for (const { id, j } of rest) await submitResult(await fresh(id), j.id, referenceResult(j.spec), 5);
+    const lostJob = (await store().getJob(lost.j.id))!;
+    await store().saveJob({ ...lostJob, status: "completed", verified: true, latencyMs: 5, lastResult: referenceResult(lostJob.spec), lifecycle: [...lostJob.lifecycle, { stage: "completed", at: Date.now() }] });
+
+    let cur = (await getJob(job.id))!;
+    expect(cur.status).not.toBe("completed");
+    expect(cur.units.find((u) => u.id === lost.j.id)!.status).toBe("assigned");
+
+    cur = (await reconcile(job.id))!;
+    expect(cur.units.find((u) => u.id === lost.j.id)!.status).toBe("verified");
+    expect(cur.status).toBe("completed");
+    expect(cur.totals.verified).toBe(IDS.length);
+    // Idempotent: a second pass changes nothing.
+    const again = (await reconcile(job.id))!;
+    expect(again.rev).toBe(cur.rev);
+  });
+
+  it("reconcile treats a unit job failed as 'node lost' as lost and reassigns it", async () => {
+    const job = await createJob({ dims: DIMS, unitsPerNode: 1, scheduled: { by: "operator", reason: "test" } });
+    const picked = await Promise.all(IDS.map(async (id) => ({ id, j: (await nextJob(await fresh(id), { distributedOnly: true }))! })));
+    const [lost] = picked;
+    const lostJob = (await store().getJob(lost.j.id))!;
+    await store().saveJob({ ...lostJob, status: "failed", failReason: "node lost" });
+    const cur = (await reconcile(job.id))!;
+    const u = cur.units.find((x) => x.id === lost.j.id)!;
+    expect(u.status).toBe("lost");
+    expect(cur.units.some((x) => x.replacedUnitId === lost.j.id && x.status === "assigned")).toBe(true);
   });
 });

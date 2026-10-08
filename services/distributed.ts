@@ -379,6 +379,38 @@ async function settle(job: DistributedJob) {
   }
 }
 
+/**
+ * Fold in unit outcomes the parent missed. submitResult closes the unit's own job before it updates
+ * the parent; if that second step fails (lock queue past its timeout and the conflict retries used
+ * up under 64 simultaneous returns, a transient database error, the function's time limit) the
+ * unit is done but the parent still shows it assigned, and the node cannot resubmit a closed job.
+ * Any pass over the parent repairs this from the unit jobs, which are the record of what happened.
+ * Returns the parent as it stands afterwards.
+ */
+export async function reconcile(parentId: string): Promise<DistributedJob | null> {
+  const store = getStore();
+  const job = await store.getDistributedJob(parentId);
+  if (!job || job.status === "completed" || job.status === "failed") return job;
+  let repaired = 0;
+  for (const u of job.units) {
+    if (u.status !== "assigned" && u.status !== "computing" && u.status !== "returned") continue;
+    const unitJob = await store.getJob(u.id);
+    if (!unitJob || unitJob.status === "assigned") continue;
+    const node = (await store.getNode(u.nodeId)) ?? ({ id: u.nodeId } as StoredNode);
+    if (unitJob.status === "completed" && unitJob.lastResult) {
+      // Same verification outcome the node received; redundancy comparison re-runs against siblings.
+      await unitResult(unitJob, node, unitJob.lastResult, unitJob.verified === true, unitJob.verified ? undefined : unitJob.failReason, unitJob.sampleIndices.length, unitJob.latencyMs ?? 0);
+    } else if (unitJob.status === "failed" && unitJob.lastResult && unitJob.failReason !== "node lost" && unitJob.failReason !== "deadline") {
+      await unitResult(unitJob, node, unitJob.lastResult, false, unitJob.failReason, 0, unitJob.latencyMs ?? 0);
+    } else {
+      await unitLost(unitJob, unitJob.failReason === "deadline" ? "deadline" : "lost");
+    }
+    repaired++;
+  }
+  if (repaired) console.warn(`[distributed] job ${parentId}: reconciled ${repaired} unit(s) from their unit jobs`);
+  return repaired ? ((await store.getDistributedJob(parentId)) ?? job) : job;
+}
+
 /** All pending units of a node that just went offline: reassign each. */
 export async function nodeLost(nodeId: string) {
   const store = getStore();
@@ -396,7 +428,10 @@ export async function reapStale(knownLive?: Set<string>) {
   const store = getStore();
   const now = Date.now();
   const liveIds = knownLive ?? new Set((await store.listNodes()).filter(live).map((n) => n.id));
-  for (const job of await store.listDistributedJobs(25)) {
+  for (const listed of await store.listDistributedJobs(25)) {
+    if (listed.status === "completed" || listed.status === "failed") continue;
+    // Units whose own job already finished but never reached the parent (see reconcile).
+    const job = (await reconcile(listed.id)) ?? listed;
     if (job.status === "completed" || job.status === "failed") continue;
     const orphans = job.units.filter((u) => (u.status === "assigned" || u.status === "computing") && !liveIds.has(u.nodeId));
     for (const u of orphans) {

@@ -10,7 +10,7 @@ import { OpenAICompatibleProvider } from "@/providers/openaiCompatible";
 import { NativeNetworkExecutionProvider } from "./nativeProvider";
 import { logProviderError, safeProviderError } from "./errors";
 import { accrueReceipt } from "@/services/accounting";
-import { createJob, getJob, listJobs } from "@/services/distributed";
+import { createJob, getJob, listJobs, reconcile } from "@/services/distributed";
 import { eventBus } from "@/services/eventBus";
 import { liveNodes } from "@/services/nodes";
 import { sha256 } from "@/services/receipts";
@@ -115,13 +115,15 @@ export class BrowserNetworkExecutionProvider implements IntelligenceProvider {
     if (req.kind !== "compute") throw new Error("browser network: unsupported request kind");
     const t0 = Date.now();
     const job = await createJob({ size: req.size, unitsPerNode: req.unitsPerNode, redundancy: req.redundancy, orderId: ctx.orderId, decisionId: ctx.decisionId });
-    // Wait for settle(): the job is driven by real nodes; we only observe.
+    // Wait for settle(): the job is driven by real nodes; we only observe. Once a second is enough
+    // (150 ms was ~800 reads of a large row per order). Every fifth read also folds in unit outcomes
+    // that nodes reported but the parent missed, so one dropped update cannot time the order out.
     const deadline = t0 + cfg.jobTtlMs + 5_000;
     let cur = job;
-    while (cur.status !== "completed" && cur.status !== "failed") {
+    for (let i = 1; cur.status !== "completed" && cur.status !== "failed"; i++) {
       if (Date.now() > deadline) break;
-      await new Promise((r) => setTimeout(r, 150));
-      cur = (await getJob(job.id)) ?? cur;
+      await new Promise((r) => setTimeout(r, 1_000));
+      cur = (await (i % 5 === 0 ? reconcile(job.id) : getJob(job.id))) ?? cur;
     }
     const ok = cur.status === "completed";
     const ms = (cur.completedAt ?? Date.now()) - t0;
