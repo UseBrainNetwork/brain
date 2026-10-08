@@ -160,10 +160,18 @@ export async function refreshClaims(wallet: string): Promise<RewardClaim[]> {
   const store = getStore();
   const claims = await store.claimsForWallet(wallet);
   const sender = getSender();
-  if (!sender) return claims;
   const out: RewardClaim[] = [];
   for (const c of claims) {
-    if (c.status !== "sent" || !c.txSignature) {
+    // A claim recorded but never sent (the instance died between the insert and the transfer) would
+    // block this wallet forever: one pending claim per wallet. Nothing can still send it after the
+    // blockhash window, so it fails and the balance returns.
+    if (c.status === "pending" && !c.txSignature && Date.now() - c.updatedAt > 5 * 60_000) {
+      const next: RewardClaim = { ...c, status: "failed", error: "abandoned", updatedAt: Date.now() };
+      await store.updateClaim(next);
+      out.push(next);
+      continue;
+    }
+    if (c.status !== "sent" || !c.txSignature || !sender) {
       out.push(c);
       continue;
     }

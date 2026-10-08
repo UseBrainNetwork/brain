@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // settlement.ts reads the native-node registry, which is server-only.
 vi.mock("server-only", () => ({}));
 import type { RewardAllocation, RewardEpoch } from "@/domain/types";
-import { balanceOf, claim, issueClaim, payoutStatus, setPayoutSender } from "./claims";
+import { balanceOf, claim, issueClaim, payoutStatus, refreshClaims, setPayoutSender } from "./claims";
 import type { PayoutSender } from "./payouts";
 import { keyFromSecret, signedTransfer, transferMessage } from "./payouts";
 import { rewardsSummary } from "./rewardsSummary";
@@ -270,6 +270,23 @@ describe("claims", () => {
     await expect(claim(w.address, message, w.sign(message))).rejects.toThrow("claim_in_progress");
     await expect(issueClaim(w.address)).rejects.toThrow("nothing_to_claim");
     expect(sender.sent).toHaveLength(1);
+  });
+
+  it("fails a claim that was recorded but never sent, so the wallet can claim again", async () => {
+    enable(fakeSender());
+    const w = wallet();
+    await seedLive(w.address, 50_000_000);
+    const stale = Date.now() - 10 * 60_000;
+    // What the store holds when an instance died between insertClaim and the transfer.
+    await store().insertClaim({ id: "nonce-dead", wallet: w.address, lamports: 50_000_000, status: "pending", createdAt: stale, updatedAt: stale });
+    expect((await balanceOf(w.address)).claimable).toBe(0);
+    const after = await refreshClaims(w.address);
+    expect(after.find((c) => c.id === "nonce-dead")?.status).toBe("failed");
+    expect(after.find((c) => c.id === "nonce-dead")?.error).toBe("abandoned");
+    expect((await balanceOf(w.address)).claimable).toBe(50_000_000);
+    // A fresh pending claim is left alone.
+    await store().insertClaim({ id: "nonce-live", wallet: w.address, lamports: 1, status: "pending", createdAt: Date.now(), updatedAt: Date.now() });
+    expect((await refreshClaims(w.address)).find((c) => c.id === "nonce-live")?.status).toBe("pending");
   });
 
   it("rejects tampered amounts, wrong signers and simulated balances", async () => {
