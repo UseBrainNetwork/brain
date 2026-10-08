@@ -58,7 +58,8 @@ export interface WorkAggregate {
  */
 export interface WorkRecord {
   id: string;
-  source: "native-inference";
+  /** "native-inference": a customer job. "native-verify": a shadow re-run of one that agreed with it. */
+  source: "native-inference" | "native-verify";
   assignedTo: string;
   status: "completed" | "failed";
   submittedAt: number;

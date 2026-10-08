@@ -7,7 +7,7 @@ import { body, nodeRoute } from "@/api/http";
 import type { PrivacyRequirement } from "@/domain/economy";
 import { normalizeMode } from "@/domain/economy";
 import { withTimeout } from "@/lib/async";
-import { planById } from "@/lib/plans";
+import { communityFirstFor, planById } from "@/lib/plans";
 import { isAllowedModel } from "@/node/models";
 import { ensureAccount } from "@/services/accounts";
 import { balance, consumeForReceipt, ensureMonthlyGrant, mayConsume } from "@/services/credits";
@@ -49,8 +49,8 @@ export const POST = nodeRoute(async (req, { ip }) => {
 
   const raw = await body<Record<string, unknown>>(req, 128 * 1024);
   const chat = validateChat({ ...raw, stream: true });
-  const mode = normalizeMode(String(raw.mode ?? "auto"));
-  if (!plan.modes.includes(mode)) return json({ error: { code: "mode_not_in_plan", message: `${mode} routing is not included in the ${plan.name} plan.` } }, 403);
+  const requestedMode = normalizeMode(String(raw.mode ?? "auto"));
+  if (!plan.modes.includes(requestedMode)) return json({ error: { code: "mode_not_in_plan", message: `${requestedMode} routing is not included in the ${plan.name} plan.` } }, 403);
   // A node model (the Community GPU option) runs only on community Brain Nodes, whose operators can
   // read the prompt. Choosing it is choosing PUBLIC; the UI says so before the request is sent.
   const nodeModel = isAllowedModel(chat.model);
@@ -58,6 +58,10 @@ export const POST = nodeRoute(async (req, { ip }) => {
   const privacy = PRIVACY.has(privacyRaw) ? privacyRaw : "STANDARD";
   if (nodeModel && privacy !== "PUBLIC") return json({ error: { code: "privacy_conflict", message: `${chat.model} runs on community GPUs whose operators can read prompts; it needs PUBLIC privacy.` } }, 400);
   if (privacy === "PRIVATE" && !plan.privateRouting) return json({ error: { code: "privacy_not_in_plan", message: `PRIVATE routing is not included in the ${plan.name} plan.` } }, 403);
+  // A PUBLIC request on a plan that runs on the community first goes to a GPU node when one can take
+  // it (COMMUNITY mode); the AUTO ranking is the fallback. The receipt and the decision record the
+  // mode that was actually used.
+  const mode = requestedMode === "AUTO" && privacy === "PUBLIC" && !nodeModel && communityFirstFor(plan.id) ? "COMMUNITY" : requestedMode;
 
   if (account) {
     const bal = await withTimeout(

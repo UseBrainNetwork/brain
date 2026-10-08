@@ -117,7 +117,7 @@ export function AutoConsole() {
         )}
         <div className="mt-5 font-mono text-[10px] uppercase tracking-[0.14em] text-chalk/45">Routing mode</div>
         <div className="mt-2 flex flex-wrap gap-1 font-mono text-[11px]">
-          {(["AUTO", "CHEAP", "FAST", "QUALITY", "BROWSER_ONLY"] as const).map((m) => (
+          {(["AUTO", "CHEAP", "FAST", "QUALITY", "COMMUNITY", "BROWSER_ONLY"] as const).map((m) => (
             <button key={m} type="button" onClick={() => setMode(m)} className={cx("rounded px-3 py-1.5 tracking-[0.08em]", mode === m ? "bg-chalk text-ink" : "text-chalk/60 ring-1 ring-inset ring-chalk/15")}>
               {m.replace("_", " ")}
             </button>

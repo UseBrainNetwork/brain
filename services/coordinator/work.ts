@@ -6,9 +6,11 @@ import { probeKind } from "./probes";
  * Settlement feed for native GPU nodes.
  *
  * A customer inference job the coordinator saw through to COMPLETED becomes one work record in the
- * same aggregate the browser kernels settle from, so the hourly epoch has one population. Probes
- * (benchmark, canary, shadow) never enter it: they are the coordinator's own prompts and paying for
- * them would pay nodes for answering four fixed questions.
+ * same aggregate the browser kernels settle from, so the hourly epoch has one population. Benchmarks
+ * and canaries never enter it: they are the coordinator's own prompts and paying for them would pay
+ * nodes for answering four fixed questions. A shadow re-run does enter it, but only when it agreed
+ * with the customer job it re-ran: that is a real prompt on a real model, chosen by the coordinator
+ * and checked against a second machine (`recordShadowWork`).
  *
  * Compute units use the unit the network already defines for LLM work (network/workloads.ts,
  * `llm_stage`): one unit = 2^20 multiply-accumulates, and a transformer spends ≈ one MAC per
@@ -61,11 +63,27 @@ export const isSettleable = (j: { requesterId: string; assignedNode: string | nu
 /** Records a completed customer job as verified work. No-op for probes, mock models and unassigned jobs. */
 export async function recordNativeWork(j: SettleableJob): Promise<WorkRecord | null> {
   if (!isSettleable(j)) return null;
+  return recordVerifiedUnits(j, "native-inference");
+}
+
+/**
+ * Records a shadow re-run that agreed with the customer job it checked. The shadow node ran the
+ * same real prompt on the same model and its answer matched; that is verified compute by a stricter
+ * test than the primary's, chosen by the coordinator, so it settles like the primary's. Only
+ * `recordShadowResult` calls this, and only on a match: a shadow that failed, timed out or
+ * disagreed is not paid.
+ */
+export async function recordShadowWork(j: SettleableJob): Promise<WorkRecord | null> {
+  if (probeKind(j) !== "verify" || !j.assignedNode) return null;
+  return recordVerifiedUnits(j, "native-verify");
+}
+
+async function recordVerifiedUnits(j: SettleableJob, source: WorkRecord["source"]): Promise<WorkRecord | null> {
   const computeUnits = nativeComputeUnits(j);
   if (computeUnits <= 0) return null;
   const w: WorkRecord = {
     id: j.jobId,
-    source: "native-inference",
+    source,
     assignedTo: j.assignedNode!,
     status: "completed",
     submittedAt: j.createdAt,

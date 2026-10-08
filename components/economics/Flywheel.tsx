@@ -28,7 +28,7 @@ const ring: { id: StageId; label: string; angle: number }[] = [
 ];
 
 const copy: Record<StageId, { title: string; body: string }> = {
-  trading: { title: "Trading", body: "Pump.fun creator fees from token trading are claimed by the protocol wallet and moved to the payout wallet. A fixed SOL pool is paid out of it each epoch." },
+  trading: { title: "Trading", body: `Pump.fun creator fees from token trading are claimed by the protocol wallet and moved to the payout wallet. A fixed SOL pool is paid out of it each epoch, plus ${Math.round(defaultRevenueSplit.inferenceRevenue.contributors * 100)}% of the plan purchases confirmed in that epoch.` },
   revenue: { title: "Revenue", body: "Creator fees and inference sales are allocated by published splits to contributors, token buyback, infrastructure and treasury." },
   compute: { title: "Compute", body: "Contributors run verifiable workloads. Only output that passes server-side verification is credited." },
   capacity: { title: "Capacity", body: "Each verified node adds schedulable memory and throughput, raising the volume of work the network can accept." },

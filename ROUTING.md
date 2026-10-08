@@ -5,7 +5,7 @@ How a request is turned into a route. Source: `engine/router.ts`, `engine/plan.t
 ## Inputs
 
 - The request (`ExecutionRequest`): chat messages or a compute workload, optional `model` hint.
-- `mode`: `AUTO` (default) · `CHEAP` · `FAST` · `QUALITY` · `BROWSER_ONLY`. Legacy aliases still accepted: `CHEAPEST → CHEAP`, `FASTEST → FAST`, `BALANCED → AUTO`, and the old `priority` field.
+- `mode`: `AUTO` (default) · `CHEAP` · `FAST` · `QUALITY` · `COMMUNITY` · `BROWSER_ONLY`. Legacy aliases still accepted: `CHEAPEST → CHEAP`, `FASTEST → FAST`, `BALANCED → AUTO`, and the old `priority` field.
 - `privacy`: `PUBLIC` · `STANDARD` (default) · `PRIVATE`.
 - `maxCost` (USD), `maxLatency` (ms), both optional.
 
@@ -94,8 +94,9 @@ score        = w_cost·normCost + w_lat·normLatency + w_rel·relPenalty + w_qua
 | `FAST` | 0.05 | 0.80 | 0.15 | 0 | 1.00 |
 | `QUALITY` | 0.05 | 0.05 | 0.30 | 0.60 | 1.00 |
 | `BROWSER_ONLY` | as `AUTO`, after the hard filter | | | | |
+| `COMMUNITY` | as `AUTO`, with one ordering rule: an eligible `NATIVE_NETWORK` row serving a real (non-mock) model is moved to the front; the score orders everything behind it | | | | |
 
-Ties break on higher `confidence`. The ranked list, weights, per-row penalties and the plain-language reason are stored on the `RouteDecision` and shown on the receipt and in "HOW BRAIN RAN THIS".
+Ties break on higher `confidence`. `COMMUNITY` is the default for a `PUBLIC` request in `AUTO` on a plan that runs on the community first (`BRAIN_COMMUNITY_FIRST`, default: the free plan); the decision and the receipt record `COMMUNITY`, not `AUTO`, when that happened. The privacy gate is unchanged, so a `STANDARD` or `PRIVATE` request never reaches a node this way, and a request a node cannot take (tools, no node online) falls through to the `AUTO` ranking with that reason on the row. The ranked list, weights, per-row penalties and the plain-language reason are stored on the `RouteDecision` and shown on the receipt and in "HOW BRAIN RAN THIS".
 
 ## Step 5: execute with fallback
 
@@ -112,6 +113,6 @@ The selected provider runs the step. If it fails before producing output, the ne
 ## What the router does not do
 
 - Guess a price, a latency or a quality tier.
-- Prefer a target for business reasons; only the published weights and the request's constraints apply.
+- Prefer a target for business reasons inside a mode; only the published weights and the request's constraints apply. (`COMMUNITY` is a mode with a published ordering rule, chosen by the request or by the plan, and it is recorded as such.)
 - Claim that an upstream model response was verified. Only browser-network work is `VERIFIED`.
 - Compare BRAIN's prices with other vendors.

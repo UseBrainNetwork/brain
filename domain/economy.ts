@@ -130,8 +130,12 @@ export type ProviderTrust = "untrusted-distributed" | "operator" | "third-party"
 /** What a provider can do. Capability ids are stable strings used by classify() and /capacity. */
 export type Capability = "compute.matmul_u32" | "chat" | "chat.reasoning" | "embeddings" | "vision" | "image.generation" | "tools";
 
-/** Routing priority. AUTO balances; CHEAP/FAST/QUALITY bias; BROWSER_ONLY is a hard filter. */
-export type RoutingMode = "AUTO" | "CHEAP" | "FAST" | "QUALITY" | "BROWSER_ONLY";
+/**
+ * Routing priority. AUTO balances; CHEAP/FAST/QUALITY bias; BROWSER_ONLY is a hard filter.
+ * COMMUNITY takes a community GPU node whenever one can serve the request and otherwise falls back
+ * to the AUTO ranking; it is the default for PUBLIC requests on the free plan (see lib/plans.ts).
+ */
+export type RoutingMode = "AUTO" | "CHEAP" | "FAST" | "QUALITY" | "BROWSER_ONLY" | "COMMUNITY";
 /** Legacy aliases accepted on the API and in stored orders. */
 export type LegacyRoutingMode = RoutingMode | "CHEAPEST" | "FASTEST" | "BALANCED";
 export const normalizeMode = (m: LegacyRoutingMode | string | undefined | null): RoutingMode => {
@@ -140,6 +144,7 @@ export const normalizeMode = (m: LegacyRoutingMode | string | undefined | null):
   if (u === "FASTEST" || u === "FAST") return "FAST";
   if (u === "QUALITY") return "QUALITY";
   if (u === "BROWSER_ONLY" || u === "BROWSER") return "BROWSER_ONLY";
+  if (u === "COMMUNITY" || u === "GPU") return "COMMUNITY";
   return "AUTO";
 };
 /** @deprecated use RoutingMode. Kept so stored orders still type-check. */

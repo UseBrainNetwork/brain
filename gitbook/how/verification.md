@@ -30,9 +30,9 @@ Language-model output is not bit-identical across GPUs, so the exact method does
 3. **Token plausibility.** The reported token count is plausible for the output length; node-reported tokens are clipped to the streamed text before anything is paid.
 4. **Wall time.** Measured on the coordinator's clock, not the node's.
 
-Then two kinds of unpaid probe, which feed the node's reliability score:
+Then two kinds of coordinator-initiated probe, which feed the node's reliability score:
 
-* **Sampled redundant execution.** 5 % of deterministic (temperature 0) customer jobs are re-run on a different node after completion. Outputs are compared with a text-similarity heuristic (character 4-gram Jaccard blended with length ratio, threshold 0.8). A mismatch is recorded against **both** nodes, because the coordinator cannot tell which one lied. The primary job's work is re-recorded as `replica-dispute`: unpaid, not counted as a failed check.
+* **Sampled redundant execution.** 5 % of deterministic (temperature 0) customer jobs are re-run on a different node after completion. Outputs are compared with a text-similarity heuristic (character 4-gram Jaccard blended with length ratio, threshold 0.8). A mismatch is recorded against **both** nodes, because the coordinator cannot tell which one lied. The primary job's work is re-recorded as `replica-dispute`: unpaid, not counted as a failed check. A **match** pays the shadow node too: it ran the same real prompt on the same model and its answer was checked against another machine, which is a stricter test than the primary passed. Its work record is labelled `native-verify`.
 * **Canaries.** Fixed prompts with mechanically checkable answers, sent to every real node hourly, every 25 jobs, and 5 minutes after a failure. Two consecutive failures mark the node `DEGRADED` (out of customer routing) until a canary passes.
 
 Receipts for this work say `verificationMethod: "node-reported"` and `verified: false`, because the coordinator did not re-run the model. The probe results are on the job and in the API's `brain.node.verification`, and they move the reliability score. They never relabel a receipt as verified.

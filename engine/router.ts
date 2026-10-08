@@ -12,6 +12,12 @@ import type { ExecutionEstimate, PrivacyRequirement, ProviderTrust, RoutingMode,
  * Hard constraints are applied before scoring and never traded against score:
  *   supported, available, BROWSER_ONLY, maxCost, maxLatency, privacy.
  * Unknown values are penalised, never treated as free, instant or perfect.
+ *
+ * COMMUNITY is the one mode with an ordering rule on top of the score: an eligible community GPU
+ * node (NATIVE_NETWORK, real model) is taken first, and the AUTO ranking decides everything after
+ * it, including the fallback when the node fails. It exists so the people who plug GPUs into the
+ * network get the traffic that can go to them; the privacy gate still applies unchanged, so only
+ * PUBLIC requests ever reach a node this way.
  */
 
 export const modeWeights: Record<RoutingMode, RoutingWeights> = {
@@ -20,7 +26,11 @@ export const modeWeights: Record<RoutingMode, RoutingWeights> = {
   FAST: { costWeight: 0.05, latencyWeight: 0.8, reliabilityWeight: 0.15, qualityWeight: 0, unknownPenalty: 1 },
   QUALITY: { costWeight: 0.05, latencyWeight: 0.05, reliabilityWeight: 0.3, qualityWeight: 0.6, unknownPenalty: 1 },
   BROWSER_ONLY: { costWeight: 0.4, latencyWeight: 0.25, reliabilityWeight: 0.25, qualityWeight: 0.1, unknownPenalty: 0.75 },
+  COMMUNITY: { costWeight: 0.4, latencyWeight: 0.25, reliabilityWeight: 0.25, qualityWeight: 0.1, unknownPenalty: 0.75 },
 };
+
+/** A community node an order may be sent to first: the real network, serving a real model. */
+export const isCommunityRoute = (e: { target: ExecutionEstimate["target"]; model?: string | null }) => e.target === "NATIVE_NETWORK" && e.model !== "brain/mock";
 
 /** Which provider trust levels may see a request at each privacy level. */
 export const privacyAllows: Record<PrivacyRequirement, ProviderTrust[]> = {
@@ -80,12 +90,21 @@ export function scoreEstimates(estimates: ExecutionEstimate[], mode: RoutingMode
     r.score = weights.costWeight * r.normalizedCost + weights.latencyWeight * r.normalizedLatency + weights.reliabilityWeight * r.reliabilityPenalty + weights.qualityWeight * r.qualityPenalty;
   }
   const ranked = [...rows].sort((a, b) => Number(b.eligible) - Number(a.eligible) || a.score - b.score || b.confidence - a.confidence);
+  // COMMUNITY: a community GPU node that can take the request goes first; the score orders the rest.
+  let community = false;
+  if (mode === "COMMUNITY") {
+    const i = ranked.findIndex((r) => r.eligible && isCommunityRoute(r));
+    if (i > 0) ranked.unshift(...ranked.splice(i, 1));
+    community = i >= 0;
+    if (community) ranked[0].notes = [...ranked[0].notes, "COMMUNITY: community GPU node taken first"];
+  }
   const selected = ranked.find((r) => r.eligible) ?? null;
   const fmtCost = (v: number | null) => (v == null ? "UNKNOWN" : `$${v.toFixed(4)}`);
   const fmtLat = (v: number | null) => (v == null ? "UNKNOWN" : `${Math.round(v)}ms`);
   const reason = selected
-    ? `${mode}: ${selected.provider} scored ${selected.score.toFixed(3)} (cost ${fmtCost(selected.estimatedCost)}, latency ${fmtLat(selected.estimatedLatency)}, reliability ${(selected.estimatedReliability * 100).toFixed(0)}%${selected.qualityTier != null ? `, quality tier ${selected.qualityTier.toFixed(2)}` : ""})` +
+    ? `${mode}: ${selected.provider} ${community ? "is a community GPU node (taken first), scored" : "scored"} ${selected.score.toFixed(3)} (cost ${fmtCost(selected.estimatedCost)}, latency ${fmtLat(selected.estimatedLatency)}, reliability ${(selected.estimatedReliability * 100).toFixed(0)}%${selected.qualityTier != null ? `, quality tier ${selected.qualityTier.toFixed(2)}` : ""})` +
       (eligible.length > 1 ? ` over ${eligible.length - 1} other eligible target${eligible.length > 2 ? "s" : ""}` : "") +
+      (mode === "COMMUNITY" && !community ? " · no community GPU node could take it; AUTO ranking" : "") +
       ` · privacy ${privacy}`
     : `no eligible target: ${rows.map((r) => `${r.provider} (${r.notes.at(-1) ?? "ineligible"})`).join("; ")}`;
   return { ranked, selected, reason };
@@ -103,6 +122,8 @@ export function selectionReason(mode: RoutingMode, selected: ScoredEstimate, eli
       return "Highest configured quality tier within requirements";
     case "BROWSER_ONLY":
       return "Browser network requested";
+    case "COMMUNITY":
+      return isCommunityRoute(selected) ? "Community GPU node, taken first" : "No community GPU node could take it; best balance of cost, latency and reliability";
     default:
       return selected.normalizedCost <= selected.normalizedLatency ? "Best balance of cost, latency and reliability (cost-led)" : "Best balance of cost, latency and reliability (latency-led)";
   }

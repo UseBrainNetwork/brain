@@ -153,7 +153,10 @@ export default async function PayoutsPage() {
               {d.epochs.slice(0, 24).map((e) => (
                 <div key={e.id} className="grid grid-cols-[1fr_90px_90px_60px] items-center gap-3 border-b border-chalk/[0.06] py-2.5 text-chalk/75">
                   <span className="text-chalk/70">{e.id.replace(/^E-/, "").replace("T", " ").replace(":00Z", "")}</span>
-                  <span className="num text-right text-[13px] text-chalk/60">{sol(e.poolLamports, 3)}</span>
+                  <span className="num text-right text-[13px] text-chalk/60" title={e.pool && e.pool.salesLamports > 0 ? `${sol(e.pool.fixedLamports, 3)} fixed + ${sol(e.pool.salesLamports, 3)} from ${e.pool.purchases} plan purchase${e.pool.purchases === 1 ? "" : "s"} ($${e.pool.salesUsd} × ${e.pool.share})` : undefined}>
+                    {sol(e.poolLamports, 3)}
+                    {e.pool && e.pool.salesLamports > 0 && <span className="text-ok"> +</span>}
+                  </span>
                   <span className="num text-right text-[13px] text-chalk">{sol(e.distributedLamports, 3)}</span>
                   <span className="text-right text-chalk/60">{e.participants}</span>
                 </div>
@@ -169,11 +172,11 @@ export default async function PayoutsPage() {
         <Link href="/rewards" className="text-chalk/60 underline decoration-chalk/20 underline-offset-4 hover:text-chalk">
           /rewards
         </Link>
-        . Pool size per epoch is set by the operator and shown on{" "}
+        . Each epoch&apos;s pool is the fixed amount set by the operator (shown on{" "}
         <Link href="/economics" className="text-chalk/60 underline decoration-chalk/20 underline-offset-4 hover:text-chalk">
           /economics
         </Link>
-        ; the USD line is today&apos;s market price applied to SOL already paid, not what it was worth when sent. Simulated epochs are excluded. Rendered {when(d.at)}.
+        ) plus the contributors&apos; share of plan purchases confirmed on chain while the epoch was open; a green + marks an epoch where sales added to the pool, and hovering the figure shows the split. The USD line is today&apos;s market price applied to SOL already paid, not what it was worth when sent. Simulated epochs are excluded. Rendered {when(d.at)}.
       </p>
     </Shell>
   );

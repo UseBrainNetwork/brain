@@ -56,7 +56,7 @@ All on `qwen/qwen2.5-1.5b-instruct`, 7 October 2026.
 
 ## Pay
 
-Native nodes are paid through the same hourly SOL epochs as browser contributors. Every customer inference job the coordinator saw through to `COMPLETED` becomes a `WorkRecord` with units `parameters × tokens ÷ 2²⁰`, tokens clipped to the text the coordinator streamed. Probes earn nothing; mock models earn nothing; a shadow mismatch makes the unit a lost `replica-dispute`.
+Native nodes are paid through the same hourly SOL epochs as browser contributors. Every customer inference job the coordinator saw through to `COMPLETED` becomes a `WorkRecord` with units `parameters × tokens ÷ 2²⁰`, tokens clipped to the text the coordinator streamed. Benchmarks and canaries earn nothing; mock models earn nothing; a shadow mismatch makes the unit a lost `replica-dispute`. A shadow re-run that agreed with the job it checked is paid as verified work of its own (`native-verify`).
 
 The wallet must be proven before anything accrues. The node reports `BRAIN_NODE_WALLET` under its own signature, and the operator signs once on `/provider?node=<id>` with that wallet. The coordinator accepts the link only when both name the same address. Until then the node's work is recorded and visible but earns nothing.
 
@@ -66,4 +66,4 @@ The wallet must be proven before anything accrues. The node reports `BRAIN_NODE_
 
 ## What the operator cannot do
 
-Choose their node id. Advertise a model not on the allowlist. Advertise `brain/mock` from real hardware. Raise their score by reporting better hardware. Get paid for a benchmark, a canary, or work the coordinator did not stream. Transfer their reliability score to a new wallet.
+Choose their node id. Advertise a model not on the allowlist. Advertise `brain/mock` from real hardware. Raise their score by reporting better hardware. Get paid for a benchmark, a canary, a shadow re-run that disagreed, or work the coordinator did not stream. Transfer their reliability score to a new wallet.

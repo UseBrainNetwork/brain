@@ -415,6 +415,11 @@ describe("verification probes", () => {
     expect((await getNativeNode(primary))!.measured.redundantMatched).toBe(1);
     expect((await getNativeNode(other))!.measured.redundantMatched).toBe(1);
     expect((await g.__brainStore!.listDocs<ComputeReceipt>("receipt", { limit: 10 })).length).toBe(1);
+    // The shadow agreed, so it settles as verified work of its own, labelled as a shadow re-run.
+    const sw = (await g.__brainStore!.getWork(shadow!.jobId))!;
+    expect(sw).toMatchObject({ source: "native-verify", assignedTo: other, status: "completed", verified: true });
+    expect(sw.computeUnits).toBeGreaterThan(0);
+    expect((await g.__brainStore!.getWork(job.jobId))!.verified).toBe(true);
   });
 
   it("records a mismatch against both nodes and lowers both reliability scores", async () => {
@@ -435,6 +440,9 @@ describe("verification probes", () => {
     expect(pa.measured.redundantMismatched).toBe(1);
     expect(pb.measured.redundantMismatched).toBe(1);
     expect(pa.reputation).toBeLessThan(before);
+    // Nobody is paid for a disagreement: the primary's work is disputed and the shadow records nothing.
+    expect((await g.__brainStore!.getWork(job.jobId))!.verified).toBe(false);
+    expect(await g.__brainStore!.getWork(shadow.jobId)).toBeNull();
   });
 
   it("does not shadow sampled jobs when temperature is not 0, when the primary is a mock node, or when no second node exists", async () => {

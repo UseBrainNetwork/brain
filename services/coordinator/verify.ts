@@ -3,23 +3,26 @@ import { eventBus } from "@/services/eventBus";
 import { cancelJob, createInferenceJob, getInferenceJob, matchJob, patchJob, type InferenceJob } from "./jobs";
 import { CANARY_REQUESTER, VERIFY_REQUESTER, isProbeJob } from "./probes";
 import { getNativeNode, updateNativeNode, type NativeNode } from "./registry";
-import { disputeNativeWork } from "./work";
+import { disputeNativeWork, recordShadowWork } from "./work";
 
 export { CANARY_REQUESTER, VERIFY_REQUESTER, isProbeJob, probeKind } from "./probes";
 
 /**
  * Verification of node inference beyond the per-job checks (hash, stream consistency, timing).
  *
- * Two probes, both coordinator-initiated, both unpaid, both labelled on /network and /provider:
+ * Two probes, both coordinator-initiated, both labelled on /network and /provider:
  *
  *  - Redundant execution. A sample of deterministic (temperature 0) customer jobs is re-run on a
  *    second node after the first completes. The two outputs are compared with a text-similarity
  *    heuristic (different GPUs and batch shapes make bit-identical output unrealistic even at
  *    temperature 0). A mismatch is recorded against BOTH nodes: with two parties the coordinator
- *    cannot know which one lied, so it lowers confidence in each and lets history sort it out.
+ *    cannot know which one lied, so it lowers confidence in each and lets history sort it out, and
+ *    the primary's work is unpaid. A match pays the shadow node as well: it ran the same real prompt
+ *    and its answer was checked against another machine (services/coordinator/work.ts).
  *
  *  - Canaries. Fixed prompts with a mechanically checkable answer, sent to real nodes on a schedule.
- *    A node that fails two in a row is DEGRADED and leaves routing until it passes one.
+ *    A node that fails two in a row is DEGRADED and leaves routing until it passes one. Unpaid: they
+ *    are the coordinator's four questions, not work anyone asked for.
  *
  * Neither probe makes a receipt "verified". Receipts for node work stay `node-reported`; these
  * probes feed the node's reliability score, which is a routing input. Mock nodes are never
@@ -157,7 +160,9 @@ export async function recordShadowResult(shadowJobId: string, now = Date.now()) 
   await updateNativeNode(p.assignedNode, bump);
   await updateNativeNode(s.assignedNode, bump);
   // Two nodes disagreed and the coordinator cannot say which was right: the primary's work is unpaid.
+  // Two nodes agreed: the shadow did the same real work under a stricter check, and settles too.
   if (!matched) await disputeNativeWork(p.jobId);
+  else await recordShadowWork(s);
   eventBus.publish({ type: "nverify.result", at: now, kind: "redundant", jobId: p.jobId, nodeIds: [p.assignedNode, s.assignedNode], passed: matched, detail: `similarity ${sim}` });
 }
 

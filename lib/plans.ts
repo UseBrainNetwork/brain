@@ -8,7 +8,21 @@
  * A request consumes `customerCost / BRAIN_CREDIT_USD` credits; when the cost is UNKNOWN the
  * consumption is recorded as UNKNOWN and nothing is deducted (see services/credits.ts).
  */
+import type { RoutingMode } from "@/domain/economy";
+
 export type PlanId = "FREE" | "PRO" | "CODE" | "MAX";
+
+/**
+ * Which plans send PUBLIC AUTO requests to community GPU nodes first (COMMUNITY mode) when they
+ * have not chosen a mode themselves. "free" (default): the free plan; the people paying for Pro,
+ * Code and Max keep the AUTO ranking unless they pick the GPU option. "all" / "off" as named.
+ */
+export function communityFirstFor(plan: PlanId): boolean {
+  const v = (process.env.BRAIN_COMMUNITY_FIRST ?? "free").toLowerCase();
+  if (v === "off") return false;
+  if (v === "all") return true;
+  return plan === "FREE";
+}
 
 /** A paid plan period: 30 days from purchase, extended by 30 days per further payment. */
 export const PLAN_PERIOD_MS = 30 * 24 * 3600_000;
@@ -34,7 +48,7 @@ export interface Plan {
   /** Requests per minute. */
   rateLimit: number;
   /** Which routing modes the plan may request. */
-  modes: ("AUTO" | "CHEAP" | "FAST" | "QUALITY" | "BROWSER_ONLY")[];
+  modes: RoutingMode[];
   /** Whether PRIVATE routing (operator infrastructure only) is available. */
   privateRouting: boolean;
   blurb: string;
@@ -66,11 +80,11 @@ export function plans(): Plan[] {
       holdTokens: null,
       includedCredits: num(env.BRAIN_PLAN_FREE_CREDITS, 500),
       rateLimit: 10,
-      modes: ["AUTO", "CHEAP", "BROWSER_ONLY"],
+      modes: ["AUTO", "CHEAP", "BROWSER_ONLY", "COMMUNITY"],
       privateRouting: false,
       tagline: "Try BRAIN.",
-      blurb: "Routed for cost. Every answer comes with its receipt.",
-      highlights: ["AUTO and CHEAP routing", "500 credits a month", "Receipts on every answer", "Earn credits, USDC or SOL with your GPU"],
+      blurb: "Answered by a community GPU when one is free, otherwise routed for cost. Every answer comes with its receipt.",
+      highlights: ["Community GPUs first, AUTO and CHEAP routing", "500 credits a month", "Receipts on every answer", "Earn credits, USDC or SOL with your GPU"],
     },
     {
       id: "PRO",
@@ -80,7 +94,7 @@ export function plans(): Plan[] {
       holdTokens: hold(env.BRAIN_PLAN_PRO_HOLD_TOKENS),
       includedCredits: num(env.BRAIN_PLAN_PRO_CREDITS, 20_000),
       rateLimit: 60,
-      modes: ["AUTO", "CHEAP", "FAST", "QUALITY", "BROWSER_ONLY"],
+      modes: ["AUTO", "CHEAP", "FAST", "QUALITY", "BROWSER_ONLY", "COMMUNITY"],
       privateRouting: false,
       tagline: "Every route, higher limits.",
       blurb: "All four routing modes, including FAST and QUALITY, and 40× the credits.",
@@ -94,7 +108,7 @@ export function plans(): Plan[] {
       holdTokens: hold(env.BRAIN_PLAN_CODE_HOLD_TOKENS),
       includedCredits: num(env.BRAIN_PLAN_CODE_CREDITS, 45_000),
       rateLimit: 120,
-      modes: ["AUTO", "CHEAP", "FAST", "QUALITY", "BROWSER_ONLY"],
+      modes: ["AUTO", "CHEAP", "FAST", "QUALITY", "BROWSER_ONLY", "COMMUNITY"],
       privateRouting: false,
       tagline: "Built for shipping software.",
       blurb: "Routes to the strongest coding models BRAIN can reach, with long context and a routing profile tuned for code.",
@@ -108,7 +122,7 @@ export function plans(): Plan[] {
       holdTokens: hold(env.BRAIN_PLAN_MAX_HOLD_TOKENS),
       includedCredits: num(env.BRAIN_PLAN_MAX_CREDITS, 120_000),
       rateLimit: 300,
-      modes: ["AUTO", "CHEAP", "FAST", "QUALITY", "BROWSER_ONLY"],
+      modes: ["AUTO", "CHEAP", "FAST", "QUALITY", "BROWSER_ONLY", "COMMUNITY"],
       privateRouting: true,
       tagline: "Everything BRAIN can reach.",
       blurb: "The largest reasoning and multimodal models on the network, private routing, and priority capacity.",

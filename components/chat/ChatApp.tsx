@@ -472,7 +472,15 @@ Route <span className="text-chalk/70">{MODES.find((m) => m.id === mode)?.label ?
               </form>
               <div className="mt-2.5 flex items-center justify-center gap-1.5 text-center font-mono text-[10px] text-chalk/30">
                 <span>
-                  {privacy === "PUBLIC" ? (community ? "Answered by a community GPU; its operator can read this prompt. " : "PUBLIC: a community GPU may answer and its operator can read the prompt; STANDARD keeps it off those machines. ") : privacy === "STANDARD" ? "STANDARD: plaintext stays off community and browser nodes. " : "PRIVATE: operator infrastructure only. "}
+                  {privacy === "PUBLIC"
+                    ? community
+                      ? "Answered by a community GPU; its operator can read this prompt. "
+                      : (!account || account.plan.id === "FREE") && mode === "AUTO"
+                        ? "PUBLIC on the free plan: a community GPU answers when one is free, otherwise BRAIN AUTO; the operator of that GPU can read the prompt. STANDARD keeps it off those machines. "
+                        : "PUBLIC: a community GPU may answer and its operator can read the prompt; STANDARD keeps it off those machines. "
+                    : privacy === "STANDARD"
+                      ? "STANDARD: plaintext stays off community and browser nodes. "
+                      : "PRIVATE: operator infrastructure only. "}
                   Every answer tells you where it ran and what it cost.
                 </span>
                 <span className="hidden sm:inline">·</span>

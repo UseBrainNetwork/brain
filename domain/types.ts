@@ -147,6 +147,26 @@ export interface RewardEpoch {
   settledAt: number;
   /** "live" only when the pool was funded by the operator and holdings came from chain. Only live epochs are claimable. */
   provenance: Provenance;
+  /** Where the pool came from. Absent on epochs settled before plan sales fed the pool (fixed only). */
+  pool?: PoolSources;
+}
+
+/**
+ * The two sources of an epoch's pool. `fixedLamports` is the operator's BRAIN_EPOCH_POOL_SOL.
+ * `salesLamports` is the contributors' share of plan purchases confirmed on chain during the
+ * epoch: SOL purchases at their lamports, USDC purchases converted at the SOL/USD quote recorded
+ * here. Zero purchases ⇒ zero; an unavailable quote blocks settlement rather than guessing.
+ */
+export interface PoolSources {
+  fixedLamports: number;
+  salesLamports: number;
+  /** USD actually received for the purchases counted, before the share. */
+  salesUsd: number;
+  purchases: number;
+  /** Share of sales that goes to contributors (rewards/config.ts inferenceRevenue.contributors). */
+  share: number;
+  /** SOL/USD used for USDC purchases; null when none needed converting. */
+  solUsd: number | null;
 }
 
 export interface RewardAllocation {

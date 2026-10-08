@@ -1,13 +1,13 @@
 # How contributors are paid
 
-One rule, stated plainly: **every hour, a fixed amount of SOL is split among the wallets that did verified work in that hour, in proportion to how much verified work they did, adjusted for quality.** Nothing else moves it.
+One rule, stated plainly: **every hour, a pool of SOL is split among the wallets that did verified work in that hour, in proportion to how much verified work they did, adjusted for quality.** The pool is a fixed amount set by the operator plus the contributors' share of the plan purchases confirmed on chain during that hour. Nothing else moves it.
 
 ```mermaid
 flowchart LR
   fees["Creator fees from token trades<br/>accrue in the pump.fun vault"] -->|claimed on-chain| proto["Protocol wallet<br/>HZLe…gxwa"]
-  usage["Developers paying to use<br/>the network's GPUs"] --> proto
+  usage["Plan purchases<br/>(USDC or SOL, on chain)"] --> proto
   proto -->|transfer| payout["Payout wallet<br/>7TSA…axVF"]
-  payout -->|fixed SOL per epoch| epoch["Hourly epoch<br/>split by verified compute"]
+  payout -->|fixed SOL per epoch<br/>+ 60 % of that hour's plan sales| epoch["Hourly epoch<br/>split by verified compute"]
   epoch -->|claim by signed message| w1["Wallet A"]
   epoch --> w2["Wallet B"]
   epoch --> w3["…"]
@@ -25,9 +25,13 @@ Each wallet's allocation becomes claimable immediately.
 
 ## The pool
 
-The pool is a **fixed amount of SOL per epoch**, set by the operator (`BRAIN_EPOCH_POOL_SOL`). It is not a share of fees, not a percentage of anything, not derived from a price. The current amount is always shown live on [/economics](https://brainnetwork.app/economics), together with how many epochs the payout wallet can fund at that rate. The operator raises it as funding grows; this book deliberately does not print a number, because the live page is the only place it is true.
+The pool has two parts, and both are money that exists.
 
-If the setting is absent, nothing live is settled. The pool never falls back to an estimate.
+**The fixed part** is an amount of SOL per epoch set by the operator (`BRAIN_EPOCH_POOL_SOL`). It is not derived from a price or a ledger. The current amount is always shown live on [/economics](https://brainnetwork.app/economics), together with how many epochs the payout wallet can fund at that rate. The operator raises it as funding grows; this book deliberately does not print a number, because the live page is the only place it is true. If the setting is absent, nothing live is settled.
+
+**The sales part** is the contributors' share of every Pro, Code or Max purchase whose transaction was confirmed while the epoch was open: 60 % (`inferenceRevenue.contributors` in `rewards/config.ts`; `BRAIN_POOL_SALES_SHARE` overrides it, `0` turns it off). A purchase paid in SOL counts at its lamports. A purchase paid in USDC is converted at the SOL/USD quote in force at settlement, and the epoch records that quote; if no quote is available the epoch is not settled until one is, rather than guessing. Free credits are not sales and add nothing. On [/payouts](https://brainnetwork.app/payouts) an epoch whose pool included sales is marked with a green +, and hovering the pool shows the split.
+
+So a GPU node that answered a paying customer is paid out of what that customer paid, in the same hour, through the same formula as everyone else; and when nobody buys anything, the fixed part still pays for the verified work that was done. The pool never falls back to an estimate.
 
 ## Where the SOL comes from
 

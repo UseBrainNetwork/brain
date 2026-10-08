@@ -10,7 +10,7 @@ import { networkConfig } from "@/lib/config";
 import { getAccount } from "@/services/accounts";
 import { balance, consumeForReceipt, ensureMonthlyGrant, mayConsume } from "@/services/credits";
 import { MISSING_KEY, authenticate, customerRateLimit, openAccess, recordRequest } from "@/services/customers";
-import { planById } from "@/lib/plans";
+import { communityFirstFor, planById } from "@/lib/plans";
 import { isAllowedModel } from "@/node/models";
 import { bearer, json, tooMany } from "@/services/security";
 
@@ -40,7 +40,8 @@ export const POST = nodeRoute(async (req) => {
 
   const raw = await body<Record<string, unknown>>(req, 128 * 1024);
   const chat = validateChat(raw);
-  const mode = normalizeMode(String(raw.mode ?? raw.priority ?? "auto"));
+  const requestedMode = normalizeMode(String(raw.mode ?? raw.priority ?? "auto"));
+  let mode = requestedMode;
   // Allowlisted node models exist only on community Brain Nodes, whose operators can read the
   // prompt. Naming one is choosing that; the default privacy for such a request is PUBLIC and the
   // response says so. Asking for STANDARD/PRIVATE with a node model is a contradiction, not a fallback.
@@ -52,6 +53,8 @@ export const POST = nodeRoute(async (req) => {
     const plan = planById(account.plan);
     if (!plan.modes.includes(mode)) return json({ error: { code: "mode_not_in_plan", message: `${mode} routing is not included in the ${plan.name} plan.` } }, 403);
     if (privacy === "PRIVATE" && !plan.privateRouting) return json({ error: { code: "privacy_not_in_plan", message: `PRIVATE routing is not included in the ${plan.name} plan.` } }, 403);
+    // PUBLIC + AUTO on a community-first plan: a GPU node takes it when one can; AUTO is the fallback.
+    if (requestedMode === "AUTO" && privacy === "PUBLIC" && !nodeModel && communityFirstFor(plan.id)) mode = "COMMUNITY";
     await ensureMonthlyGrant(account);
     const bal = await balance(account.accountId);
     if (!mayConsume(bal)) return json({ error: { code: "out_of_credits", message: "This account has used its included credits for the month." } }, 402);

@@ -23,6 +23,10 @@ privacyAllows   PUBLIC   → untrusted-distributed, operator, third-party
 
 A chat request carries plaintext. If its privacy level does not allow the class, the class is excluded before any score is computed. Requests that name a Brain Node model default to `PUBLIC`, because those models only run on hardware BRAIN does not operate; asking for `PRIVATE` on such a model is a contradiction and returns `400 privacy_conflict` instead of routing somewhere else.
 
+### COMMUNITY: the community first
+
+One mode has an ordering rule on top of the score. In `COMMUNITY`, an eligible Brain Node serving a real model is taken first; the AUTO ranking orders everything behind it and is the fallback when no node can take the request or the node fails before the first byte. It exists so that the GPUs people plug into the network get the traffic that is allowed to reach them. It is the default for a `PUBLIC` request in `AUTO` on the free plan (operator setting `BRAIN_COMMUNITY_FIRST`: `free`, `all` or `off`); paid plans keep the AUTO ranking unless they pick the GPU option or ask for `COMMUNITY`. The privacy gate is unchanged: `STANDARD` and `PRIVATE` requests never reach a node this way, and the receipt records `COMMUNITY` when it was used.
+
 ### Unknown is penalised, never guessed
 
 Each class estimates cost, latency and reliability from its own measurements. A class with no price configured reports cost `null`; a class with no completed samples reports latency `null`. Both render as **UNKNOWN** on the trace and are penalised in the score. Nothing fills them in by assumption.

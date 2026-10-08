@@ -1,4 +1,4 @@
-import type { CurrentEpochProgress, Provenance, RewardAllocation, RewardEpoch } from "@/domain/types";
+import type { CurrentEpochProgress, PoolSources, Provenance, RewardAllocation, RewardEpoch } from "@/domain/types";
 import { networkConfig } from "@/lib/config";
 import { defaultRewardConfig } from "@/rewards/config";
 import { computeEpoch, type ContributorInput } from "@/rewards/formula";
@@ -7,6 +7,7 @@ import { demoSolPriceUsd } from "@/services/mock/mockData";
 import { NodeError } from "./nodes";
 import { notifySettled } from "./notify";
 import { listNativeNodes, type NativeNode } from "./coordinator/registry";
+import { PoolSourcesError, poolSources } from "./poolSources";
 import { getStore, type StoredNode } from "./store";
 import { getHoldings } from "./wallet";
 
@@ -30,10 +31,13 @@ export function demoPoolLamports(lengthMs = epochLengthMs()): number {
 }
 
 /**
- * The pool rule: a fixed amount of SOL per epoch, set by the operator (BRAIN_EPOCH_POOL_SOL) and
- * funded from creator fees moved into the payout wallet. It is not a share of anything the app
+ * The pool rule, fixed part: an amount of SOL per epoch, set by the operator (BRAIN_EPOCH_POOL_SOL)
+ * and funded from creator fees moved into the payout wallet. It is not a share of anything the app
  * computes, so it cannot drift with a ledger; what it costs and how long the payout wallet lasts
  * are read from chain (see `services/treasury.ts`). Unset ⇒ nothing settles as live.
+ *
+ * On top of it, `settleEpoch` adds the contributors' share of plan sales confirmed on chain during
+ * the epoch (`services/poolSources.ts`), so the pool grows with what customers actually paid.
  */
 export function configuredPoolLamports(): number | null {
   const sol = Number(process.env.BRAIN_EPOCH_POOL_SOL);
@@ -358,9 +362,21 @@ export async function settleEpoch(opts: SettleOptions): Promise<{ epoch: RewardE
   const existing = await store.getEpoch(e.id);
   if (existing) return { epoch: existing, created: false };
 
-  // Pool precedence: explicit > configured fixed pool (real) > simulated demo.
+  // Pool precedence: explicit > configured fixed pool (real) > simulated demo. A real pool also
+  // takes the contributors' share of plan sales confirmed while the epoch was open
+  // (services/poolSources.ts); a demo pool takes nothing real.
   const operatorPool = opts.poolLamports ?? configuredPoolLamports();
-  const pool = Math.floor(operatorPool ?? demoPoolLamports(e.endsAt - e.startsAt));
+  let sources: PoolSources | undefined;
+  if (operatorPool != null) {
+    try {
+      sources = await poolSources(Math.floor(operatorPool), e.startsAt, e.endsAt, now);
+    } catch (err) {
+      // USDC was sold and no SOL/USD quote answered: do not guess a rate for real money. Retry later.
+      if (err instanceof PoolSourcesError) throw new NodeError(err.code, 503);
+      throw err;
+    }
+  }
+  const pool = Math.floor(operatorPool != null ? operatorPool + (sources?.salesLamports ?? 0) : demoPoolLamports(e.endsAt - e.startsAt));
   if (!(pool >= 0)) throw new NodeError("invalid_pool");
 
   const { wallets, totalBuckets } = await measureWork(e.startsAt, e.endsAt);
@@ -404,6 +420,7 @@ export async function settleEpoch(opts: SettleOptions): Promise<{ epoch: RewardE
     totalVerifiedCompute: inputs.reduce((s, x) => s + x.verifiedCompute, 0),
     settledAt: now,
     provenance,
+    ...(sources ? { pool: sources } : {}),
   };
   const created = await store.saveSettlement(epoch, allocations);
   // Nothing else to book: "allocated" is the sum of live epochs, read back from the store (services/treasury.ts).

@@ -85,6 +85,28 @@ describe("privacy constraint", () => {
   });
 });
 
+describe("COMMUNITY mode", () => {
+  // A real node with worse numbers than the external model on every axis the score reads.
+  const native = est({ provider: "brain-native-pool", target: "NATIVE_NETWORK", model: "qwen/qwen2.5-1.5b-instruct", estimatedCost: 0.03, estimatedLatency: 9000, estimatedReliability: 0.85 });
+  it("takes an eligible community GPU node first even when it scores worse, and keeps the AUTO ranking behind it as the fallback", () => {
+    expect(scoreEstimates([native, cloud, external], "AUTO", pub).selected?.provider).not.toBe("brain-native-pool");
+    const r = scoreEstimates([native, cloud, external], "COMMUNITY", pub);
+    expect(r.selected?.provider).toBe("brain-native-pool");
+    expect(r.reason).toContain("community GPU node (taken first)");
+    const rest = r.ranked.slice(1).map((x) => x.provider);
+    expect(rest).toEqual(scoreEstimates([cloud, external], "AUTO", pub).ranked.map((x) => x.provider));
+  });
+  it("falls back to the AUTO ranking when no node can take the request", () => {
+    const r = scoreEstimates([{ ...native, available: false, notes: ["no node online"] }, cloud, external], "COMMUNITY", pub);
+    expect(r.selected?.provider).toBe(scoreEstimates([cloud, external], "AUTO", pub).selected?.provider);
+    expect(r.reason).toContain("no community GPU node could take it");
+  });
+  it("never sends a customer to the mock model and never bypasses the privacy gate", () => {
+    expect(scoreEstimates([{ ...native, model: "brain/mock" }, cloud], "COMMUNITY", pub).selected?.provider).toBe("cloud-fallback");
+    expect(scoreEstimates([native, cloud], "COMMUNITY", { privacy: "STANDARD" }).selected?.provider).toBe("cloud-fallback");
+  });
+});
+
 describe("tool calling capability", async () => {
   const { classify } = await import("./plan");
   const { wantsTools } = await import("@/domain/chat");

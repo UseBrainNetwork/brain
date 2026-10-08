@@ -11,6 +11,7 @@ import { RewardsDashboard } from "@/components/rewards/RewardsDashboard";
 import { Button, Container, Section } from "@/components/ui";
 import { fmtPct } from "@/lib/format";
 import { defaultRewardConfig } from "@/rewards/config";
+import { defaultRevenueSplit } from "@/rewards/config";
 
 export const metadata: Metadata = { title: "Rewards" };
 
@@ -37,7 +38,7 @@ export default function RewardsPage() {
               </h1>
             </div>
             <div className="max-w-[400px]">
-              <p className="text-[15.5px] leading-relaxed text-chalk/60">Verified compute earns a share of a fixed SOL pool every hour, funded by creator fees. Claim any time once payouts are open; SOL is sent straight to your wallet.</p>
+              <p className="text-[15.5px] leading-relaxed text-chalk/60">Verified compute earns a share of a SOL pool every hour: a fixed amount funded by creator fees, plus {Math.round(defaultRevenueSplit.inferenceRevenue.contributors * 100)}% of that hour&apos;s plan purchases. Claim any time once payouts are open; SOL is sent straight to your wallet.</p>
               <Link href="/payouts" className="mt-4 inline-block font-mono text-[12px] text-chalk/70 underline decoration-chalk/25 underline-offset-4 hover:text-chalk">
                 Every payout so far, with its transaction →
               </Link>
@@ -91,7 +92,7 @@ export default function RewardsPage() {
           <div className="mb-14 flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <h2 className="display-md text-[36px] md:text-[56px]">Where rewards come from</h2>
             <p className="max-w-[440px] text-[14.5px] leading-relaxed text-chalk/55">
-              Each hour pays a fixed SOL pool, set by the operator and funded by creator fees moved into the payout wallet; the pool is split by verified compute. The protocol and payout wallets are published below and read from chain; API billing is not connected yet. Modelled values are available under “Show simulated data” in the footer, labelled SIM.
+              Each hour pays a SOL pool: a fixed amount set by the operator and funded by creator fees moved into the payout wallet, plus {Math.round(defaultRevenueSplit.inferenceRevenue.contributors * 100)}% of the plan purchases confirmed on chain in that hour. The pool is split by verified compute. The protocol and payout wallets are published below and read from chain. Modelled values are available under “Show simulated data” in the footer, labelled SIM.
             </p>
           </div>
           <div className="mb-10 grid gap-5 lg:grid-cols-2">

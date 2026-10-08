@@ -18,6 +18,10 @@ import type { ExecutionContext, IntelligenceProvider } from "./providers";
  * progress into an OpenAI-shaped SSE stream. It never runs a model itself and never guesses
  * capacity: no eligible node → not available, with the router's reason.
  */
+
+/** Token budget cap for any job sent to a community node; app/api/chat applies the same figure. */
+export const NATIVE_MAX_TOKENS = 768;
+
 export class NativeNetworkExecutionProvider implements IntelligenceProvider {
   readonly id = "brain-native-pool";
   readonly type = "NATIVE_NETWORK" as const;
@@ -94,7 +98,10 @@ export class NativeNetworkExecutionProvider implements IntelligenceProvider {
     const model = await this.resolveModel(req.model);
     if (!model) throw new Error("native network: no node serves an allowlisted model");
     const messages: ChatTurn[] = req.messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" }));
-    const job = await createInferenceJob({ requesterId: ctx.customerId, model, messages, maxTokens: req.maxTokens ?? 512, temperature: req.temperature ?? 0.7, ...(req.stop?.length ? { stop: req.stop } : {}), orderId: ctx.orderId, decisionId: ctx.decisionId });
+    // Consumer cards decode at tens of tokens a second; a request written for an upstream model's
+    // 4096-token budget is bounded here so it finishes inside the job deadline.
+    const maxTokens = Math.min(req.maxTokens ?? 512, NATIVE_MAX_TOKENS);
+    const job = await createInferenceJob({ requesterId: ctx.customerId, model, messages, maxTokens, temperature: req.temperature ?? 0.7, ...(req.stop?.length ? { stop: req.stop } : {}), orderId: ctx.orderId, decisionId: ctx.decisionId });
     const matched = await matchJob(job.jobId);
     if (matched.state !== "ASSIGNED") {
       const reason = matched.routing?.reason ?? "no capable node";

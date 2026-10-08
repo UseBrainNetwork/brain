@@ -18,6 +18,7 @@ import { cx, fmtDuration, fmtInt, fmtPct, fmtSol, fmtUsd, shortAddr, ineligibleC
 import type { NodeEconomics } from "@/services/nodeProfile";
 import type { RewardsSummary } from "@/domain/types";
 import { BenchResult, BenchViz, DeviceReport, JobRow, MomentTicker, StepShell } from "./parts";
+import { defaultRevenueSplit } from "@/rewards/config";
 
 export function ContributeFlow() {
   const s = useContributor();
@@ -342,7 +343,7 @@ function NodeDashboard({ s, onWallet }: { s: ContributorState; onWallet: () => v
         </div>
       )}
       <div className="border-t border-chalk/[0.07] bg-warn/[0.06] px-5 py-3 font-mono text-[11px] leading-relaxed text-warn md:px-6">
-        A fixed SOL pool, funded from creator fees, is split each hour among linked wallets by verified compute. More network work means a smaller slice per unit. Zero verified compute earns zero. No return is promised.
+        A SOL pool (a fixed amount funded from creator fees, plus {Math.round(defaultRevenueSplit.inferenceRevenue.contributors * 100)}% of that hour&apos;s plan purchases) is split each hour among linked wallets by verified compute. More network work means a smaller slice per unit. Zero verified compute earns zero. No return is promised.
       </div>
 
       <div className="px-5 pb-2 pt-5 md:px-6">
