@@ -14,6 +14,7 @@
 <p align="center">
   <a href="https://brainnetwork.app/chat"><b>Use BRAIN</b></a> ·
   <a href="https://brainnetwork.app/earn"><b>Power BRAIN</b></a> ·
+  <a href="https://docs.brainnetwork.app">Docs</a> ·
   <a href="https://brainnetwork.app/developers">API</a> ·
   <a href="https://brainnetwork.app/pricing">Pricing</a> ·
   <a href="https://brainnetwork.app/network">Network</a> ·
@@ -27,7 +28,7 @@
 
 **BRAIN** is a distributed AI compute network. People run **Brain Nodes**; developers and agents send requests through an **OpenAI-compatible API**; a coordinator routes each request to a node, times it, and signs a compute receipt. The same network is also powered by browsers: open a tab and the server measures and verifies your WebGPU compute.
 
-Live at [brainnetwork.app](https://brainnetwork.app). Source: [github.com/UseBrainNetwork/brain](https://github.com/UseBrainNetwork/brain). Every figure on the site carries its provenance (LIVE, DEMO or PLANNED); the rules are in [REAL_VS_SIMULATED.md](REAL_VS_SIMULATED.md) and [docs/architecture.md](docs/architecture.md).
+Live at [brainnetwork.app](https://brainnetwork.app). Docs: [docs.brainnetwork.app](https://docs.brainnetwork.app) (the full account of how it works, synced from [`gitbook/`](gitbook/)). Source: [github.com/UseBrainNetwork/brain](https://github.com/UseBrainNetwork/brain). Every figure on the site carries its provenance (LIVE, DEMO or PLANNED); the rules are in [REAL_VS_SIMULATED.md](REAL_VS_SIMULATED.md) and [docs/architecture.md](docs/architecture.md).
 
 <img src=".github/assets/divider.svg" width="100%" alt="">
 

@@ -44,4 +44,5 @@ export const social = {
   githubOrg: "UseBrainNetwork",
   githubUrl: "https://github.com/UseBrainNetwork",
   repoUrl: "https://github.com/UseBrainNetwork/brain",
+  docsUrl: "https://docs.brainnetwork.app",
 } as const;

@@ -9,6 +9,7 @@ import { Logo } from "./Logo";
 import { SocialLinks } from "./SocialLinks";
 import { openStupified } from "@/components/layout/Stupified";
 import { ModeToggle, useColorMode } from "@/components/layout/ModeToggle";
+import { social } from "@/lib/site";
 
 const links = [
   { href: "/chat", label: "Chat" },
@@ -24,6 +25,7 @@ const secondary = [
   { href: "/auto", label: "BRAIN AUTO", hint: "Routing console" },
   { href: "/rewards", label: "Rewards", hint: "Contributor epochs" },
   { href: "/payouts", label: "Payouts", hint: "Every SOL payout, on chain" },
+  { href: social.docsUrl, label: "Docs", hint: "The full account of how BRAIN works", external: true },
 ];
 const accountLinks = [
   { href: "/account", label: "Account" },
@@ -125,12 +127,17 @@ export function Nav() {
             {more && (
               <div className="absolute right-0 top-[calc(100%+10px)] w-[300px] rounded-[16px] bg-ink p-2 text-chalk shadow-2xl ring-1 ring-chalk/10">
                 {secondary.map((l) => (
-                  <Link key={l.href} href={l.href} className="flex items-center justify-between rounded-[10px] px-3 py-2.5 hover:bg-chalk/5">
+                  <Link
+                    key={l.href}
+                    href={l.href}
+                    {...(l.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                    className="flex items-center justify-between rounded-[10px] px-3 py-2.5 hover:bg-chalk/5"
+                  >
                     <span>
                       <span className="block text-[13.5px] font-medium">{l.label}</span>
                       <span className="block text-[11.5px] text-chalk/45">{l.hint}</span>
                     </span>
-                    <span className="text-fog">→</span>
+                    <span className="text-fog">{l.external ? "↗" : "→"}</span>
                   </Link>
                 ))}
                 <button
