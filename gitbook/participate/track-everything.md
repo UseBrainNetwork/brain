@@ -10,6 +10,7 @@ Every claim in this book can be checked against a public surface. This page list
 | [/explorer](https://brainnetwork.app/explorer) | Every job and receipt; ids ≥ 5,000,000 are real | Server records |
 | [/economics](https://brainnetwork.app/economics) | Accounting cells (REAL only), creator rewards, treasury figures, payout wallet, allocated, claimed, owed, pool per epoch, runway | Accounting ledger and chain-rebuilt treasury |
 | [/rewards](https://brainnetwork.app/rewards) | Your epochs, allocations, claims | Settlement records for your wallet |
+| [/payouts](https://brainnetwork.app/payouts) | Every SOL payout ever sent, each with its Solana signature; SOL paid per day; pool and distributed per settled epoch | Claim records with status sent or confirmed; live epochs only |
 | `/epoch/<id>` | One settled epoch: participants, pool, distributed, allocation hash | Written once at settlement |
 | `/receipt/<id>` | One receipt with every field and its basis | Server records |
 | `/node/<id>` | One browser node's history | Server job and heartbeat records |

@@ -16,7 +16,7 @@ GPU detection (each field with its source; VRAM always unavailable). Benchmarks 
 
 ## Simulated
 
-Only when "Show simulated data" is on: a demo network size, memory and request rate; device-class cluster sizes; a background job stream (ids below 5,000,000); explorer job chain; money-flow ribbons on `/rewards`; model pools; demo revenue figures; a demo token price; demo top contributors; the network tape under the hero. Pro, Code and Max plan prices are configuration placeholders labelled COMING SOON. Epoch history for a wallet with nothing settled is a labelled demo and never claimable.
+Only when "Show simulated data" is on: a demo network size, memory and request rate; device-class cluster sizes; a background job stream (ids below 5,000,000); explorer job chain; money-flow ribbons on `/rewards`; model pools; demo revenue figures; a demo token price; demo top contributors; the network tape under the hero. Epoch history for a wallet with nothing settled is a labelled demo and never claimable.
 
 ## Estimated
 
