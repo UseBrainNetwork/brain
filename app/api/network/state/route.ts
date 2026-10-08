@@ -1,4 +1,5 @@
 import { liveNodes, publicJob } from "@/services/nodes";
+import { isStoreUnavailable, isTransientDbError } from "@/services/failsoft";
 import { sharedJson } from "@/services/security";
 import { getStore } from "@/services/store";
 
@@ -21,5 +22,13 @@ export async function GET() {
   if (cache.body && Date.now() - cache.at < TTL_MS) return sharedJson(cache.body, 3);
   cache.inflight ??= build().finally(() => (cache.inflight = null));
   if (cache.body) return sharedJson(cache.body, 3); // serve the previous snapshot while this one builds
-  return sharedJson(await cache.inflight, 3);
+  try {
+    return sharedJson(await cache.inflight, 3);
+  } catch (e) {
+    // Database not answering and no previous snapshot on this instance: say so (503 + Retry-After)
+    // rather than crash. Nothing is fabricated; the client keeps whatever it last had.
+    if (!isTransientDbError(e)) throw e;
+    const retryAfterSec = isStoreUnavailable(e) ? e.retryAfterSec : 15;
+    return Response.json({ error: "database_unavailable", retryAfterSec }, { status: 503, headers: { "retry-after": String(retryAfterSec), "cache-control": "no-store" } });
+  }
 }

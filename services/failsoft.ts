@@ -95,7 +95,8 @@ export function isPoolerRejection(e: unknown): boolean {
   const err = e as { code?: string; message?: string } | null;
   if (!err) return false;
   const msg = String(err.message ?? "");
-  if (/max client connections reached|EMAXCONN/i.test(msg)) return true;
+  // "max client connections reached" (transaction mode), "MaxClientsInSessionMode … max clients reached" (session mode).
+  if (/max client connections reached|max clients reached|MaxClientsInSessionMode|EMAXCONN/i.test(msg)) return true;
   return String(err.code ?? "") === "28P01" && /restore pool functionality|reconnect with fresh credentials/i.test(msg);
 }
 

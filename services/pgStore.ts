@@ -83,8 +83,10 @@ export class PgStore implements NetworkStore {
       const u = new URL(cs);
       if (/\.pooler\.supabase\.com$/.test(u.hostname) && u.port === "6543") {
         u.port = "5432";
-        const session = { ...common, connectionString: u.toString(), idleTimeoutMillis: 10_000 };
-        this.sessionPools = { pool: new Pool({ ...session, max: 2 }), lockPool: new Pool({ ...session, max: 1 }) };
+        // Session mode admits at most pool_size clients for the whole project (15 on small compute),
+        // shared by every warm instance: one client per pool, released after 3 s idle.
+        const session = { ...common, connectionString: u.toString(), idleTimeoutMillis: 3_000 };
+        this.sessionPools = { pool: new Pool({ ...session, max: 1 }), lockPool: new Pool({ ...session, max: 1 }) };
         for (const pool of [this.sessionPools.pool, this.sessionPools.lockPool]) pool.on("error", (e) => console.warn("[pgStore] idle session client error:", e.message));
       }
     } catch {
@@ -165,14 +167,22 @@ export class PgStore implements NetworkStore {
    * session-mode pooler exists, run `fallback` there and stay on session mode for a few minutes.
    */
   private async viaPooler<T>(primary: () => Promise<T>, fallback: () => Promise<T>): Promise<T> {
-    if (this.inSessionFallback()) return fallback();
+    const viaSession = async () => {
+      try {
+        return await retryPoolerRejection(fallback);
+      } catch (e) {
+        console.warn("[pgStore] session pooler failed:", (e as Error).message.slice(0, 120));
+        throw e;
+      }
+    };
+    if (this.inSessionFallback()) return viaSession();
     try {
       return await retryPoolerRejection(primary);
     } catch (e) {
       if (!this.sessionPools || !isPoolerRejection(e)) throw e;
       this.sessionUntil = Date.now() + PgStore.SESSION_FALLBACK_MS;
       console.warn(`[pgStore] transaction pooler rejecting credentials; using session pooler for ${PgStore.SESSION_FALLBACK_MS / 1000}s:`, (e as Error).message.slice(0, 80));
-      return fallback();
+      return viaSession();
     }
   }
 
