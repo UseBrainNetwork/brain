@@ -149,11 +149,38 @@ export class PgStore implements NetworkStore {
         marker = null; // table missing on a fresh database: run the DDL
       }
       if (marker === version) return;
-      await this.viaLane((l) => l.pool.query(sql));
-      await this.viaLane((l) => l.pool.query(
-        `INSERT INTO brain_documents (kind, id, key, at, data) VALUES ('meta', 'schema', NULL, $1, $2) ON CONFLICT (kind, id) DO UPDATE SET at = $1, data = $2`,
-        [Date.now(), JSON.stringify({ version, appliedAt: Date.now() })],
-      ));
+      // One instance applies the DDL; the rest skip. Without this, every cold start after a schema
+      // change replayed the file at once, and the table locks the replays take (even IF NOT EXISTS
+      // statements lock what they check) queued behind live inserts and then blocked all of them:
+      // heartbeats waited over a minute on a deploy. Transaction-scoped so the lock, the DDL and the
+      // marker travel together on one pinned backend, and a 5 s lock_timeout so a replay that cannot
+      // get its locks gives way instead of convoying; the next cold start tries again.
+      const c = await this.viaLane((l) => l.pool.connect());
+      let applied = false;
+      try {
+        await c.query("BEGIN");
+        const got = await c.query<{ ok: boolean }>("SELECT pg_try_advisory_xact_lock(hashtext('brain:migrate')) AS ok");
+        if (got.rows[0]?.ok) {
+          const again = await c.query<{ v: string }>(`SELECT data->>'version' AS v FROM brain_documents WHERE kind = 'meta' AND id = 'schema' LIMIT 1`).catch(() => ({ rows: [] as { v: string }[] }));
+          if (again.rows[0]?.v !== version) {
+            await c.query("SET LOCAL lock_timeout = '5s'");
+            await c.query("SET LOCAL statement_timeout = '60s'");
+            await c.query(sql);
+            await c.query(
+              `INSERT INTO brain_documents (kind, id, key, at, data) VALUES ('meta', 'schema', NULL, $1, $2) ON CONFLICT (kind, id) DO UPDATE SET at = $1, data = $2`,
+              [Date.now(), JSON.stringify({ version, appliedAt: Date.now() })],
+            );
+            applied = true;
+          }
+        }
+        await c.query("COMMIT");
+      } catch (e) {
+        await c.query("ROLLBACK").catch(() => undefined);
+        throw e;
+      } finally {
+        c.release();
+      }
+      if (!applied) return;
       // Advisory locks held for more than a minute belong to a frozen or dead instance. Clear them.
       await this.viaLane((l) => l.pool.query(
         `SELECT pg_terminate_backend(a.pid) FROM pg_locks l JOIN pg_stat_activity a USING (pid)
