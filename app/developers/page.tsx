@@ -46,9 +46,11 @@ console.log(res.choices[0].message.content);
 const stream = await client.chat.completions.create({
   model: "brain/auto",
   stream: true,
-  // BRAIN extensions (ignored by other servers): mode and privacy
+  // BRAIN extensions (ignored by other servers): routing mode, privacy, and the
+  // gateway policy: retries on the same provider for transient failures (0-2),
+  // fallback to the next ranked provider, total time budget.
   // @ts-expect-error extension fields
-  mode: "auto", privacy: "standard",
+  mode: "auto", privacy: "standard", retries: 1, fallback: true, timeout_ms: 30000,
   messages: [{ role: "user", content: "Summarize this audit report." }],
 });
 for await (const chunk of stream) process.stdout.write(chunk.choices[0]?.delta?.content ?? "");`;

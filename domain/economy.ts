@@ -290,8 +290,22 @@ export interface ExecutionStep {
   status: "PENDING" | "ROUTING" | "EXECUTING" | "COMPLETED" | "FAILED" | "SKIPPED";
   decisionId?: string;
   result?: ExecutionResult;
+  /** Every execution attempt for this step, in order: provider, retry index, outcome, wall time. */
+  attempts?: ExecutionAttempt[];
+  /** Why the step stopped trying, when it did not succeed: "budget exhausted", "fallback disabled", "stream already started". */
+  stopReason?: string;
   startedAt?: number;
   completedAt?: number;
+}
+
+export interface ExecutionAttempt {
+  provider: string;
+  target: ExecutionTarget;
+  retry: number;
+  ok: boolean;
+  error?: string;
+  ms: number;
+  at: number;
 }
 
 export interface ExecutionDependency {
@@ -342,6 +356,8 @@ export interface ComputeOrder {
   priority: Priority;
   mode: RoutingMode;
   privacy: PrivacyRequirement;
+  /** Retry / fallback / budget policy the order ran under. Absent on orders stored before it existed. */
+  policy?: { retries: number; fallback: boolean; timeoutMs: number | null };
   createdAt: number;
   completedAt?: number;
   status: OrderStatus;
@@ -350,6 +366,8 @@ export interface ComputeOrder {
   jobId?: string;
   receiptId?: string;
   error?: string;
+  /** Every execution attempt across the plan, in order. Retries and fallbacks are visible here. */
+  attempts?: ExecutionAttempt[];
   /** Chat only: the returned text. */
   output?: string;
   /** Chat only: tool calls the model made instead of (or alongside) text. */

@@ -12,6 +12,10 @@ export async function brainHeaders(requestId: string, s: BrainRunSummary | null,
   if (!s) return h;
   if (s.target) h["brain-target"] = s.target;
   h["brain-latency"] = String(s.latencyMs);
+  if (s.attempts?.length) {
+    h["brain-attempts"] = String(s.attempts.length);
+    if (s.attempts.length > 1) h["brain-attempt-path"] = s.attempts.map((a) => `${a.provider}${a.retry ? `#${a.retry}` : ""}:${a.ok ? "ok" : (a.error ?? "failed").replace(/[^a-z0-9 _.-]/gi, "").slice(0, 40)}`).join(",");
+  }
   if (s.receiptId) {
     h["x-brain-receipt"] = s.receiptId;
     h["x-brain-receipt-url"] = `https://brainnetwork.app/api/receipts/${encodeURIComponent(s.receiptId)}/verify`;

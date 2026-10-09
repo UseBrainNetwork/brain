@@ -6,6 +6,7 @@ import { body, nodeRoute } from "@/api/http";
 import type { ComputeOrder, PrivacyRequirement } from "@/domain/economy";
 import { normalizeMode } from "@/domain/economy";
 import { placeOrder } from "@/engine/orders";
+import { parsePolicy } from "@/engine/policy";
 import { networkConfig } from "@/lib/config";
 import { getAccount } from "@/services/accounts";
 import { balance, consumeForReceipt, ensureMonthlyGrant, mayConsume } from "@/services/credits";
@@ -24,6 +25,7 @@ const PRIVACY = new Set<PrivacyRequirement>(["PUBLIC", "STANDARD", "PRIVATE"]);
  * Extensions:
  *   mode: "auto" | "cheap" | "fast" | "quality" | "browser_only"   (BRAIN AUTO routing; `priority` accepted as an alias)
  *   privacy: "public" | "standard" | "private"
+ *   retries: 0..2, fallback: true|false, timeout_ms: n   (gateway policy; also accepted inside a `brain` object)
  *   Response carries a `brain` object (route, model, cost, latency, verification, receipt id) and an `x-brain-receipt` header.
  *   Streaming responses emit the same object as a final `event: brain` SSE message after the last token.
  *
@@ -61,6 +63,7 @@ export const POST = nodeRoute(async (req) => {
   }
   const t0 = Date.now();
   const chatId = `chatcmpl-${randomBytes(10).toString("hex")}`;
+  const policy = parsePolicy(raw);
   const request = { kind: "chat" as const, model: chat.model, messages: chat.messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy, tools: chat.tools, tool_choice: chat.tool_choice, response_format: chat.response_format, stop: chat.stop };
 
   const record = async (order: ComputeOrder, s: Awaited<ReturnType<typeof finalize>>) => {
@@ -83,11 +86,11 @@ export const POST = nodeRoute(async (req) => {
   };
 
   if (chat.stream) {
-    const stream = await chatEventStream({ input: { request, mode, privacy }, customerId: customer.customerId, chatId, t0, mode, privacy, onComplete: record });
+    const stream = await chatEventStream({ input: { request, mode, privacy, policy }, customerId: customer.customerId, chatId, t0, mode, privacy, onComplete: record });
     return new Response(stream, { headers: { ...sseHeaders, "brain-request-id": chatId } });
   }
 
-  const order = await placeOrder({ request, mode, privacy }, customer.customerId);
+  const order = await placeOrder({ request, mode, privacy, policy }, customer.customerId);
   const s = await finalize(order, t0, mode, privacy);
   await record(order, s);
   const headers = await brainHeaders(chatId, s.brain, s.receipt?.nodesUsed ?? []);

@@ -31,6 +31,14 @@ One mode has an ordering rule on top of the score. In `COMMUNITY`, an eligible B
 
 Each class estimates cost, latency and reliability from its own measurements. A class with no price configured reports cost `null`; a class with no completed samples reports latency `null`. Both render as **UNKNOWN** on the trace and are penalised in the score. Nothing fills them in by assumption.
 
+### When an attempt fails
+
+The gateway policy is fixed and published (`engine/policy.ts`). A failed attempt is *transient* if it was a timeout, an unreachable upstream, a 5xx, a 429/408/409, or a node that never started or lost the job. Transient failures are retried on the same provider with exponential backoff (200, 400 ms), then the next ranked eligible provider is tried. A failure that says the request itself is the problem (a 4xx from upstream, a privacy rule, a model nobody serves) is not retried. Per request: `retries` 0–2 (default 1), `fallback` (default true), `timeout_ms` (default: the step's `maxLatency`, else 60 s) — no new attempt starts past the budget.
+
+A provider that fails three times in a row inside a minute is *cooling* for 30 seconds: it is ranked last, not removed, so a lone provider is still tried. Nothing is retried or re-routed once the first byte of a stream has reached the customer; such a failure is reported as `stream_interrupted`.
+
+Every attempt — provider, retry index, outcome, wall time — is stored on the order and returned in `brain.attempts`. The `brain-attempts` header carries the count; when there was more than one, `brain-attempt-path` lists them.
+
 ## Node router: which machine
 
 Once `NATIVE_NETWORK` is chosen (or the request pins a node model), `services/router/score.ts` picks the node. It is a pure function with unit tests.

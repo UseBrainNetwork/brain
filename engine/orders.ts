@@ -10,6 +10,7 @@ import { carriesPlaintext, classify, plan as makePlan, planTotalCost, topologica
 import { logProviderError, safeProviderError } from "./errors";
 import { background } from "@/lib/async";
 import { executionProviders, type IntelligenceProvider } from "./providers";
+import { backoffMs, DEFAULT_BUDGET_MS, DEFAULT_POLICY, isRetryable, noteAttempt, orderByHealth, type AttemptRecord, type GatewayPolicy } from "./policy";
 import { modeWeights, scoreEstimates } from "./router";
 
 /**
@@ -19,8 +20,9 @@ import { modeWeights, scoreEstimates } from "./router";
  *
  * An order is one request with constraints. It becomes an ExecutionPlan (single step today).
  * Each step is routed: every provider estimates, hard constraints filter, the rest are scored,
- * the winner executes and the remaining eligible targets are tried in rank order on failure.
- * Every decision, order, plan and receipt is persisted as REAL.
+ * the winner executes; transient failures are retried on the same provider and then the remaining
+ * eligible targets are tried in rank order (see ./policy). Every decision, order, plan, receipt
+ * and attempt is persisted as REAL.
  */
 
 export interface PlaceOrderInput {
@@ -31,6 +33,8 @@ export interface PlaceOrderInput {
   privacy?: PrivacyRequirement;
   maxCost?: number | null;
   maxLatency?: number | null;
+  /** Retry / fallback / budget. Defaults to DEFAULT_POLICY. */
+  policy?: GatewayPolicy;
 }
 
 const id = (p: string) => `${p}-${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
@@ -88,6 +92,7 @@ function newOrder(input: PlaceOrderInput, customerId: string): ComputeOrder {
     priority: legacyPriority(mode),
     mode,
     privacy: input.privacy ?? classify(req).privacy,
+    policy: input.policy ?? DEFAULT_POLICY,
     createdAt: Date.now(),
     status: "ROUTING",
     source: "REAL",
@@ -100,11 +105,21 @@ export interface StepExecution {
   result: ExecutionResult | null;
 }
 
+export interface StepContext {
+  orderId: string;
+  customerId: string;
+  planId: string;
+  policy?: GatewayPolicy;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /**
- * Route and execute one step with fallback through the ranked eligible targets.
- * `onSelected` fires before execution so callers (streaming) can act on the chosen provider.
+ * Route and execute one step. Providers are tried in rank order (cooling ones last); each gets
+ * `1 + policy.retries` tries while its failure is transient and the budget allows; `fallback: false`
+ * stops after the first provider. `onAttempt` lets the streaming caller run the attempt itself.
  */
-export async function executeStep(step: ExecutionStep, request: ExecutionRequest, ctx: { orderId: string; customerId: string; planId: string }, ps: IntelligenceProvider[], onAttempt?: (p: IntelligenceProvider, decision: RouteDecision) => Promise<ExecutionResult> | undefined): Promise<StepExecution> {
+export async function executeStep(step: ExecutionStep, request: ExecutionRequest, ctx: StepContext, ps: IntelligenceProvider[], onAttempt?: (p: IntelligenceProvider, decision: RouteDecision) => Promise<ExecutionResult> | undefined): Promise<StepExecution> {
   step.status = "ROUTING";
   step.startedAt = Date.now();
   const decision = await decide(request, step.constraints.mode, { maxCost: step.constraints.maxCost, maxLatency: step.constraints.maxLatency, privacy: step.constraints.privacy }, ps, step.classification);
@@ -116,21 +131,55 @@ export async function executeStep(step: ExecutionStep, request: ExecutionRequest
     return { decision, attempts, result: null };
   }
   step.status = "EXECUTING";
-  const eligible = decision.estimates.filter((e: ScoredEstimate) => e.eligible);
+  const policy = ctx.policy ?? DEFAULT_POLICY;
+  const budgetMs = policy.timeoutMs ?? step.constraints.maxLatency ?? DEFAULT_BUDGET_MS;
+  const deadline = step.startedAt + budgetMs;
+  const eligible = orderByHealth(decision.estimates.filter((e: ScoredEstimate) => e.eligible));
+  const log: AttemptRecord[] = [];
   let last: ExecutionResult | null = null;
-  for (const cand of eligible) {
+  let stop: string | undefined;
+  providers: for (const cand of eligible) {
     const p = ps.find((x) => x.id === cand.provider);
     if (!p) continue;
-    try {
-      const custom = onAttempt?.(p, decision);
-      last = custom ? await custom : await p.execute(request, { orderId: ctx.orderId, decisionId: decision.decisionId, customerId: ctx.customerId, planId: ctx.planId, stepId: step.stepId, mode: step.constraints.mode });
-    } catch (e) {
-      logProviderError(p.id, e);
-      last = { ok: false, provider: p.id, target: p.type, jobId: "", receiptId: "", executionTimeMs: 0, error: e instanceof NodeError ? e.code : safeProviderError(e) };
+    for (let retry = 0; retry <= policy.retries; retry++) {
+      if (retry > 0) {
+        const wait = backoffMs(retry - 1);
+        if (Date.now() + wait > deadline) {
+          stop = "budget exhausted";
+          break providers;
+        }
+        await sleep(wait);
+      }
+      const t0 = Date.now();
+      try {
+        const custom = onAttempt?.(p, decision);
+        last = custom ? await custom : await p.execute(request, { orderId: ctx.orderId, decisionId: decision.decisionId, customerId: ctx.customerId, planId: ctx.planId, stepId: step.stepId, mode: step.constraints.mode });
+      } catch (e) {
+        logProviderError(p.id, e);
+        last = { ok: false, provider: p.id, target: p.type, jobId: "", receiptId: "", executionTimeMs: Date.now() - t0, error: e instanceof NodeError ? e.code : safeProviderError(e) };
+      }
+      attempts.push(last);
+      log.push({ provider: p.id, target: p.type, retry, ok: last.ok, error: last.ok ? undefined : last.error, ms: last.executionTimeMs || Date.now() - t0, at: t0 });
+      noteAttempt(p.id, last.ok, last.error);
+      if (last.ok) break providers;
+      // A stream that already reached the customer cannot be retried or re-routed.
+      if (last.error?.startsWith("stream_interrupted")) {
+        stop = "stream already started";
+        break providers;
+      }
+      if (!isRetryable(last.error)) break;
+      if (Date.now() >= deadline) {
+        stop = "budget exhausted";
+        break providers;
+      }
     }
-    attempts.push(last);
-    if (last.ok) break;
+    if (!policy.fallback) {
+      stop = "fallback disabled";
+      break;
+    }
   }
+  step.attempts = log;
+  if (stop) step.stopReason = stop;
   step.result = last ?? undefined;
   step.status = last?.ok ? "COMPLETED" : "FAILED";
   step.completedAt = Date.now();
@@ -139,7 +188,7 @@ export async function executeStep(step: ExecutionStep, request: ExecutionRequest
 }
 
 /** Walk the plan graph wave by wave; steps in a wave run concurrently. Stops at the first failed wave. */
-export async function executePlan(p: ExecutionPlan, ctx: { customerId: string }, ps: IntelligenceProvider[], onAttempt?: Parameters<typeof executeStep>[4]) {
+export async function executePlan(p: ExecutionPlan, ctx: { customerId: string; policy?: GatewayPolicy }, ps: IntelligenceProvider[], onAttempt?: Parameters<typeof executeStep>[4]) {
   p.status = "EXECUTING";
   const outputs = new Map<string, string | undefined>();
   const executions = new Map<string, StepExecution>();
@@ -147,7 +196,7 @@ export async function executePlan(p: ExecutionPlan, ctx: { customerId: string },
     const results = await Promise.all(
       wave.map(async (step) => {
         const req = withContext(step, outputs);
-        const ex = await executeStep(step, req, { orderId: p.orderId, customerId: ctx.customerId, planId: p.planId }, ps, onAttempt);
+        const ex = await executeStep(step, req, { orderId: p.orderId, customerId: ctx.customerId, planId: p.planId, policy: ctx.policy }, ps, onAttempt);
         executions.set(step.stepId, ex);
         if (ex.result?.ok) outputs.set(step.stepId, ex.result.content);
         return ex;
@@ -170,6 +219,8 @@ function finish(order: ComputeOrder, p: ExecutionPlan, final: ExecutionStep, ex:
   order.completedAt = Date.now();
   order.planId = p.planId;
   order.decisionId = final.decisionId ?? ex?.decision.decisionId;
+  // Every attempt across the plan, in order, so the customer sees retries and fallbacks as facts.
+  order.attempts = p.steps.flatMap((s) => s.attempts ?? []);
   // Keep the receipt of a genuinely failed browser job on the order so the failure is auditable.
   const anyReceipt = ex?.attempts.find((a) => a.receiptId);
   if (anyReceipt) {
@@ -200,7 +251,7 @@ export async function placeOrder(input: PlaceOrderInput, customerId: string, ps:
   order.status = "EXECUTING";
   const pending = [background("order.create", save(order)), background("plan.create", savePlan(p))];
   try {
-    const { final, executions } = await executePlan(p, { customerId }, ps);
+    const { final, executions } = await executePlan(p, { customerId, policy: order.policy }, ps);
     finish(order, p, final, executions.get(final.stepId));
   } catch (e) {
     console.error("[orders] order failed", order.orderId, e instanceof Error ? `${e.name}: ${e.message}` : e);
@@ -238,14 +289,15 @@ export async function placeStreamingOrder(input: PlaceOrderInput & { request: Ex
 
   const persisted = (async () => {
     try {
-      const { final, executions } = await executePlan(p, { customerId }, ps, (prov, decision) => {
+      const { final, executions } = await executePlan(p, { customerId, policy: order.policy }, ps, (prov, decision) => {
         if (handed || !prov.executeStream) return undefined;
         const req = input.request;
-        return (async () => {
+        return (async (): Promise<ExecutionResult> => {
           const { upstream, done } = await prov.executeStream!(req, { orderId: order.orderId, decisionId: decision.decisionId, customerId, planId: p.planId, stepId: p.steps[0].stepId, mode: p.steps[0].constraints.mode });
           handed = true;
           resolveStream({ stream: upstream, decision, provider: prov });
-          return done;
+          // Bytes have reached the customer. A failure from here is reported, not retried or re-routed.
+          return done.then((r) => (r.ok ? r : { ...r, error: `stream_interrupted: ${r.error ?? "unknown"}` }));
         })();
       });
       const ex = executions.get(final.stepId);

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExecutionEstimate, ExecutionRequest, ExecutionResult, ExecutionTarget, ProviderHealth } from "@/domain/economy";
 import { MemoryStore } from "@/services/store";
 import { executePlan, getPlan, placeOrder, placeStreamingOrder } from "./orders";
+import { isCooling, resetProviderHealth } from "./policy";
 import { compoundPlan, makeStep } from "./plan";
 import type { IntelligenceProvider } from "./providers";
 import { UpstreamHttpError } from "@/providers/openaiCompatible";
@@ -37,6 +38,7 @@ const chat: ExecutionRequest = { kind: "chat", model: "brain/auto", messages: [{
 describe("orders", () => {
   beforeEach(() => {
     g.__brainStore = new MemoryStore();
+    resetProviderHealth();
   });
 
   it("routes to the selected provider and records a completed order with its receipt and plan", async () => {
@@ -73,8 +75,86 @@ describe("orders", () => {
       return ok("b", "EXTERNAL_MODEL");
     });
     const o = await placeOrder({ request: chat, mode: "CHEAP" }, "cust", [a, b]);
+    // Default policy: one retry on the same provider for a transient 503, then fall back.
+    expect(calls).toEqual(["a", "a", "b"]);
+    expect(o.status).toBe("COMPLETED");
+    expect(o.receiptId).toBe("r-b");
+    expect(o.attempts?.map((x) => [x.provider, x.retry, x.ok])).toEqual([
+      ["a", 0, false],
+      ["a", 1, false],
+      ["b", 0, true],
+    ]);
+  });
+
+  it("does not retry non-transient failures and honours fallback: false", async () => {
+    const calls: string[] = [];
+    const a = fake("a", "CLOUD_GPU", { estimatedCost: 0.01 }, async () => {
+      calls.push("a");
+      return { ok: false, provider: "a", target: "CLOUD_GPU", jobId: "", receiptId: "", executionTimeMs: 5, error: "upstream 400" };
+    });
+    const b = fake("b", "EXTERNAL_MODEL", { estimatedCost: 0.05 }, async () => {
+      calls.push("b");
+      return ok("b", "EXTERNAL_MODEL");
+    });
+    const o = await placeOrder({ request: chat, mode: "CHEAP", policy: { retries: 2, fallback: false, timeoutMs: null } }, "cust", [a, b]);
+    expect(calls).toEqual(["a"]);
+    expect(o.status).toBe("FAILED");
+    expect(o.error).toBe("upstream 400");
+    expect(o.policy).toEqual({ retries: 2, fallback: false, timeoutMs: null });
+    const p = await getPlan(o.planId!);
+    expect(p?.steps[0].stopReason).toBe("fallback disabled");
+  });
+
+  it("retries: 0 goes straight to the next provider", async () => {
+    const calls: string[] = [];
+    const a = fake("a", "CLOUD_GPU", { estimatedCost: 0.01 }, async () => {
+      calls.push("a");
+      return { ok: false, provider: "a", target: "CLOUD_GPU", jobId: "", receiptId: "", executionTimeMs: 5, error: "timeout" };
+    });
+    const b = fake("b", "EXTERNAL_MODEL", { estimatedCost: 0.05 }, async () => {
+      calls.push("b");
+      return ok("b", "EXTERNAL_MODEL");
+    });
+    const o = await placeOrder({ request: chat, mode: "CHEAP", policy: { retries: 0, fallback: true, timeoutMs: null } }, "cust", [a, b]);
     expect(calls).toEqual(["a", "b"]);
     expect(o.status).toBe("COMPLETED");
+  });
+
+  it("stops starting attempts once the time budget is spent", async () => {
+    const calls: string[] = [];
+    const slow = fake("a", "CLOUD_GPU", { estimatedCost: 0.01 }, async () => {
+      calls.push("a");
+      await new Promise((r) => setTimeout(r, 1_100));
+      return { ok: false, provider: "a", target: "CLOUD_GPU", jobId: "", receiptId: "", executionTimeMs: 1_100, error: "timeout" };
+    });
+    const b = fake("b", "EXTERNAL_MODEL", { estimatedCost: 0.05 }, async () => {
+      calls.push("b");
+      return ok("b", "EXTERNAL_MODEL");
+    });
+    const o = await placeOrder({ request: chat, mode: "CHEAP", policy: { retries: 2, fallback: true, timeoutMs: 1_000 } }, "cust", [slow, b]);
+    expect(calls).toEqual(["a"]);
+    expect(o.status).toBe("FAILED");
+    const p = await getPlan(o.planId!);
+    expect(p?.steps[0].stopReason).toBe("budget exhausted");
+  });
+
+  it("a provider that keeps failing is ranked last while it cools down", async () => {
+    const calls: string[] = [];
+    const a = fake("a", "CLOUD_GPU", { estimatedCost: 0.01 }, async () => {
+      calls.push("a");
+      return { ok: false, provider: "a", target: "CLOUD_GPU", jobId: "", receiptId: "", executionTimeMs: 5, error: "upstream 502" };
+    });
+    const b = fake("b", "EXTERNAL_MODEL", { estimatedCost: 0.05 }, async () => {
+      calls.push("b");
+      return ok("b", "EXTERNAL_MODEL");
+    });
+    const noRetry = { retries: 0, fallback: true, timeoutMs: null };
+    for (let i = 0; i < 3; i++) await placeOrder({ request: chat, mode: "CHEAP", policy: noRetry }, "cust", [a, b]);
+    expect(calls).toEqual(["a", "b", "a", "b", "a", "b"]);
+    expect(isCooling("a")).toBe(true);
+    calls.length = 0;
+    const o = await placeOrder({ request: chat, mode: "CHEAP", policy: noRetry }, "cust", [a, b]);
+    expect(calls).toEqual(["b"]);
     expect(o.receiptId).toBe("r-b");
   });
 
@@ -120,6 +200,7 @@ describe("orders", () => {
 describe("streaming orders", () => {
   beforeEach(() => {
     g.__brainStore = new MemoryStore();
+    resetProviderHealth();
   });
   const sse = (text: string) => new ReadableStream<Uint8Array>({ start: (c) => (c.enqueue(new TextEncoder().encode(text)), c.close()) });
 
@@ -147,6 +228,25 @@ describe("streaming orders", () => {
     const { order: o } = await done;
     expect(o.status).toBe("COMPLETED");
     expect(o.receiptId).toBe("r-good");
+  });
+
+  it("a stream that fails after hand-off is reported, never retried or re-routed", async () => {
+    const calls: string[] = [];
+    const s = fake("s", "CLOUD_GPU", { estimatedCost: 0.001 }, async () => ok("s", "CLOUD_GPU"), async () => {
+      calls.push("s");
+      return { upstream: sse("data: {}\n\n"), done: Promise.resolve({ ok: false, provider: "s", target: "CLOUD_GPU", jobId: "", receiptId: "", executionTimeMs: 50, error: "upstream 502" } as ExecutionResult) };
+    });
+    const good = fake("good", "EXTERNAL_MODEL", { estimatedCost: 0.01 }, async () => {
+      calls.push("good");
+      return ok("good", "EXTERNAL_MODEL");
+    });
+    const { firstByte, done } = await placeStreamingOrder({ request: chat, mode: "CHEAP", policy: { retries: 2, fallback: true, timeoutMs: null } }, "cust", [s, good]);
+    expect((await firstByte).stream).not.toBeNull();
+    const { order: o } = await done;
+    expect(calls).toEqual(["s"]);
+    expect(o.status).toBe("FAILED");
+    expect(o.error).toMatch(/^stream_interrupted: upstream 502/);
+    expect(o.attempts).toHaveLength(1);
   });
 });
 
@@ -183,7 +283,8 @@ describe("compound execution plans", () => {
 
   it("a failed step fails the plan and skips dependents", async () => {
     let n = 0;
-    const p = fake("p", "CLOUD_GPU", { estimatedCost: 0.01 }, async () => (n++ === 0 ? { ok: false, provider: "p", target: "CLOUD_GPU", jobId: "", receiptId: "", executionTimeMs: 1, error: "upstream 500" } : ok("p", "CLOUD_GPU")));
+    // A non-transient failure on the first step (a transient one would be retried and rescued).
+    const p = fake("p", "CLOUD_GPU", { estimatedCost: 0.01 }, async () => (n++ === 0 ? { ok: false, provider: "p", target: "CLOUD_GPU", jobId: "", receiptId: "", executionTimeMs: 1, error: "upstream 400" } : ok("p", "CLOUD_GPU")));
     const a = makeStep("a", "extract", req("a"), c);
     const b = makeStep("b", "synthesise", req("b"), c, [{ stepId: "a", use: "context" }]);
     const plan = compoundPlan("o-2", "p-2", [a, b], "b");

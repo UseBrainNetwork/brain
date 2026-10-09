@@ -48,6 +48,9 @@ export interface BrainRunSummary {
    * layers (services/inference.ts). Present only on network runs.
    */
   network?: NetworkRunSummary | null;
+  /** Retry / fallback policy the order ran under, and every attempt made in order. */
+  policy?: ComputeOrder["policy"];
+  attempts?: ComputeOrder["attempts"];
   status: ComputeOrder["status"];
   error?: string;
 }
@@ -91,6 +94,8 @@ export async function summarize(order: ComputeOrder, t0: number, mode: RoutingMo
       verified: receipt ? receipt.verificationMethod !== "unverified-provider-response" && receipt.verificationMethod !== "node-reported" : false,
       usage: receipt?.tokens ? { inputUnits: receipt.tokens.prompt, outputUnits: receipt.tokens.completion } : undefined,
       node: receipt?.route?.target === "NATIVE_NETWORK" ? await nodeBlock(receipt) : undefined,
+      policy: order.policy,
+      attempts: order.attempts,
       status: order.status,
       error: order.error,
     },
