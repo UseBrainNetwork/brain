@@ -10,6 +10,8 @@ next-env.d.ts
 .DS_Store
 .vercel
 .shots
+# generated at build from sdk/cli/brain.mjs
+public/cli.mjs
 *.log
 
 # wrangler local secrets

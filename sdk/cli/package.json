@@ -1,0 +1,12 @@
+{
+  "name": "@brainnetwork/cli",
+  "version": "0.1.0",
+  "description": "Command line for the BRAIN gateway: chat, models, receipts with local signature verification, pay-per-call quotes.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "brain": "./brain.mjs" },
+  "files": ["brain.mjs"],
+  "engines": { "node": ">=18" },
+  "repository": { "type": "git", "url": "https://github.com/UseBrainNetwork/brain", "directory": "sdk/cli" },
+  "homepage": "https://brainnetwork.app/developers"
+}

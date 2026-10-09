@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "cp sdk/cli/brain.mjs public/cli.mjs && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

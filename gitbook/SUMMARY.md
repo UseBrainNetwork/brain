@@ -41,6 +41,7 @@
 * [Run a browser node](participate/run-a-browser-node.md)
 * [Run a GPU node](participate/run-a-gpu-node.md)
 * [Use the API](participate/use-the-api.md)
+* [Integrations](participate/integrations.md)
 * [Track everything](participate/track-everything.md)
 
 ## Trust

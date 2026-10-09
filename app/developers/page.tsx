@@ -100,6 +100,105 @@ r2 = client.chat.completions.create(model="brain/auto", tools=tools, messages=[
 print(r2.choices[0].message.content)
 # Every response still carries r.brain: target, model, latency, cost.`;
 
+const AI_SDK = `import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { generateText, streamText } from "ai";
+
+const brain = createOpenAICompatible({
+  name: "brain",
+  baseURL: "https://brainnetwork.app/v1",
+  apiKey: process.env.BRAIN_API_KEY,
+  includeUsage: true,
+});
+
+const { text, response } = await generateText({
+  model: brain("brain/auto"),
+  prompt: "Summarize this audit report.",
+});
+// Route and receipt come back in the response headers.
+console.log(response.headers?.["x-brain-receipt-url"]);
+
+// Streaming, tools and structured output work the same way.
+const result = streamText({ model: brain("brain/code"), prompt: "Write a bash one-liner that…" });
+for await (const delta of result.textStream) process.stdout.write(delta);`;
+
+const LANGCHAIN_PY = `from langchain_openai import ChatOpenAI
+
+llm = ChatOpenAI(
+    model="brain/auto",
+    base_url="https://brainnetwork.app/v1",
+    api_key=os.environ["BRAIN_API_KEY"],
+    # BRAIN extensions ride along in extra_body; other servers ignore them.
+    extra_body={"mode": "cheap", "retries": 1, "fallback": True},
+)
+
+msg = llm.invoke("Summarize this audit report.")
+print(msg.content)
+print(msg.response_metadata)  # token usage; receipt id is on the x-brain-receipt header`;
+
+const LANGCHAIN_JS = `import { ChatOpenAI } from "@langchain/openai";
+
+const llm = new ChatOpenAI({
+  model: "brain/auto",
+  apiKey: process.env.BRAIN_API_KEY,
+  configuration: { baseURL: "https://brainnetwork.app/v1" },
+  modelKwargs: { mode: "quality", privacy: "standard" },
+});
+
+const msg = await llm.invoke("Summarize this audit report.");
+console.log(msg.content);`;
+
+const LITELLM = `# LiteLLM proxy / SDK: prefix with openai/ and point api_base at BRAIN.
+import litellm
+r = litellm.completion(
+    model="openai/brain/auto",
+    api_base="https://brainnetwork.app/v1",
+    api_key=os.environ["BRAIN_API_KEY"],
+    messages=[{"role": "user", "content": "Summarize this audit report."}],
+)
+print(r.choices[0].message.content)
+
+# litellm config.yaml
+# model_list:
+#   - model_name: brain
+#     litellm_params:
+#       model: openai/brain/auto
+#       api_base: https://brainnetwork.app/v1
+#       api_key: os.environ/BRAIN_API_KEY`;
+
+const EDITORS = `# Cursor
+#   Settings → Models → OpenAI API Key: paste your brain_sk_… key,
+#   turn on "Override OpenAI Base URL" → https://brainnetwork.app/v1,
+#   add a custom model named brain/auto (or brain/code) and select it.
+#   Cursor's own features that require its hosted models keep using them.
+
+# Continue (.continue/config.yaml)
+models:
+  - name: BRAIN
+    provider: openai
+    model: brain/code
+    apiBase: https://brainnetwork.app/v1
+    apiKey: \${{ secrets.BRAIN_API_KEY }}
+
+# Cline / Roo Code / Aider / Open WebUI / any "OpenAI compatible" slot
+#   Base URL  https://brainnetwork.app/v1
+#   API key   brain_sk_…
+#   Model     brain/auto`;
+
+const CLI = `# Zero dependencies, Node 18+. One file; read it before you run it.
+curl -fsSL https://brainnetwork.app/cli.mjs -o brain.mjs
+export BRAIN_API_KEY=brain_sk_…
+
+node brain.mjs chat "Summarize this file" < notes.txt
+# · route NATIVE_NETWORK · model qwen/qwen2.5-7b-instruct · 1184 ms · cost $0.000008 (list-price) · verified · receipt https://brainnetwork.app/receipt/r-…
+
+node brain.mjs models
+node brain.mjs receipt r-ij-…               # re-verifies the ed25519 signature on your machine
+node brain.mjs receipts --days 30 --csv > october.csv
+node brain.mjs quote "Hello" --currency sol  # the pay-per-call 402 quote, no key needed
+node brain.mjs stats
+
+# Also in the repository as sdk/cli/brain.mjs (package @brainnetwork/cli, bin: brain).`;
+
 const ERRORS = [
   ["400", "invalid_request", "Malformed body, bad roles or empty messages."],
   ["401", "invalid_api_key", "Missing, unknown or revoked API key."],
@@ -332,6 +431,37 @@ export default function DevelopersPage() {
               </div>
             </div>
             <CodeBlock lang="python" title="tool round trip · openai sdk" code={TOOLS} />
+          </div>
+          <div id="integrations" className="mt-24">
+            <div className="grid gap-10 lg:grid-cols-2">
+              <div>
+                <h2 className="display-md text-[32px] md:text-[48px]">Integrations</h2>
+                <p className="mt-4 max-w-[460px] text-[15px] leading-relaxed text-ink/65">
+                  Anything with an &quot;OpenAI compatible&quot; slot already works: base URL <span className="font-mono text-[14px]">https://brainnetwork.app/v1</span>, your key, model <span className="font-mono text-[14px]">brain/auto</span>. These are the exact snippets for the common ones. BRAIN&apos;s extra fields (<span className="font-mono text-[14px]">mode</span>, <span className="font-mono text-[14px]">privacy</span>, <span className="font-mono text-[14px]">retries</span>, <span className="font-mono text-[14px]">fallback</span>, <span className="font-mono text-[14px]">node</span>) go through each framework&apos;s extra-body hook and are ignored by any other server.
+                </p>
+                <p className="mt-4 max-w-[460px] text-[14px] leading-relaxed text-ink/55">
+                  The receipt is on the <span className="font-mono text-[13px]">x-brain-receipt</span> response header, so frameworks that hide the <span className="font-mono text-[13px]">brain</span> JSON block still give you the audit trail.
+                </p>
+              </div>
+              <CodeTabs
+                tabs={[
+                  { label: "Vercel AI SDK", lang: "js", code: AI_SDK },
+                  { label: "LangChain", lang: "python", code: LANGCHAIN_PY },
+                  { label: "LangChain.js", lang: "js", code: LANGCHAIN_JS },
+                  { label: "LiteLLM", lang: "python", code: LITELLM },
+                  { label: "Editors", lang: "bash", code: EDITORS },
+                ]}
+              />
+            </div>
+            <div className="mt-16 grid gap-10 lg:grid-cols-2">
+              <div>
+                <h3 className="display-md text-[26px] md:text-[34px]">Command line</h3>
+                <p className="mt-4 max-w-[460px] text-[15px] leading-relaxed text-ink/65">
+                  Chat from a shell, pipe files in, export your receipts for the month, and re-verify any receipt&apos;s signature locally against the coordinator&apos;s public key rather than taking the gateway&apos;s word for it. Every chat prints the route, model, latency, cost basis and receipt link on stderr so stdout stays clean for pipes.
+                </p>
+              </div>
+              <CodeBlock lang="bash" title="brain cli" code={CLI} />
+            </div>
           </div>
         </Container>
       </Section>
