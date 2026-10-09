@@ -39,7 +39,16 @@ const OLLAMA_NAMES: Record<string, string> = {
   "qwen/qwen2.5-7b-instruct": "qwen2.5:7b-instruct",
   "mistralai/mistral-7b-instruct-v0.3": "mistral:7b-instruct-v0.3",
   "meta-llama/llama-3.1-8b-instruct": "llama3.1:8b-instruct-q4_K_M",
+  "qwen/qwen2.5-14b-instruct": "qwen2.5:14b-instruct",
+  "qwen/qwen2.5-32b-instruct": "qwen2.5:32b-instruct",
+  "qwen/qwen2.5-coder-32b-instruct": "qwen2.5-coder:32b-instruct",
+  "qwen/qwen2.5-72b-instruct": "qwen2.5:72b-instruct",
+  "deepseek-ai/deepseek-r1-distill-qwen-32b": "deepseek-r1:32b",
+  "deepseek-ai/deepseek-r1-distill-llama-8b": "deepseek-r1:8b",
+  "meta-llama/llama-3.3-70b-instruct": "llama3.3:70b-instruct-q4_K_M",
 };
+
+const OLLAMA_IDS: Record<string, string> = Object.fromEntries(Object.entries(OLLAMA_NAMES).map(([id, tag]) => [tag, id]));
 
 export class LocalServerBackend implements InferenceBackend {
   readonly kind: Backend;
@@ -69,7 +78,8 @@ export class LocalServerBackend implements InferenceBackend {
       return this.supportedModels();
     }
     for (const name of names) {
-      const spec = matchServedModel(name);
+      // Ollama tags like "deepseek-r1:32b" do not carry the allowlisted name; the known-tag table covers them.
+      const spec = matchServedModel(name) ?? (this.kind === "ollama" ? modelSpec(OLLAMA_IDS[name.replace(/:latest$/, "")] ?? "") : undefined);
       if (!spec || this.served.has(spec.id)) continue;
       if (this.opts.models && !this.opts.models.includes(spec.id)) continue;
       this.served.set(spec.id, name);

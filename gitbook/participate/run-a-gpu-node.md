@@ -90,6 +90,22 @@ A mock node may only serve `brain/mock`, says so in every token, and is refused 
 4. Canaries arrive hourly and every 25 jobs. Two consecutive failures mark you `DEGRADED` until one passes.
 5. About 5 % of your deterministic jobs are re-run on another node and compared. A mismatch counts against both of you.
 
+## Pinning a model
+
+A customer request that names a model only ever reaches a node serving that model, so which models you pin decides which traffic you compete for. [/models](https://brainnetwork.app/models) shows, per allowlisted model, nodes online, measured speed, lowest ask, and the last 24 hours of orders that asked for it, were served, or went unserved because no node could take them. A model marked **wanted** had customers and no supply.
+
+```bash
+# vLLM (NVIDIA): the agent pulls and serves the pinned ids. Multi-GPU boxes are sharded
+# automatically when a model's floor exceeds one card.
+BRAIN_NODE_MODE=vllm BRAIN_NODE_MODELS=qwen/qwen2.5-32b-instruct-awq npm run node
+
+# Ollama / llama.cpp / mlx-lm / exo: you serve the weights, the agent advertises what matches.
+ollama pull qwen2.5:32b-instruct
+BRAIN_NODE_MODE=ollama BRAIN_NODE_MODELS=qwen/qwen2.5-32b-instruct npm run node
+```
+
+Plain ids (`qwen/qwen2.5-32b-instruct`) mean the model at whatever precision your server runs; `-awq` ids are the vLLM 4-bit builds with their own VRAM floor. The allowlist includes 14B, 32B, Coder 32B and 72B Qwen2.5, DeepSeek R1 distills (8B, 32B) and Llama 3.3 70B; see the full list with VRAM floors and licenses on `/models`. Units for the hourly epoch scale with parameters × tokens, so a served 32B request counts about twenty times a 1.5B one.
+
 ## Getting paid
 
 Set `BRAIN_NODE_WALLET`, then open `/provider?node=<your id>` and sign once with that wallet. The coordinator links the wallet only when the signature and the node's own report name the same address. From then on every completed customer inference job becomes verified work in the hourly SOL epoch, with units `parameters × tokens ÷ 2²⁰` clipped to what the coordinator streamed. Claim on [/rewards](https://brainnetwork.app/rewards) like any contributor.

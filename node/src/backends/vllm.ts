@@ -123,6 +123,10 @@ export class VllmBackend implements InferenceBackend {
     await this.pullImage();
     await run("docker", ["rm", "-f", CONTAINER]).catch(() => undefined);
     this.loaded = null;
+    // A model whose floor exceeds one card is sharded across the GPUs present (power of two, as vLLM requires).
+    const perGpu = Math.max(0, ...this.opts.gpus.map((g) => g.vramTotalMb ?? 0));
+    let tp = 1;
+    if (perGpu > 0 && spec.minVramMb > perGpu) while (tp * 2 <= this.opts.gpus.length && tp * perGpu < spec.minVramMb) tp *= 2;
     const args = [
       "run", "-d", "--name", CONTAINER, "--gpus", "all",
       "-p", `127.0.0.1:${PORT}:8000`,
@@ -133,6 +137,7 @@ export class VllmBackend implements InferenceBackend {
       "--model", spec.hf, "--served-model-name", spec.id,
       "--max-model-len", String(Math.min(spec.context, this.opts.maxModelLen ?? 8192)),
       "--gpu-memory-utilization", "0.90",
+      ...(tp > 1 ? ["--tensor-parallel-size", String(tp)] : []),
       ...(spec.vllmArgs ?? []),
     ];
     await run("docker", args);

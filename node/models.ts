@@ -46,6 +46,21 @@ export const MODEL_ALLOWLIST: readonly ModelSpec[] = [
   { id: "qwen/qwen2.5-7b-instruct-awq", name: "Qwen2.5 7B Instruct (AWQ 4-bit)", hf: "Qwen/Qwen2.5-7B-Instruct-AWQ", params: "7B", context: 32768, minVramMb: 10_000, classes: ["CONSUMER", "PRO", "DATACENTER"], license: "Apache-2.0", vllmArgs: ["--quantization", "awq"] },
   { id: "mistralai/mistral-7b-instruct-v0.3", name: "Mistral 7B Instruct v0.3", hf: "mistralai/Mistral-7B-Instruct-v0.3", params: "7B", context: 32768, minVramMb: 20_000, classes: ["PRO", "DATACENTER"], license: "Apache-2.0" },
   { id: "meta-llama/llama-3.1-8b-instruct", name: "Llama 3.1 8B Instruct", hf: "meta-llama/Llama-3.1-8B-Instruct", params: "8B", context: 32768, minVramMb: 20_000, classes: ["PRO", "DATACENTER"], license: "Llama 3.1 Community (gated; node needs HF_TOKEN)" },
+  // Larger models an operator pins on purpose. Nobody is routed these unless they serve them; the
+  // /models page shows how often each was asked for and went unserved, so operators can see where to compete.
+  // Plain ids are the model at the precision the node runs (Ollama/llama.cpp/mlx quantize as they like);
+  // "-awq" ids are the vLLM 4-bit builds with their own VRAM floor, as with the 7B pair above.
+  { id: "qwen/qwen2.5-14b-instruct", name: "Qwen2.5 14B Instruct", hf: "Qwen/Qwen2.5-14B-Instruct", params: "14B", context: 32768, minVramMb: 34_000, classes: ["PRO", "DATACENTER"], license: "Apache-2.0" },
+  { id: "qwen/qwen2.5-14b-instruct-awq", name: "Qwen2.5 14B Instruct (AWQ 4-bit)", hf: "Qwen/Qwen2.5-14B-Instruct-AWQ", params: "14B", context: 32768, minVramMb: 14_000, classes: ["CONSUMER", "PRO", "DATACENTER"], license: "Apache-2.0", vllmArgs: ["--quantization", "awq"] },
+  { id: "qwen/qwen2.5-32b-instruct", name: "Qwen2.5 32B Instruct", hf: "Qwen/Qwen2.5-32B-Instruct", params: "32B", context: 32768, minVramMb: 72_000, classes: ["DATACENTER"], license: "Apache-2.0" },
+  { id: "qwen/qwen2.5-32b-instruct-awq", name: "Qwen2.5 32B Instruct (AWQ 4-bit)", hf: "Qwen/Qwen2.5-32B-Instruct-AWQ", params: "32B", context: 32768, minVramMb: 24_000, classes: ["PRO", "DATACENTER"], license: "Apache-2.0", vllmArgs: ["--quantization", "awq"] },
+  { id: "qwen/qwen2.5-coder-32b-instruct", name: "Qwen2.5 Coder 32B Instruct", hf: "Qwen/Qwen2.5-Coder-32B-Instruct", params: "32B", context: 32768, minVramMb: 72_000, classes: ["DATACENTER"], license: "Apache-2.0" },
+  { id: "qwen/qwen2.5-coder-32b-instruct-awq", name: "Qwen2.5 Coder 32B Instruct (AWQ 4-bit)", hf: "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ", params: "32B", context: 32768, minVramMb: 24_000, classes: ["PRO", "DATACENTER"], license: "Apache-2.0", vllmArgs: ["--quantization", "awq"] },
+  { id: "qwen/qwen2.5-72b-instruct", name: "Qwen2.5 72B Instruct", hf: "Qwen/Qwen2.5-72B-Instruct", params: "72B", context: 32768, minVramMb: 150_000, classes: ["DATACENTER"], license: "Qwen (non-commercial above 100M MAU)" },
+  { id: "qwen/qwen2.5-72b-instruct-awq", name: "Qwen2.5 72B Instruct (AWQ 4-bit)", hf: "Qwen/Qwen2.5-72B-Instruct-AWQ", params: "72B", context: 32768, minVramMb: 48_000, classes: ["DATACENTER"], license: "Qwen (non-commercial above 100M MAU)", vllmArgs: ["--quantization", "awq"] },
+  { id: "deepseek-ai/deepseek-r1-distill-qwen-32b", name: "DeepSeek R1 Distill Qwen 32B", hf: "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", params: "32B", context: 32768, minVramMb: 72_000, classes: ["DATACENTER"], license: "MIT" },
+  { id: "deepseek-ai/deepseek-r1-distill-llama-8b", name: "DeepSeek R1 Distill Llama 8B", hf: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B", params: "8B", context: 32768, minVramMb: 20_000, classes: ["PRO", "DATACENTER"], license: "MIT (Llama 3.1 Community for the base weights)" },
+  { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B Instruct", hf: "meta-llama/Llama-3.3-70B-Instruct", params: "70B", context: 32768, minVramMb: 150_000, classes: ["DATACENTER"], license: "Llama 3.3 Community (gated; node needs HF_TOKEN)" },
 ];
 
 const byId = new Map(MODEL_ALLOWLIST.map((m) => [m.id, m]));
