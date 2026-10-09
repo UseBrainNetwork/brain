@@ -102,6 +102,29 @@ export default async function PayoutsPage() {
         </Panel>
       </div>
 
+      {/* Where the pool comes from */}
+      {(() => {
+        const p = d.poolSources;
+        const total = p.fixedLamports + p.salesLamports;
+        const salesShare = total > 0 ? p.salesLamports / total : 0;
+        return (
+          <Panel className="mt-6" title="Where the pool comes from" right={`${fmtInt(p.epochs)} live epochs`}>
+            <div className="grid gap-6 md:grid-cols-[1.2fr_1fr_1fr_1fr]">
+              <Metric k="From the treasury" v={`${sol(p.fixedLamports, 2)} SOL`} sub="fixed amount the operator funds each hour" />
+              <Metric k="From plan sales" v={`${sol(p.salesLamports, 3)} SOL`} tone={p.salesLamports > 0 ? "ok" : "muted"} sub={p.purchases > 0 ? <>{fmtInt(p.purchases)} purchases · ${p.salesUsd.toFixed(2)} received · {fmtInt(p.epochsWithSales)} epochs</> : "no purchase has added to the pool yet"} />
+              <Metric k="Sales share of all pools" v={`${(100 * salesShare).toFixed(salesShare > 0 && salesShare < 0.01 ? 2 : 1)}%`} tone={salesShare > 0 ? undefined : "muted"} sub="the number that has to pass 50%" />
+              <Metric k="First hour sales > treasury" v={p.firstSalesMajority ? p.firstSalesMajority.replace(/^E-/, "") : "not yet"} tone={p.firstSalesMajority ? "ok" : "muted"} sub={p.latest ? <>latest epoch: {sol(p.latest.fixedLamports, 2)} fixed + {sol(p.latest.salesLamports, 3)} sales</> : undefined} />
+            </div>
+            <div className="mt-4 h-[6px] w-full overflow-hidden rounded-full bg-chalk/[0.08]">
+              <div className="h-full bg-ok" style={{ width: `${Math.max(salesShare > 0 ? 0.5 : 0, 100 * salesShare)}%` }} />
+            </div>
+            <div className="mt-3 font-mono text-[10.5px] text-chalk/40">
+              Every hourly pool is the fixed treasury amount plus the contributors&apos; share of plan purchases confirmed on chain during that hour (SOL at face value, USDC at the recorded SOL/USD quote). Nothing else feeds it: no emissions, no staking, no token sales. The network pays for itself on the hour this bar passes half.
+            </div>
+          </Panel>
+        );
+      })()}
+
       {/* Latest payouts */}
       <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <Panel title="Latest payouts" right={`${Math.min(100, d.claims.length)} of ${fmtInt(d.totals.count)}`}>

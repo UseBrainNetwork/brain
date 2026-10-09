@@ -20,7 +20,42 @@ export interface PayoutsData {
   daily: { day: string; lamports: number; payouts: number }[];
   /** Current SOL/USD market quote, for the "≈ USD" line only. Null when sources disagree or are down. */
   quote: SolQuote | null;
+  /** Where every live epoch's pool came from, summed. */
+  poolSources: PoolComposition;
   at: number;
+}
+
+/**
+ * The pool is fixed SOL from the treasury plus the contributors' share of plan sales confirmed in
+ * the epoch. Epochs settled before sales fed the pool have no `pool` record and count as fixed.
+ */
+export interface PoolComposition {
+  fixedLamports: number;
+  salesLamports: number;
+  salesUsd: number;
+  purchases: number;
+  /** Epochs in which at least one purchase added to the pool. */
+  epochsWithSales: number;
+  epochs: number;
+  /** First epoch in which sales exceeded the fixed amount; null until it happens. */
+  firstSalesMajority: string | null;
+  latest: { id: string; fixedLamports: number; salesLamports: number; purchases: number } | null;
+}
+
+export function poolComposition(live: RewardEpoch[]): PoolComposition {
+  const out: PoolComposition = { fixedLamports: 0, salesLamports: 0, salesUsd: 0, purchases: 0, epochsWithSales: 0, epochs: live.length, firstSalesMajority: null, latest: null };
+  for (const e of [...live].sort((a, b) => a.startsAt - b.startsAt)) {
+    const fixed = e.pool?.fixedLamports ?? e.poolLamports;
+    const sales = e.pool?.salesLamports ?? 0;
+    out.fixedLamports += fixed;
+    out.salesLamports += sales;
+    out.salesUsd += e.pool?.salesUsd ?? 0;
+    out.purchases += e.pool?.purchases ?? 0;
+    if (sales > 0) out.epochsWithSales++;
+    if (sales > fixed && !out.firstSalesMajority) out.firstSalesMajority = e.id;
+    out.latest = { id: e.id, fixedLamports: fixed, salesLamports: sales, purchases: e.pool?.purchases ?? 0 };
+  }
+  return out;
 }
 
 export function bucketByDay(claims: RewardClaim[], days: number, now = Date.now()) {
@@ -55,6 +90,7 @@ export async function payoutsData(opts: { claims?: number; epochs?: number; days
     liveEpochs: live.length,
     daily: bucketByDay(allClaimsForChart, days),
     quote,
+    poolSources: poolComposition(live),
     at: Date.now(),
   };
 }

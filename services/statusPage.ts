@@ -141,7 +141,8 @@ export function parseIncidents(md: string): Incident[] {
       .trim();
     out.push({ date: m[1], title: m[2].trim(), summary });
   }
-  return out;
+  // Newest first; the log file itself is written oldest first.
+  return out.sort((a, b) => b.date.localeCompare(a.date));
 }
 
 async function incidents(): Promise<Incident[]> {

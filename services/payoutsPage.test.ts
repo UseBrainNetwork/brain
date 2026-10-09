@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RewardClaim } from "@/domain/types";
+import type { RewardClaim, RewardEpoch } from "@/domain/types";
 import { MemoryStore } from "./store";
-import { bucketByDay } from "./payoutsPage";
+import { bucketByDay, poolComposition } from "./payoutsPage";
 
 vi.mock("server-only", () => ({}));
 
@@ -25,5 +25,30 @@ describe("payouts page data", () => {
     expect(await s.paidClaimTotals()).toEqual({ lamports: 30, count: 2, wallets: 1, firstAt: 100, lastAt: 200 });
     expect((await s.listPaidClaims(10)).map((c) => c.lamports)).toEqual([20, 10]);
     expect(await new MemoryStore().paidClaimTotals()).toEqual({ lamports: 0, count: 0, wallets: 0, firstAt: null, lastAt: null });
+  });
+});
+
+describe("poolComposition", () => {
+  const H = 3600_000;
+  const epoch = (i: number, pool?: RewardEpoch["pool"]): RewardEpoch => ({ id: `E-${i}`, startsAt: i * H, endsAt: (i + 1) * H, poolLamports: 150_000_000 + (pool?.salesLamports ?? 0), distributedLamports: 1, participants: 1, totalVerifiedCompute: 1, settledAt: (i + 1) * H, provenance: "live", ...(pool ? { pool } : {}) });
+  const src = (salesLamports: number, purchases: number): NonNullable<RewardEpoch["pool"]> => ({ fixedLamports: 150_000_000, salesLamports, salesUsd: purchases * 20, purchases, share: 0.6, solUsd: 100 });
+
+  it("treats epochs without a pool record as fixed and finds the first sales-majority hour", () => {
+    const c = poolComposition([epoch(2, src(200_000_000, 3)), epoch(1, src(10_000_000, 1)), epoch(0)]);
+    expect(c.fixedLamports).toBe(450_000_000);
+    expect(c.salesLamports).toBe(210_000_000);
+    expect(c.salesUsd).toBe(80);
+    expect(c.purchases).toBe(4);
+    expect(c.epochsWithSales).toBe(2);
+    expect(c.epochs).toBe(3);
+    expect(c.firstSalesMajority).toBe("E-2");
+    expect(c.latest).toEqual({ id: "E-2", fixedLamports: 150_000_000, salesLamports: 200_000_000, purchases: 3 });
+  });
+
+  it("reports no majority and no sales when nothing has been bought", () => {
+    const c = poolComposition([epoch(1), epoch(0)]);
+    expect(c.salesLamports).toBe(0);
+    expect(c.firstSalesMajority).toBeNull();
+    expect(c.latest?.id).toBe("E-1");
   });
 });
