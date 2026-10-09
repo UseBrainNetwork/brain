@@ -24,6 +24,22 @@ A long day. Three distinct problems, in sequence.
 
 **Open follow-ups.** Prune `brain_jobs` history older than a few days (1.9 GB, the main CPU load). Rotate the credentials that were handled during the incident. Replicate the database or move the pooler dependency behind the store interface.
 
+## 2026-10-08 — Pooler pool poisoned again; deployments disabled
+
+**Impact.** Database-backed routes returned `database_unavailable` for most of the evening (UTC), then every route returned HTTP 402 for about an hour. Browser nodes retried and rejoined; the two native nodes went offline and re-registered after service returned. The 17:00 to 20:00 epochs settled late, none were skipped.
+
+**Cause.** Two unrelated things. The shared pooler's cached credentials for the application role went bad a second time (same *"reconnect with fresh credentials"* symptom as the day before), and the one fallback path, a single session-mode connection, is capped at 15 for the whole project and was saturated. Separately, the hosting account hit its spending cap and every deployment was disabled until the bill was paid; there is no API for that, so it waited on a person.
+
+**Fix.** The store now holds ordered connection lanes: the primary role, a second role with the same privileges, and the session fallback. A lane that the pooler rejects is cooled for ten minutes while the next one serves; the page `/api/health/db` shows lane state. The cap was raised and the site redeployed. Also shipped the same night, after the outage exposed them: a parent job no longer loses unit results that arrive from another instance (`reconcile`), a 64-unit job is written in two statements instead of 130, schema changes are applied by one instance under a lock, and advisory-lock waits no longer pin pooler backends.
+
+## 2026-10-09 — Database disk and write load
+
+**Impact.** No outage. `/api/health/db` flapped to `database_unavailable` for a few minutes around 10:00 UTC while the rest of the site answered; some instances tripped their breaker on slow connections.
+
+**Cause.** The fleet grew from 316 to over 1,700 browser nodes online in twelve hours. Each node took a self-generated job every 3 seconds and every job is a row, so `brain_jobs` grew by about 8 million rows a day to 4.9 million live rows and 8.8 GB, on a disk that was already full. The database was I/O-bound; batch deletes slowed from 7 s to 35 s each.
+
+**Fix.** Self-generated job pacing raised from 3 s to 15 s per node (reward shares between nodes are unchanged; everyone is paced the same). Hourly cron removes browser job rows older than 24 hours in small batches, keeping native work records; 1.74 million rows were removed by hand first. Heartbeats went from every 10 s to every 20 s. An external check now probes the site every five minutes and pages on failure. This page is now also rendered on [/status](https://brainnetwork.app/status). Still open on the operator's side: a larger database tier and credential rotation.
+
 ## How incidents are recorded
 
 This page is maintained by hand after each incident and is deliberately specific. The lesson from the first week is that the crowd is the robust part of BRAIN and the single database behind it is the fragile part, and the roadmap in [What changes as it grows](../scale/what-changes-as-it-grows.md) reflects that.

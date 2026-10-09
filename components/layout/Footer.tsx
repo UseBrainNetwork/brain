@@ -11,7 +11,7 @@ import { social } from "@/lib/site";
 
 const cols = [
   { h: "Product", l: [["Chat", "/chat"], ["Pricing", "/pricing"], ["Account", "/account"], ["Power BRAIN", "/earn"]] },
-  { h: "Network", l: [["Operations", "/network"], ["The Brain", "/brain"], ["Explorer", "/explorer"], ["Capacity", "/capacity"], ["Economics", "/economics"]] },
+  { h: "Network", l: [["Operations", "/network"], ["The Brain", "/brain"], ["Explorer", "/explorer"], ["Capacity", "/capacity"], ["Economics", "/economics"], ["Status", "/status"]] },
   { h: "Developers", l: [["Docs", social.docsUrl], ["API reference", "/developers"], ["BRAIN AUTO", "/auto"], ["Source", social.repoUrl], ["Verification", "/developers#verification"]] },
   { h: "Community", l: [["X / Twitter", social.xUrl], ["GitHub", social.githubUrl], ["Rewards", "/rewards"], ["Payouts", "/payouts"], ["Live economics", "/economics"]] },
 ];

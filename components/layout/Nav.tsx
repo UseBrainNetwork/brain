@@ -25,6 +25,7 @@ const secondary = [
   { href: "/auto", label: "BRAIN AUTO", hint: "Routing console" },
   { href: "/rewards", label: "Rewards", hint: "Contributor epochs" },
   { href: "/payouts", label: "Payouts", hint: "Every SOL payout, on chain" },
+  { href: "/status", label: "Status", hint: "Is it up, and how well" },
   { href: social.docsUrl, label: "Docs", hint: "The full account of how BRAIN works", external: true },
 ];
 const accountLinks = [
