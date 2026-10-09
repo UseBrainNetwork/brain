@@ -66,6 +66,18 @@ Optional fields:
 | `maxCost` | USD ceiling; excludes classes whose known cost exceeds it |
 | `maxLatency` | ms ceiling; excludes classes whose known latency exceeds it |
 
+## Pay per call, no account
+
+Agents do not have credit cards. The gateway speaks the x402 shape on Solana:
+
+1. Send the request with no key and the header `x-brain-pay: sol` (or `usdc`). The answer is `402 payment_required` with a `payment` object: `id`, `currency`, `amount`, `amountUsd`, `to` (the protocol wallet), `memo` (`brain:<id>`), `expiresAt` (20 minutes), `budgetTokens`.
+2. Pay it from any wallet: a transfer of `amount` to `to` carrying `memo`. `GET /v1/pay/<id>/transaction?payer=<wallet>` returns the unsigned transaction if you would rather not build it.
+3. Re-send the same body with `x-brain-payment: <id>:<transaction signature>`. The gateway reads the transaction from the chain, checks destination, amount, memo and that the body still hashes to what was quoted, marks the signature spent, and serves the request as customer `pay:<payer>`.
+
+The quote is the request's token budget (prompt estimate + `max_tokens`) at the published list price, floored at `BRAIN_PAYCALL_MIN_USD` (default $0.001) so a Solana fee never dwarfs the charge. With no list price configured there is no quote; the 402 says so rather than inventing one. The receipt shows what was actually used at list price. Paid calls count as sales for the hourly contributor pool like plan purchases.
+
+A one-file client, `sdk/pay-per-call.ts` in the repository, does the three steps with `@solana/web3.js` and a `maxUsd` guard.
+
 ## Privacy
 
 Node models run on hardware BRAIN does not operate, so they are `privacy: public`. A `STANDARD` or `PRIVATE` request pinned to a node model returns `400 privacy_conflict` instead of being routed somewhere else. With `brain/auto`, privacy is a hard filter applied before scoring.

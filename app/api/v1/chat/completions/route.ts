@@ -13,12 +13,20 @@ import { balance, consumeForReceipt, ensureMonthlyGrant, mayConsume } from "@/se
 import { MISSING_KEY, authenticate, customerRateLimit, openAccess, recordRequest } from "@/services/customers";
 import { communityFirstFor, planById } from "@/lib/plans";
 import { isAllowedModel } from "@/node/models";
+import { PaymentError } from "@/services/payments";
+import { attachCallResult, budgetTokens, isPayCurrency, parsePaymentHeader, paymentRequired, quoteCall, redeemCall, type CallQuote } from "@/services/payPerCall";
 import { bearer, json, tooMany } from "@/services/security";
 
 export const dynamic = "force-dynamic";
 
 const PRIVACY = new Set<PrivacyRequirement>(["PUBLIC", "STANDARD", "PRIVATE"]);
 const NODE_ID = /^N-[A-F0-9]{8}$/;
+
+/** `x-brain-pay: sol|usdc` header, or `pay: "sol"|"usdc"` in the body. */
+function payCurrency(req: Request, raw: Record<string, unknown>) {
+  const v = String(req.headers.get("x-brain-pay") ?? raw.pay ?? "").toUpperCase();
+  return isPayCurrency(v) ? v : undefined;
+}
 
 /** `node` from the body or its `brain` object: undefined when absent, false when malformed. */
 function designatedNode(raw: Record<string, unknown>): string | undefined | false {
@@ -46,15 +54,40 @@ function designatedNode(raw: Record<string, unknown>): string | undefined | fals
  */
 export const POST = nodeRoute(async (req) => {
   const auth = await authenticate(bearer(req));
-  if (!auth && !(await openAccess())) return json({ error: MISSING_KEY }, 401);
-  const customer = auth?.customer ?? { customerId: "anonymous", label: "open access", createdAt: 0, rateLimit: networkConfig.rateLimit.inferenceRequests, source: "REAL" as const };
+  const raw = await body<Record<string, unknown>>(req, 128 * 1024);
+
+  // Pay per call, no account (x402 shape): a quote header asks for a 402 with the price; a payment
+  // header redeems a paid quote. Both are ignored when a valid API key is present.
+  const payWith = !auth ? payCurrency(req, raw) : undefined;
+  const payment = !auth ? parsePaymentHeader(req.headers.get("x-brain-payment")) : null;
+  let paid: CallQuote | null = null;
+  if (!auth && payment) {
+    try {
+      paid = await redeemCall(payment.quoteId, payment.signature, raw);
+    } catch (e) {
+      if (e instanceof PaymentError) return json({ error: { code: e.code, message: e.message } }, e.status);
+      throw e;
+    }
+  } else if (!auth && payWith) {
+    const chat = validateChat(raw);
+    try {
+      const q = await quoteCall(raw, chat, payWith);
+      return json({ error: { code: "payment_required", message: `Pay ${q.amount} ${q.currency} (≈ $${q.amountUsd.toFixed(4)}) to ${q.to} with memo "${q.memo}", then re-send this request with x-brain-payment: ${q.id}:<signature>.` }, payment: paymentRequired(q) }, { status: 402, headers: { "x-brain-payment-id": q.id, "x-brain-payment-amount": `${q.amount} ${q.currency}`, "cache-control": "no-store" } });
+    } catch (e) {
+      if (e instanceof PaymentError) return json({ error: { code: e.code, message: e.message } }, e.status);
+      throw e;
+    }
+  }
+  if (!auth && !paid && !(await openAccess())) return json({ error: { ...MISSING_KEY, message: `${MISSING_KEY.message} Or pay per call without an account: send x-brain-pay: sol|usdc for a quote.` } }, 401);
+  const customer = auth?.customer ?? (paid ? { customerId: `pay:${paid.payer}`, label: "pay per call", createdAt: paid.createdAt, rateLimit: networkConfig.rateLimit.inferenceRequests, source: "REAL" as const } : { customerId: "anonymous", label: "open access", createdAt: 0, rateLimit: networkConfig.rateLimit.inferenceRequests, source: "REAL" as const });
   if (!customerRateLimit(customer).ok) return tooMany();
 
   // Keys issued from /account map to `acct:<id>` and share that account's plan and credit ledger.
   const account = customer.customerId.startsWith("acct:") ? await getAccount(customer.customerId.slice(5)) : null;
 
-  const raw = await body<Record<string, unknown>>(req, 128 * 1024);
   const chat = validateChat(raw);
+  // A paid quote covers the budget it was priced for; a larger completion budget would be a different request.
+  if (paid && budgetTokens(chat) > paid.budgetTokens) return json({ error: { code: "invalid_request", message: "This request's token budget exceeds what the quote covered." } }, 400);
   const requestedMode = normalizeMode(String(raw.mode ?? raw.priority ?? "auto"));
   let mode = requestedMode;
   // Allowlisted node models exist only on community Brain Nodes, whose operators can read the
@@ -85,6 +118,7 @@ export const POST = nodeRoute(async (req) => {
 
   const record = async (order: ComputeOrder, s: Awaited<ReturnType<typeof finalize>>) => {
     if (account && s.receipt) await consumeForReceipt(account, s.receipt, { orderId: order.orderId, inputUnits: s.brain.usage?.inputUnits, outputUnits: s.brain.usage?.outputUnits });
+    if (paid) await attachCallResult(paid.id, order.orderId, order.receiptId ?? null).catch((e) => console.error("[pay] attach", e));
     await recordRequest({
       customerId: customer.customerId,
       at: t0,
@@ -111,6 +145,7 @@ export const POST = nodeRoute(async (req) => {
   const s = await finalize(order, t0, mode, privacy);
   await record(order, s);
   const headers = await brainHeaders(chatId, s.brain, s.receipt?.nodesUsed ?? []);
+  if (paid) headers["x-brain-payment-id"] = paid.id;
   if (order.status !== "COMPLETED") {
     const status = order.status === "REJECTED" ? 503 : 502;
     return json({ error: { code: order.status === "REJECTED" ? "no_provider_available" : "upstream_failed", message: order.error ?? "execution failed" }, brain: s.brain }, { status, headers });

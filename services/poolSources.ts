@@ -33,16 +33,20 @@ export class PoolSourcesError extends Error {
   }
 }
 
-/** Confirmed purchases whose confirmation fell inside [from, to). */
-export async function confirmedSales(from: number, to: number): Promise<PaymentIntent[]> {
+/** A sale as the pool sees it: plan purchases and pay-per-call payments share these fields. */
+export type Sale = Pick<PaymentIntent, "amountUsd" | "currency" | "baseUnits" | "confirmedAt">;
+
+/** Confirmed purchases (plans and pay-per-call) whose confirmation fell inside [from, to). */
+export async function confirmedSales(from: number, to: number): Promise<Sale[]> {
   // Payment documents are indexed by creation time; an intent lives INTENT_TTL_MS (plus a grace
   // period in confirmIntent), so everything confirmed in the window was created after from − that.
-  const docs = await getStore().listDocs<PaymentIntent>("payment", { from: from - INTENT_TTL_MS - 10 * 60_000, to, limit: 5000 });
-  return docs.filter((p) => p && p.status === "confirmed" && typeof p.confirmedAt === "number" && p.confirmedAt >= from && p.confirmedAt < to && p.plan != null);
+  type Doc = Omit<PaymentIntent, "status" | "plan"> & { kind?: "call"; status: string; plan?: PaymentIntent["plan"] | null };
+  const docs = await getStore().listDocs<Doc>("payment", { from: from - INTENT_TTL_MS - 10 * 60_000, to, limit: 5000 });
+  return docs.filter((p) => p && (p.status === "confirmed" || (p.kind === "call" && p.status === "redeemed")) && typeof p.confirmedAt === "number" && p.confirmedAt >= from && p.confirmedAt < to && (p.plan != null || p.kind === "call"));
 }
 
 /** Pure: the sales side of the pool from a list of purchases. Exported for tests. */
-export function salesPool(sales: PaymentIntent[], share: number, quote: SolQuote | null): Omit<PoolSources, "fixedLamports"> {
+export function salesPool(sales: Sale[], share: number, quote: SolQuote | null): Omit<PoolSources, "fixedLamports"> {
   let lamports = 0;
   let usd = 0;
   let needQuote = false;

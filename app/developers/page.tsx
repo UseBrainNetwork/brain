@@ -104,6 +104,7 @@ const ERRORS = [
   ["400", "invalid_request", "Malformed body, bad roles or empty messages."],
   ["401", "invalid_api_key", "Missing, unknown or revoked API key."],
   ["402", "out_of_credits", "The account behind the key has used its included credits for the month."],
+  ["402", "payment_required", "Pay-per-call quote for this request (x-brain-pay). Pay it and re-send with x-brain-payment."],
   ["403", "mode_not_in_plan", "The requested mode or PRIVATE routing is not in the account's plan."],
   ["404", "model_not_found", "Model id is not one of the brain/* models."],
   ["413", "too_large", "Prompt exceeds the V1 size limit."],
@@ -148,6 +149,23 @@ curl https://brainnetwork.app/v1/chat/completions \
        "messages": [{"role": "user", "content": "Hello from a Brain Node"}]}'
 
 # → brain-node-id: N-3A4F…   brain-region: eu-north   brain-latency: 1184`;
+
+const PAY_CURL = `# 1. Ask with no key; get a quote for exactly this request.
+curl -s https://brainnetwork.app/v1/chat/completions -H "x-brain-pay: sol" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model": "brain/auto", "max_tokens": 200,
+       "messages": [{"role": "user", "content": "Hello"}]}'
+# → 402 { "payment": { "id": "call_…", "currency": "SOL", "amount": 0.00001, "amountUsd": 0.001,
+#          "to": "HZLev…gxwa", "memo": "brain:call_…", "expiresAt": …, "budgetTokens": 202 } }
+
+# 2. Pay from any wallet: transfer \`amount\` to \`to\` with memo \`memo\`
+#    (or GET /v1/pay/call_…/transaction?payer=<wallet> for the unsigned tx).
+
+# 3. Same body, plus the proof. Verified on chain, then served.
+curl -s https://brainnetwork.app/v1/chat/completions \\
+  -H "x-brain-payment: call_…:<transaction signature>" \\
+  -H "Content-Type: application/json" -d '<same body>'
+# → 200, x-brain-receipt: r-…, x-brain-payment-id: call_…`;
 
 const PRIVATE_CURL = `# Your own Brain Node, your prompt never stored.
 curl https://brainnetwork.app/v1/chat/completions \\
@@ -352,6 +370,18 @@ export default function DevelopersPage() {
               </div>
             </div>
             <CodeBlock lang="bash" title="node model · response headers" code={NODE_CURL} />
+          </div>
+          <div className="mt-16 grid gap-10 lg:grid-cols-[360px_1fr]">
+            <div>
+              <h3 className="display-md text-[26px] md:text-[34px]">Pay per call, no account</h3>
+              <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
+                Agents do not have credit cards. Send the request with no key and <span className="font-mono text-chalk">x-brain-pay: sol</span> (or <span className="font-mono text-chalk">usdc</span>) and the answer is a <span className="font-mono text-chalk">402</span> carrying an exact quote for that request: amount, destination, memo, expiry. Pay it from any Solana wallet, re-send the same body with <span className="font-mono text-chalk">x-brain-payment: &lt;id&gt;:&lt;signature&gt;</span>, and the gateway reads the transfer from the chain before serving. One signature, one quote, one request.
+              </p>
+              <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
+                The quote is the request&apos;s token budget at the published list price, floored so a Solana fee never dwarfs the charge. The receipt shows what was actually used. Paid calls join plan sales in the hourly contributor pool. A one-file TypeScript client lives at <span className="font-mono text-chalk">sdk/pay-per-call.ts</span> in the repository.
+              </p>
+            </div>
+            <CodeBlock lang="bash" title="x402 on solana" code={PAY_CURL} />
           </div>
           <div className="mt-16 grid gap-10 lg:grid-cols-[360px_1fr]">
             <div>
