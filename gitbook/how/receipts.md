@@ -15,6 +15,13 @@ executionMs, timestamp, requestHash, responseHash, hardwareClass, cost
 
 It is serialised with sorted keys, hashed with sha256, and signed with the coordinator's ed25519 key. The public key is served at [`/api/coordinator/signer`](https://brainnetwork.app/api/coordinator/signer). `verifyReceipt()` checks any receipt offline, without talking to the database.
 
+## Checking and exporting receipts
+
+* **One receipt, no account:** `GET /api/receipts/<id>/verify` returns the canonical body, the stored hash, the hash recomputed now, the signature and the signer key, plus `valid: true|false` with a reason. Unsigned receipts (browser pool, upstream providers) say `signed: false`.
+* **In a response:** every `/v1/chat/completions` response that produced a receipt carries `x-brain-receipt` (the id) and `x-brain-receipt-url` (the verify URL). Store them with your logs.
+* **Your whole history:** `GET /v1/receipts?from=&to=&format=csv&verify=1` with your API key returns your own requests and their receipts for the window, as JSON or CSV, with each signature re-checked at read time if you ask. Money fields are `null` where no price applied; they are never zero in place of unknown.
+* **In the explorer:** the search box on [/explorer](https://brainnetwork.app/explorer) takes a job id, a receipt id (`r-…`) or a node id (`N-…`).
+
 ## What a receipt says about money
 
 | Field | Meaning |

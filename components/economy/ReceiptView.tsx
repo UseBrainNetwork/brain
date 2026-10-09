@@ -79,9 +79,31 @@ export function ReceiptView({ receipt: r, job, decision }: { receipt: ComputeRec
           <Panel title="Result hash" right={r.resultHashLabel}>
             <Hash value={r.resultHash} />
             <p className="mt-3 text-[12px] leading-relaxed text-chalk/50">
-              Integrity digest over the ordered, server-verified outputs. Anyone holding the same outputs can recompute it. It is <span className="text-chalk/80">not</span> a cryptographic proof of execution and is not signed or anchored on-chain
-              {r.attestation.kind === "none" ? " (attestation: none)." : "."}
+              Integrity digest over the ordered, server-verified outputs. Anyone holding the same outputs can recompute it. It is <span className="text-chalk/80">not</span> a cryptographic proof of execution.
             </p>
+          </Panel>
+          <Panel title="Attestation" right={r.attestation.kind}>
+            {r.attestation.kind === "signature" ? (
+              <>
+                <div className="font-mono text-[11px] text-chalk/50">signer (ed25519, base64)</div>
+                <Hash value={r.attestation.signer} />
+                <div className="mt-3 font-mono text-[11px] text-chalk/50">signature</div>
+                <Hash value={r.attestation.signature} />
+                <p className="mt-3 text-[12px] leading-relaxed text-chalk/50">
+                  The coordinator signed the hash of this receipt&apos;s canonical body. Re-check it with nothing but the id at{" "}
+                  <a href={`/api/receipts/${encodeURIComponent(r.receiptId)}/verify`} className="font-mono text-chalk/80 underline underline-offset-4">
+                    /api/receipts/{r.receiptId}/verify
+                  </a>
+                  . Not anchored on-chain.
+                </p>
+              </>
+            ) : r.attestation.kind === "anchor" ? (
+              <p className="text-[12px] leading-relaxed text-chalk/50">
+                Anchored on {r.attestation.chain}, tx <span className="font-mono text-chalk/80">{r.attestation.txId}</span>.
+              </p>
+            ) : (
+              <p className="text-[12px] leading-relaxed text-chalk/50">Unsigned. Browser-pool and upstream-provider receipts carry the integrity digest above and nothing more; only Brain Node receipts are signed by the coordinator.</p>
+            )}
           </Panel>
         </div>
       </div>

@@ -39,6 +39,19 @@ export function StatusPill({ s }: { s: JobStatus }) {
   );
 }
 
+/**
+ * Where an explorer search should go. Numeric → distributed job; `r-…` → receipt; anything that looks
+ * like a node id (N-XXXXXXXX or a short hex tag) → node profile. null when nothing matches.
+ */
+export function explorerTarget(raw: string): string | null {
+  const q = raw.trim().replace(/^#/, "");
+  if (!q) return null;
+  if (/^\d{1,9}$/.test(q)) return `/explorer/job/${q}`;
+  if (/^r-[A-Za-z0-9_-]{1,80}$/.test(q)) return `/receipt/${encodeURIComponent(q)}`;
+  if (/^(N-)?[A-Fa-f0-9]{6,12}$/.test(q)) return `/node/${encodeURIComponent(q.toUpperCase())}`;
+  return null;
+}
+
 export function JobSearch() {
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -47,23 +60,22 @@ export function JobSearch() {
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        const id = q.trim().replace(/^#/, "");
-        if (!/^\d{1,9}$/.test(id)) return setErr("Enter a numeric job id, e.g. 918240");
-        router.push(`/explorer/job/${id}`);
+        const to = explorerTarget(q);
+        if (!to) return setErr("Enter a job id (918240), a receipt id (r-918240 or r-ij…), or a node id (N-1A2B3C4D or 3449A2)");
+        router.push(to);
       }}
-      className="w-full max-w-[460px]"
+      className="w-full max-w-[520px]"
     >
       <div className="flex h-12 items-center gap-3 rounded-full bg-paper px-5 ring-1 ring-inset ring-ink/15 focus-within:ring-ink/50">
-        <span className="font-mono text-[12px] text-fog">JOB #</span>
+        <span className="font-mono text-[12px] text-fog">FIND</span>
         <input
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
             setErr(null);
           }}
-          inputMode="numeric"
-          placeholder="Look up a job id"
-          aria-label="Job id"
+          placeholder="Job, receipt or node id"
+          aria-label="Job, receipt or node id"
           className="h-full min-w-0 flex-1 bg-transparent font-mono text-[13px] outline-none placeholder:text-fog"
         />
         <button type="submit" className="font-mono text-[12px] font-semibold">

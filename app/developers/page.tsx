@@ -135,6 +135,7 @@ const HEADERS = [
   ["brain-region", "The operator label of that node's region."],
   ["brain-latency", "Wall time of the request in ms, measured by the gateway."],
   ["x-brain-receipt", "Receipt id. GET /api/receipts/:id for the signed compute receipt."],
+  ["x-brain-receipt-url", "Public verify URL for that receipt: canonical body, recomputed hash, signature and signer key, repeatable offline."],
 ];
 
 const NODE_CURL = `# Same request, pinned to a model served by Brain Nodes.
@@ -145,6 +146,15 @@ curl https://brainnetwork.app/v1/chat/completions \
        "messages": [{"role": "user", "content": "Hello from a Brain Node"}]}'
 
 # → brain-node-id: N-3A4F…   brain-region: eu-north   brain-latency: 1184`;
+
+const AUDIT_CURL = `# Your requests for September, one row each, signatures re-checked, as CSV.
+curl "https://brainnetwork.app/v1/receipts?from=2026-09-01&to=2026-10-01&format=csv&verify=1" \\
+  -H "Authorization: Bearer $BRAIN_API_KEY" -o brain-2026-09.csv
+
+# Check one receipt with nothing but the id. No key needed.
+curl https://brainnetwork.app/api/receipts/r-ij-3f9c…/verify
+# → { "signed": true, "valid": true, "canonical": { "storedHash": "…", "recomputedHash": "…" },
+#     "attestation": { "kind": "signature", "signer": "…", "signature": "…" } }`;
 
 const VERIFICATION: [string, string, "live" | "interface"][] = [
   ["Server-issued challenges", "Benchmarks and jobs are generated server-side from secret seeds. Clients cannot pick their own work.", "live"],
@@ -329,6 +339,18 @@ export default function DevelopersPage() {
               </div>
             </div>
             <CodeBlock lang="bash" title="node model · response headers" code={NODE_CURL} />
+          </div>
+          <div className="mt-16 grid gap-10 lg:grid-cols-[360px_1fr]">
+            <div>
+              <h3 className="display-md text-[26px] md:text-[34px]">Receipts and audit</h3>
+              <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
+                Every request that produced compute has a receipt: which target answered, the hash of what it returned, the verification method and how confident it is, and what it cost, or <span className="font-mono text-chalk">null</span> where no price applied. Receipts from Brain Nodes are signed by the coordinator; anyone can re-check the signature at <span className="font-mono text-chalk">/api/receipts/:id/verify</span> without an account. Receipts from the browser pool and from upstream providers are unsigned and say so.
+              </p>
+              <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
+                <span className="font-mono text-chalk">GET /v1/receipts</span> with your API key returns your own requests and their receipts for any window, as JSON or CSV, optionally re-verifying each signature at read time. Keep the file; it is the record of what you bought.
+              </p>
+            </div>
+            <CodeBlock lang="bash" title="monthly audit export" code={AUDIT_CURL} />
           </div>
           <div className="mt-16 grid gap-10 lg:grid-cols-[360px_1fr]">
             <div>

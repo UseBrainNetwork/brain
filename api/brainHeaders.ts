@@ -12,7 +12,10 @@ export async function brainHeaders(requestId: string, s: BrainRunSummary | null,
   if (!s) return h;
   if (s.target) h["brain-target"] = s.target;
   h["brain-latency"] = String(s.latencyMs);
-  if (s.receiptId) h["x-brain-receipt"] = s.receiptId;
+  if (s.receiptId) {
+    h["x-brain-receipt"] = s.receiptId;
+    h["x-brain-receipt-url"] = `https://brainnetwork.app/api/receipts/${encodeURIComponent(s.receiptId)}/verify`;
+  }
   const nodeId = receiptNodes[0];
   if (nodeId && s.target === "NATIVE_NETWORK") {
     h["brain-node-id"] = nodeId;
