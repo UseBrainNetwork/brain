@@ -35,7 +35,7 @@ Three kinds of work reach a browser node:
 
 * **Distributed jobs.** A parallel `u32` matrix multiplication split into up to 64 work units across the online fleet, each unit a row block of C = A × B. The server spot-checks secret rows, reassigns units whose node disappears, and fails the job with a reason if it cannot finish. When customer traffic alone would leave the fleet idle, the scheduler dispatches operator baseline jobs of the same kind (labelled `scheduled by operator (network-baseline)` on the receipt). They carry no customer charge and pay verified units through the hourly pool exactly like any other work.
 * **Canaries.** Full-answer jobs with a known result.
-* **Inference stages.** In NETWORK mode a tab holds one layer-range of a Qwen3 model and runs it for every decoding step. See [Network inference](network-inference.md).
+* **Inference stages.** In NETWORK mode a tab holds one layer-range of a Qwen3 model, or the whole model when its adapter can hold it, and runs it for every decoding step. See [Network inference](network-inference.md).
 
 Each poll that finds nothing returns a `retryMs` so idle tabs do not hammer the database, and distributed work wakes them early over the event stream.
 

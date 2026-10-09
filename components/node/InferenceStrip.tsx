@@ -38,7 +38,7 @@ export function InferenceStrip({ connected }: { connected: boolean }) {
           <span className={cx("font-semibold", tone)}>{label}</span>
           {s.stage != null && s.layers && (
             <span className="text-chalk/55">
-              · {s.modelLabel} · stage {s.stage + 1}/{s.stages} · layers {s.layers[0]}–{s.layers[1] - 1}
+              · {s.modelLabel} · {s.stages === 1 ? "whole model" : `stage ${s.stage + 1}/${s.stages}`} · layers {s.layers[0]}–{s.layers[1] - 1}
               {s.hasEmbed ? " + embedding" : ""}
               {s.hasHead ? " + output head" : ""} · {mb(s.downloadBytes)}
             </span>

@@ -1,5 +1,5 @@
 import type { ComputeJob } from "@/domain/types";
-import { DEFAULT_NETWORK_MODEL, MODEL_LADDER, MODEL_PREFERENCE, NETWORK_MODELS, nodeFitsStage, stagePlan, stageUnits, tokenizerUrl, type NetworkModel, type StageSpan } from "@/inference/config";
+import { DEFAULT_NETWORK_MODEL, MODEL_LADDER, MODEL_PREFERENCE, NETWORK_MODELS, nodeFitsStage, stagePlan, stageUnits, tokenizerUrl, type NetworkModel, type StageSpan, isSingleTab } from "@/inference/config";
 import { mulberry32, sampleTopK } from "@/inference/llama";
 import { REPLICA_TOLERANCE, unpackTopK, type LapStage, type StageMsg } from "@/inference/protocol";
 import { StreamDecoder, Tokenizer, chatPrompt, type ChatTurn, type TokenizerJson } from "@/inference/tokenizer";
@@ -101,6 +101,8 @@ export interface NetworkRunSummary {
   totalMs: number;
   tokPerSec: number | null;
   stages: { stage: number; layers: string; nodes: { id: string; hops: number; gpuMs: number; verified: boolean | null; dropped?: string }[] }[];
+  /** "single-tab": one stage held the whole model, so each lap was one hop (still run on two tabs and compared). "pipeline": layers split across stages. */
+  topology: "single-tab" | "pipeline";
   /** "replica-tolerance" when every stage had two agreeing nodes for every hop; otherwise "unverified". */
   verification: "replica-tolerance" | "unverified";
   verified: boolean;
@@ -593,7 +595,13 @@ export async function settleSession(model: NetworkModel, session: InferenceSessi
       latencyMs: session.totalMs,
       submittedAt: session.createdAt,
       lifecycle: [
-        { stage: "submitted", at: session.createdAt, detail: `network inference session ${session.id}, ${model.label} stage ${sn.stage} (layers ${st.layerFrom}–${st.layerTo - 1}${span.hasHead ? " + head" : ""})` },
+        {
+          stage: "submitted",
+          at: session.createdAt,
+          detail: isSingleTab(model)
+            ? `network inference session ${session.id}, ${model.label}: whole model on one tab (layers ${st.layerFrom}–${st.layerTo - 1} + embedding + head), replica-checked against a second tab`
+            : `network inference session ${session.id}, ${model.label} stage ${sn.stage} (layers ${st.layerFrom}–${st.layerTo - 1}${span.hasHead ? " + head" : ""})`,
+        },
         { stage: "executing", at: session.createdAt, detail: `${sn.hops} hops · ${sn.tokens} token-columns · client GPU ${Math.round(sn.gpuMs)} ms (reported) · relay ${Math.round(sn.ms)} ms` },
         { stage: "verifying", at: now, detail: `replica-tolerance: ${sn.checked}/${sn.hops} hops checked, ${sn.mismatches} disagreements` },
         verified ? { stage: "completed", at: now, detail: `+${units} units` } : { stage: "failed", at: now, detail: failReason },
@@ -643,6 +651,7 @@ export async function settleSession(model: NetworkModel, session: InferenceSessi
     totalMs: session.totalMs ?? 0,
     tokPerSec,
     stages,
+    topology: isSingleTab(model) ? "single-tab" : "pipeline",
     verification: allVerified ? "replica-tolerance" : "unverified",
     verified: allVerified,
     units: { total: totalUnits, verified: verifiedUnits },

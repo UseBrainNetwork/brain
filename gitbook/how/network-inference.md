@@ -6,11 +6,21 @@ The most ambitious thing BRAIN does today: run a language model across browser t
 
 Qwen3 (Apache-2.0) in GGUF:
 
-| Tier | Quantisation | Stages | When |
-| --- | --- | --- | --- |
-| 0.6B | Q8_0 | 3 | Small tier |
-| 1.7B | Q4_0 | 4 | Default |
-| 4B | Q4_0 | 6 | Once enough nodes hold stages |
+| Model | Quantisation | Stages | Weights per tab | When |
+| --- | --- | --- | --- | --- |
+| 1.7B · single tab | Q4_0 | 1 | 1.14 GB | Tabs whose adapter can hold the whole model |
+| 1.7B | Q4_0 | 4 | 0.3–0.4 GB | Default pipeline |
+| 0.6B · single tab | Q8_0 | 1 | 0.64 GB | Tabs that can hold the whole small model |
+| 4B | Q4_0 | 6 | 0.45–0.53 GB | Once enough nodes hold stages |
+| 0.6B | Q8_0 | 3 | 0.25–0.3 GB | Small pipeline |
+
+## Single tab or pipeline
+
+The single-tab entries are the same weights as the pipeline entries with one stage holding every layer, the embedding and the head. A lap is one hop instead of three to six, so decode speed is bounded by one tab's GPU rather than the slowest of several plus the relay hops between them. Two such tabs serve a whole model.
+
+A tab is only assigned a single-tab stage when half its adapter buffer limit (the same `advertisedMemoryGb` rule used everywhere on the network) covers the model's weight bytes. No browser exposes VRAM, so this is the only honest proxy; a stage that still does not fit fails at load and is reported as such. Capacity is filled single-tab first where tabs qualify, then the pipelines. When a chat does not name a model the gateway serves the largest one available and, at equal size, the single-tab variant.
+
+Verification is identical: every lap goes to two tabs and their top-64 logits are compared. A single tab is never trusted alone; a lap served by one tab is recorded `no-replica` and earns nothing. The receipt and the chat panel say `whole model` instead of `stage n`, so the two topologies are never confused.
 
 ## How the model is split
 

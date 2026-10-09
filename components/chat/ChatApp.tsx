@@ -740,7 +740,7 @@ function NetworkPanel({ n }: { n: NonNullable<BrainRunSummary["network"]> }) {
         {n.stages.map((s) => (
           <div key={s.stage} className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="w-[118px] text-chalk/45">
-              stage {s.stage + 1} · layers {s.layers}
+              {n.topology === "single-tab" ? `whole model · layers ${s.layers}` : `stage ${s.stage + 1} · layers ${s.layers}`}
             </span>
             {s.nodes.map((x) => (
               <span key={x.id} className={cx("rounded-[3px] px-1.5 py-[1px]", x.verified === true ? "bg-ok/15 text-ok" : x.verified === false ? "bg-signal/15 text-signal" : "bg-chalk/[0.08] text-chalk/60")} title={x.dropped ? `dropped: ${x.dropped}` : x.verified === true ? "replica-checked, agreed" : x.verified === false ? "disagreed with its replica" : "not checked (no replica)"}>
@@ -752,8 +752,9 @@ function NetworkPanel({ n }: { n: NonNullable<BrainRunSummary["network"]> }) {
         ))}
       </div>
       <p className="mt-2.5">
-        The whole model ran on the nodes above: the first stage embeds, the last projects to logits; the server only tokenizes and samples. Hidden states moved node to node over a live relay. Each
-        hop went to two nodes where two were available and their outputs were compared (relative RMS ≤ 2e-3).{" "}
+        {n.topology === "single-tab"
+          ? "One tab held the whole model, so each lap was a single hop; the server only tokenizes and samples. The same lap went to a second tab where one was available and the two outputs were compared (relative RMS ≤ 2e-3). "
+          : "The whole model ran on the nodes above: the first stage embeds, the last projects to logits; the server only tokenizes and samples. Hidden states moved node to node over a live relay. Each hop went to two nodes where two were available and their outputs were compared (relative RMS ≤ 2e-3). "}
         {n.verified ? `${n.units.verified.toLocaleString()} compute units verified and credited to those nodes.` : `Not every hop could be checked, so ${n.units.verified.toLocaleString()} of ${n.units.total.toLocaleString()} units were credited.`}{" "}
         Open-weights model (Apache-2.0); no charge.
       </p>

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { QWEN3_0_6B, QWEN3_1_7B, QWEN3_4B, layerMacs, nodeFitsStage, stagePlan, stageUnits } from "./config";
+import { MODEL_LADDER, MODEL_PREFERENCE, QWEN3_0_6B, QWEN3_0_6B_SOLO, QWEN3_1_7B, QWEN3_1_7B_SOLO, QWEN3_4B, isSingleTab, layerMacs, nodeFitsStage, stagePlan, stageUnits } from "./config";
 import { GGML_Q4_0, GGML_Q8_0, dequantToF32, entriesFromBuffer, entryToF32, f16Bits, f32ToF16Bits, parseGgufHeader, toWeightEntry, type GgufTensorInfo } from "./gguf";
 import { createKv, embed, finalLogits, layerForward, layerWeightsFrom, matmulT, mulberry32, relativeRms, rmsnorm, ropeInPlace, sampleTopK, stageForward, topK } from "./llama";
 import { StreamDecoder, Tokenizer, chatPrompt } from "./tokenizer";
@@ -102,6 +102,35 @@ describe("llama primitives", () => {
     expect(nodeFitsStage(QWEN3_1_7B, s0, 256 * 1024 * 1024)).toBe(false);
     expect(nodeFitsStage(QWEN3_1_7B, stagePlan(QWEN3_1_7B)[1], 256 * 1024 * 1024)).toBe(true);
     expect(nodeFitsStage(QWEN3_4B, stagePlan(QWEN3_4B)[0], 1024 * 1024 * 1024)).toBe(true);
+  });
+
+  it("single-tab variants are one stage with embedding and head, share weights with the sharded entry, and are gated by total memory", () => {
+    for (const [solo, sharded] of [
+      [QWEN3_0_6B_SOLO, QWEN3_0_6B],
+      [QWEN3_1_7B_SOLO, QWEN3_1_7B],
+    ] as const) {
+      expect(isSingleTab(solo)).toBe(true);
+      expect(isSingleTab(sharded)).toBe(false);
+      const plan = stagePlan(solo);
+      expect(plan).toHaveLength(1);
+      expect(plan[0]).toMatchObject({ stage: 0, layerFrom: 0, layerTo: solo.config.layers, hasEmbed: true, hasHead: true });
+      expect([solo.repo, solo.weightsFile, solo.config]).toEqual([sharded.repo, sharded.weightsFile, sharded.config]);
+      // One lap through the whole model costs the same units as all sharded stages together.
+      const whole = stageUnits(solo.config, plan[0], 1);
+      const parts = stagePlan(sharded).reduce((a, s) => a + stageUnits(sharded.config, s, 1), 0);
+      expect(Math.abs(whole - parts)).toBeLessThanOrEqual(stagePlan(sharded).length);
+    }
+    const gb = 1024 * 1024 * 1024;
+    const [solo17] = stagePlan(QWEN3_1_7B_SOLO);
+    // A 1 GB adapter fits the sharded end stage but is not asked to hold the whole 1.7B model (1.14 GB of weights against 0.5 GB schedulable).
+    expect(nodeFitsStage(QWEN3_1_7B, stagePlan(QWEN3_1_7B)[0], gb)).toBe(true);
+    expect(nodeFitsStage(QWEN3_1_7B_SOLO, solo17, gb)).toBe(false);
+    expect(nodeFitsStage(QWEN3_1_7B_SOLO, solo17, 2.5 * gb)).toBe(true);
+    expect(nodeFitsStage(QWEN3_0_6B_SOLO, stagePlan(QWEN3_0_6B_SOLO)[0], 1.1 * gb)).toBe(false);
+    expect(nodeFitsStage(QWEN3_0_6B_SOLO, stagePlan(QWEN3_0_6B_SOLO)[0], 1.3 * gb)).toBe(true);
+    // Ladder: single-tab 1.7B is filled first; preference serves the largest model, single-tab before sharded at the same size.
+    expect(MODEL_LADDER[0]).toBe(QWEN3_1_7B_SOLO);
+    expect(MODEL_PREFERENCE.map((m) => m.id)).toEqual(["qwen3-4b", "qwen3-1.7b-solo", "qwen3-1.7b", "qwen3-0.6b-solo", "qwen3-0.6b"]);
   });
 });
 

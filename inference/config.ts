@@ -86,7 +86,7 @@ export const QWEN3_0_6B: NetworkModel = {
   stageGpuBytes: [249e6, 301e6, 249e6],
   maxContext: 1024,
   noThink: true,
-  tier: 2,
+  tier: 4,
 };
 
 export const QWEN3_1_7B: NetworkModel = {
@@ -107,7 +107,7 @@ export const QWEN3_1_7B: NetworkModel = {
   stageGpuBytes: [418e6, 319e6, 319e6, 418e6],
   maxContext: 1024,
   noThink: true,
-  tier: 0,
+  tier: 1,
 };
 
 export const QWEN3_4B: NetworkModel = {
@@ -128,20 +128,51 @@ export const QWEN3_4B: NetworkModel = {
   stageGpuBytes: [527e6, 454e6, 454e6, 454e6, 454e6, 527e6],
   maxContext: 1024,
   noThink: true,
-  tier: 1,
+  tier: 3,
+};
+
+/**
+ * Single-tab variants: the same weights as the sharded entry, one stage holding every layer plus
+ * the embedding and the head. A lap is one hop instead of three to six, so decode is bounded by
+ * one tab's GPU rather than the slowest of several plus relay hops. Still run on two tabs and
+ * compared; a single tab is never trusted alone. Only tabs whose adapter is willing to hold the
+ * whole model are assigned one (see `nodeFitsStage`).
+ */
+export const QWEN3_0_6B_SOLO: NetworkModel = {
+  ...QWEN3_0_6B,
+  id: "qwen3-0.6b-solo",
+  label: "Qwen3 0.6B · single tab",
+  stageLayers: [28],
+  stageDownloadBytes: [635e6],
+  stageGpuBytes: [635e6],
+  tier: 2,
+};
+
+export const QWEN3_1_7B_SOLO: NetworkModel = {
+  ...QWEN3_1_7B,
+  id: "qwen3-1.7b-solo",
+  label: "Qwen3 1.7B · single tab",
+  stageLayers: [28],
+  stageDownloadBytes: [1073e6],
+  stageGpuBytes: [1143e6],
+  tier: 0,
 };
 
 export const NETWORK_MODELS: Record<string, NetworkModel> = {
+  [QWEN3_1_7B_SOLO.id]: QWEN3_1_7B_SOLO,
   [QWEN3_1_7B.id]: QWEN3_1_7B,
+  [QWEN3_0_6B_SOLO.id]: QWEN3_0_6B_SOLO,
   [QWEN3_4B.id]: QWEN3_4B,
   [QWEN3_0_6B.id]: QWEN3_0_6B,
 };
 
-/** Capacity is filled in this order (see `assignShard`). */
+/** Capacity is filled in this order (see `assignShard`): single-tab tiers first where a tab can hold them, since two such tabs serve a whole model. */
 export const MODEL_LADDER: NetworkModel[] = Object.values(NETWORK_MODELS).sort((a, b) => a.tier - b.tier);
 
-/** Preference when a chat does not name a model: the largest one the network can serve. */
-export const MODEL_PREFERENCE: NetworkModel[] = [QWEN3_4B, QWEN3_1_7B, QWEN3_0_6B];
+/** Preference when a chat does not name a model: the largest one the network can serve; within a size, the single-tab variant (fewer hops) before the sharded one. */
+export const MODEL_PREFERENCE: NetworkModel[] = [QWEN3_4B, QWEN3_1_7B_SOLO, QWEN3_1_7B, QWEN3_0_6B_SOLO, QWEN3_0_6B];
+
+export const isSingleTab = (m: Pick<NetworkModel, "stageLayers">) => m.stageLayers.length === 1;
 
 export const DEFAULT_NETWORK_MODEL = QWEN3_1_7B;
 
@@ -202,8 +233,16 @@ export function stageMaxBufferBytes(m: NetworkModel, span: StageSpan): number {
   return Math.max(embedQ8, ffn);
 }
 
-/** Can a node with this adapter buffer limit hold the given stage? */
+/**
+ * Can a node with this adapter buffer limit hold the given stage? Sharded stages are gated by the
+ * largest single buffer they need. A single-tab stage holds the whole model, so it is also gated
+ * by total weight bytes against the memory BRAIN schedules against for a tab: half the adapter's
+ * buffer limit, the same `advertisedMemoryGb` rule used everywhere else. No browser exposes VRAM,
+ * so this is the only honest proxy.
+ */
 export function nodeFitsStage(m: NetworkModel, span: StageSpan, maxBufferBytes: number): boolean {
   if (!maxBufferBytes) return false;
-  return maxBufferBytes >= stageMaxBufferBytes(m, span) * 1.1;
+  if (maxBufferBytes < stageMaxBufferBytes(m, span) * 1.1) return false;
+  if (isSingleTab(m)) return maxBufferBytes / 2 >= (m.stageGpuBytes[span.stage] ?? Number.POSITIVE_INFINITY);
+  return true;
 }
