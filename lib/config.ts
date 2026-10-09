@@ -24,9 +24,13 @@ export const networkConfig = {
     maxPlausibleOpsPerMs: 5e9,
   },
   nodes: {
-    heartbeatMs: 10_000,
-    /** A node silent this long is LOST: its pending work units are reassigned. */
-    offlineAfterMs: 30_000,
+    /**
+     * Every heartbeat is a row update; at a few hundred nodes 10 s was ~30 writes/s of nothing
+     * but timestamps. Work units are not gated on heartbeats (unitDeadlineMs reassigns them).
+     */
+    heartbeatMs: 20_000,
+    /** A node silent this long is LOST: its pending work units are reassigned. Must be > 2 × heartbeatMs. */
+    offlineAfterMs: 60_000,
   },
   distributed: {
     /** Work-unit dims per size. Integer matmul, rows hashed per output row. Calibrated for 3–6 s jobs. */

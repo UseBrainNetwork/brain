@@ -134,6 +134,13 @@ export interface NetworkStore {
   getWork(id: string): Promise<WorkRecord | null>;
   /** Jobs still in flight (not completed/failed) submitted after `since`, newest first. */
   listOpenJobs(limit: number, since: number): Promise<StoredJob[]>;
+  /**
+   * Deletes browser kernel jobs submitted before `olderThan`, oldest first, in batches, until none
+   * are left or `deadlineMs` has passed. Native work records are kept: they are an operator's
+   * history and there are few of them. Settled epochs never read this far back, so nothing owed
+   * changes. Returns what was removed and whether the backlog is gone.
+   */
+  pruneJobs(olderThan: number, opts?: { batch?: number; deadlineMs?: number }): Promise<{ deleted: number; done: boolean }>;
   getEpoch(id: string): Promise<RewardEpoch | null>;
   /** Writes the epoch and its allocations atomically. Returns false if the epoch already exists. */
   saveSettlement(epoch: RewardEpoch, allocations: RewardAllocation[]): Promise<boolean>;
@@ -328,6 +335,16 @@ export class MemoryStore implements NetworkStore {
   async listOpenJobs(limit: number, since: number) {
     return (await this.listRecentJobs(limit)).filter((j) => j.status !== "completed" && j.status !== "failed" && j.submittedAt > since);
   }
+  async pruneJobs(olderThan: number) {
+    let deleted = 0;
+    for (const [id, j] of this.jobs) {
+      if (j.submittedAt < olderThan && !(j as { source?: string }).source?.startsWith("native")) {
+        this.jobs.delete(id);
+        deleted++;
+      }
+    }
+    return { deleted, done: true };
+  }
   async getEpoch(id: string) {
     return this.epochs.get(id) ?? null;
   }
@@ -435,7 +452,7 @@ export class MemoryStore implements NetworkStore {
 const g = globalThis as typeof globalThis & { __brainStore?: NetworkStore };
 
 /** Dev HMR keeps the globalThis singleton across module reloads; replace it if its shape is stale. */
-const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode", "countNodesJoined", "aggregateWork", "recordWork", "listOpenJobs", "getNodes", "allocationsForEpoch"];
+const REQUIRED: (keyof NetworkStore)[] = ["listDistributedJobs", "pendingUnitsFor", "putDoc", "listJobsForNode", "countNodesJoined", "aggregateWork", "recordWork", "listOpenJobs", "pruneJobs", "getNodes", "allocationsForEpoch"];
 
 export function getStore(): NetworkStore {
   if (g.__brainStore && REQUIRED.some((k) => typeof g.__brainStore?.[k] !== "function")) g.__brainStore = undefined;

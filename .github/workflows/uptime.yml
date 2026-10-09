@@ -1,0 +1,66 @@
+name: uptime
+
+# External check on production, independent of Vercel and the database: every 5 minutes (the
+# shortest schedule GitHub runs), /api/health/db must answer 200 with the schema applied and at
+# least one database lane open, and /api/stats must answer 200. One retry after 20 s so a single
+# slow response does not page. A failed run emails whoever last changed this file (GitHub's own
+# notification) and, if the ALERT_WEBHOOK_URL repository secret is set, posts to that webhook
+# (Discord or Slack incoming-webhook URLs both work).
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe brainnetwork.app
+        id: probe
+        shell: bash
+        run: |
+          set -u
+          base="https://brainnetwork.app"
+          probe() {
+            local fail=""
+            local out code body
+            out=$(curl -sS -m 25 -w $'\n%{http_code}' "$base/api/health/db" 2>/dev/null) || out=$'\n000'
+            code=${out##*$'\n'}; body=${out%$'\n'*}
+            [ "$code" = "200" ] || fail="$fail health/db HTTP $code;"
+            if [ "$code" = "200" ]; then
+              grep -q '"migrationError":null' <<<"$body" || fail="$fail health/db schema migration error;"
+              grep -q '"coolingDownSec":0' <<<"$body" || fail="$fail health/db every lane cooling down;"
+            fi
+            code=$(curl -sS -m 25 -o /dev/null -w '%{http_code}' "$base/api/stats" 2>/dev/null) || code=000
+            [ "$code" = "200" ] || fail="$fail stats HTTP $code;"
+            printf '%s' "$fail"
+          }
+          fail=$(probe)
+          if [ -n "$fail" ]; then
+            echo "first probe failed:$fail; retrying in 20 s"
+            sleep 20
+            fail=$(probe)
+          fi
+          if [ -n "$fail" ]; then
+            echo "DOWN:$fail"
+            echo "detail=$fail" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "ok"
+
+      - name: Notify webhook
+        if: failure()
+        shell: bash
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          DETAIL: ${{ steps.probe.outputs.detail }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "${ALERT_WEBHOOK_URL:-}" ] || { echo "ALERT_WEBHOOK_URL not set; relying on GitHub's failure email"; exit 0; }
+          msg="brainnetwork.app check failed: ${DETAIL:-probe step errored} ${RUN_URL}"
+          payload=$(printf '{"content":"%s","text":"%s"}' "$msg" "$msg")
+          curl -sS -m 15 -X POST -H 'content-type: application/json' -d "$payload" "$ALERT_WEBHOOK_URL" >/dev/null || echo "webhook post failed"

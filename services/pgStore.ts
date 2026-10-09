@@ -624,6 +624,26 @@ export class PgStore implements NetworkStore {
     const r = await this.q(`SELECT data FROM brain_jobs WHERE submitted_at >= $1 AND submitted_at < $2`, [from, to]);
     return r.rows.map((x) => x.data as StoredJob);
   }
+  async pruneJobs(olderThan: number, opts: { batch?: number; deadlineMs?: number } = {}) {
+    // Small batches, each its own short statement: a single DELETE of a day of rows would hold
+    // locks and WAL for minutes and trip the pool's statement timeout. Oldest first via the
+    // submitted_at index; the ctid subquery keeps each batch to one index range scan.
+    const batch = Math.max(100, Math.min(opts.batch ?? 5_000, 20_000));
+    const deadline = Date.now() + (opts.deadlineMs ?? 60_000);
+    let deleted = 0;
+    for (;;) {
+      const r = await this.q(
+        `/* pruneJobs */ DELETE FROM brain_jobs WHERE ctid = ANY(ARRAY(
+           SELECT ctid FROM brain_jobs
+            WHERE submitted_at < $1 AND coalesce(data->>'source', '') NOT LIKE 'native%'
+            ORDER BY submitted_at LIMIT $2))`,
+        [olderThan, batch],
+      );
+      deleted += r.rowCount ?? 0;
+      if ((r.rowCount ?? 0) < batch) return { deleted, done: true };
+      if (Date.now() >= deadline) return { deleted, done: false };
+    }
+  }
   async getEpoch(id: string) {
     const r = await this.q(`SELECT data FROM brain_reward_epochs WHERE id = $1`, [id]);
     return (r.rows[0]?.data as RewardEpoch) ?? null;
