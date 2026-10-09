@@ -79,6 +79,14 @@ export interface InferenceJob {
   decisionId?: string;
   /** Coordinator-pinned target (benchmarks, canaries). The router still applies every hard filter to it. */
   pinnedNode?: string;
+  /** Customer designated this node (private tier). Never shadowed; never re-matched elsewhere. */
+  customerPinned?: boolean;
+  /** Privacy level the request ran under, when the requester stated one. */
+  privacy?: "PUBLIC" | "STANDARD" | "PRIVATE";
+  /** Prompt and output are removed from this record once delivered. Set for PRIVATE requests. */
+  ephemeral?: boolean;
+  /** When the scrub happened. request.messages is [] and output is "" from then on; hashes remain. */
+  scrubbedAt?: number;
   /** For shadow (redundant-execution) jobs: the customer job being re-run. */
   verifyOf?: string;
   /** For canary jobs: which canary prompt was sent. */
@@ -148,6 +156,9 @@ export interface CreateJobInput {
   /** Hard ceiling on wall time; default 120 s. */
   ttlMs?: number;
   pinnedNode?: string;
+  customerPinned?: boolean;
+  privacy?: "PUBLIC" | "STANDARD" | "PRIVATE";
+  ephemeral?: boolean;
   /** Nodes that must not receive this job (shadow runs exclude the primary node). */
   exclude?: string[];
   verifyOf?: string;
@@ -197,6 +208,9 @@ export async function createInferenceJob(input: CreateJobInput, now = Date.now()
     ...(input.orderId ? { orderId: input.orderId } : {}),
     ...(input.decisionId ? { decisionId: input.decisionId } : {}),
     ...(input.pinnedNode ? { pinnedNode: input.pinnedNode } : {}),
+    ...(input.customerPinned ? { customerPinned: true } : {}),
+    ...(input.privacy ? { privacy: input.privacy } : {}),
+    ...(input.ephemeral ? { ephemeral: true } : {}),
     ...(input.verifyOf ? { verifyOf: input.verifyOf } : {}),
     ...(input.canaryId ? { canaryId: input.canaryId } : {}),
     ...(input.allowDegraded ? { allowDegraded: true } : {}),
@@ -509,10 +523,31 @@ export async function cancelJob(jobId: string, reason = "cancelled by requester"
  * fail. Throttled per instance; called from work polls and job reads so it runs without a cron.
  */
 const sweepAt = globalThis as typeof globalThis & { __brainNJobSweep?: number };
+/**
+ * Removes prompt and output from a terminal job's record. Request and response hashes, token
+ * counts, timings and the receipt stay, so the job remains auditable without its content. Idempotent.
+ */
+export async function scrubInferenceJob(jobId: string, now = Date.now()): Promise<boolean> {
+  return locked(jobId, async () => {
+    const j = await getInferenceJob(jobId);
+    if (!j || !TERMINAL.has(j.state) || j.scrubbedAt) return false;
+    j.request = { ...j.request, messages: [] };
+    j.output = "";
+    j.scrubbedAt = now;
+    await save(j);
+    return true;
+  });
+}
+
+/** Ephemeral jobs the requester did not scrub itself (crash between delivery and scrub) are scrubbed here. */
+const SCRUB_GRACE_MS = 120_000;
+
 export async function sweepInferenceJobs(now = Date.now()) {
   if (now - (sweepAt.__brainNJobSweep ?? 0) < 5_000) return;
   sweepAt.__brainNJobSweep = now;
-  const open = (await listInferenceJobs(100)).filter((j) => !TERMINAL.has(j.state));
+  const recent = await listInferenceJobs(100);
+  for (const j of recent) if (j.ephemeral && !j.scrubbedAt && TERMINAL.has(j.state) && now - (j.completedAt ?? j.createdAt) > SCRUB_GRACE_MS) await scrubInferenceJob(j.jobId, now).catch(() => undefined);
+  const open = recent.filter((j) => !TERMINAL.has(j.state));
   if (!open.length) return;
   const nodes = await listNativeNodes();
   const offline = new Set(nodes.filter((n) => n.state === "OFFLINE" || n.banReason).map((n) => n.nodeId));

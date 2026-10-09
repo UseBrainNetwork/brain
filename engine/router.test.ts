@@ -85,6 +85,23 @@ describe("privacy constraint", () => {
   });
 });
 
+describe("designated node (private tier)", () => {
+  const native = est({ provider: "brain-native-pool", target: "NATIVE_NETWORK", estimatedCost: 0.001, estimatedLatency: 900 });
+  it("only the native network is eligible, and the privacy gate does not apply to it", () => {
+    const r = scoreEstimates([native, cloud, external], "AUTO", { privacy: "PRIVATE", designatedNode: "N-1A2B3C4D" });
+    expect(r.ranked.filter((x) => x.eligible).map((x) => x.provider)).toEqual(["brain-native-pool"]);
+    expect(r.ranked.find((x) => x.provider === "cloud-fallback")!.notes.join()).toMatch(/designated node N-1A2B3C4D/);
+  });
+  it("without a designation PRIVATE still excludes native nodes", () => {
+    const r = scoreEstimates([native, cloud], "AUTO", { privacy: "PRIVATE" });
+    expect(r.selected?.provider).toBe("cloud-fallback");
+  });
+  it("a designated node that cannot take the request means no route, never a fallback", () => {
+    const r = scoreEstimates([{ ...native, available: false }, cloud, external], "AUTO", { privacy: "STANDARD", designatedNode: "N-1A2B3C4D" });
+    expect(r.selected).toBeNull();
+  });
+});
+
 describe("COMMUNITY mode", () => {
   // A real node with worse numbers than the external model on every axis the score reads.
   const native = est({ provider: "brain-native-pool", target: "NATIVE_NETWORK", model: "qwen/qwen2.5-1.5b-instruct", estimatedCost: 0.03, estimatedLatency: 9000, estimatedReliability: 0.85 });

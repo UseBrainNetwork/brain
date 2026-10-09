@@ -61,12 +61,31 @@ Optional fields:
 | --- | --- |
 | `mode` | `AUTO` (default) · `CHEAP` · `FAST` · `QUALITY` · `BROWSER_ONLY` |
 | `privacy` | `PUBLIC` · `STANDARD` (default) · `PRIVATE` |
+| `node` | A Brain Node id (`N-1A2B3C4D`). The request goes to that node or nowhere. |
+| `retries` / `fallback` / `timeout_ms` | Gateway policy; see [Routing](../how/routing.md#when-an-attempt-fails) |
 | `maxCost` | USD ceiling; excludes classes whose known cost exceeds it |
 | `maxLatency` | ms ceiling; excludes classes whose known latency exceeds it |
 
 ## Privacy
 
 Node models run on hardware BRAIN does not operate, so they are `privacy: public`. A `STANDARD` or `PRIVATE` request pinned to a node model returns `400 privacy_conflict` instead of being routed somewhere else. With `brain/auto`, privacy is a hard filter applied before scoring.
+
+### Private tier: your node, our network
+
+Designating a node changes the rule, because naming a node is naming who may read the prompt. Run a Brain Node yourself (or agree terms with an operator you trust), then send:
+
+```json
+{ "model": "qwen/qwen2.5-32b-instruct", "node": "N-1A2B3C4D", "privacy": "private", "messages": [...] }
+```
+
+What that buys, each part enforced in code and visible on the receipt:
+
+* **Single path.** Only that node is eligible. No fallback to other nodes, to operator cloud or to external models; if the node is offline or does not serve the model the request fails with `503 no_provider_available` and the decision says why.
+* **No shadow runs.** Designated jobs are never re-executed on another node for verification, so the prompt reaches exactly one machine. The receipt therefore says `node-reported`, as all node work does.
+* **No prompt retention (`PRIVATE`).** The coordinator keeps the request and response *hashes*, token counts and timings; the prompt and output are removed from the job record once the answer is delivered (a sweep catches anything left behind within two minutes) and are never written to the order at all (`contentRetained: false`). `STANDARD` with a designated node keeps the single path and no-shadow rules but retains content like any other request.
+* **The receipt proves the path.** `receipt.privacy = { level, pinnedNode, promptRetained }`, signed by the coordinator with the rest of the receipt. `/api/receipts/:id/verify` re-checks it.
+
+What it does not buy, said plainly: BRAIN's gateway still sees the plaintext in transit, the node's operator can read it, and nothing is executed inside a TEE yet. `PRIVATE` needs a plan with private routing; `STANDARD` + `node` works on every plan.
 
 ## What comes back
 

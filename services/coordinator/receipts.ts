@@ -143,6 +143,8 @@ export async function issueNodeReceipt(j: InferenceJob, now = Date.now()): Promi
     route: { target: "NATIVE_NETWORK", providerId: "brain-native-pool", ...(j.decisionId ? { decisionId: j.decisionId } : {}) },
     ...(j.orderId ? { orderId: j.orderId } : {}),
     tokens: { prompt: usage.prompt, completion: usage.completion, basis: "node-reported" },
+    // The terms this ran under. promptRetained is false only for PRIVATE: the coordinator scrubs content after delivery.
+    privacy: { level: j.privacy ?? "PUBLIC", pinnedNode: j.customerPinned && j.pinnedNode ? j.pinnedNode : null, promptRetained: !j.ephemeral },
     // Delivered and checked for consistency, not re-executed: see verificationMethod.
     status: "COMPLETED",
   };

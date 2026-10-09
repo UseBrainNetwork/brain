@@ -56,6 +56,11 @@ export interface Constraints {
    * none (seeded synthetic matrices), so the privacy constraint does not apply to them.
    */
   carriesPlaintext?: boolean;
+  /**
+   * Customer-designated Brain Node. Only NATIVE_NETWORK is eligible and the privacy gate does not
+   * apply to it: the customer chose who reads the prompt. Nothing else may take the request.
+   */
+  designatedNode?: string;
 }
 
 export function scoreEstimates(estimates: ExecutionEstimate[], mode: RoutingMode, c: Constraints = {}, weights: RoutingWeights = modeWeights[mode]): { ranked: ScoredEstimate[]; selected: ScoredEstimate | null; reason: string } {
@@ -65,7 +70,9 @@ export function scoreEstimates(estimates: ExecutionEstimate[], mode: RoutingMode
     if (!e.supported) why.push("not supported");
     if (!e.available) why.push("unavailable");
     if (mode === "BROWSER_ONLY" && e.target !== "BROWSER_NETWORK") why.push("excluded by BROWSER_ONLY");
-    if (c.carriesPlaintext !== false && !privacyAllows[privacy].includes(targetTrust[e.target])) why.push(`excluded by privacy ${privacy} (${targetTrust[e.target]})`);
+    if (c.designatedNode && e.target !== "NATIVE_NETWORK") why.push(`excluded: request designated node ${c.designatedNode}`);
+    const designated = Boolean(c.designatedNode) && e.target === "NATIVE_NETWORK";
+    if (!designated && c.carriesPlaintext !== false && !privacyAllows[privacy].includes(targetTrust[e.target])) why.push(`excluded by privacy ${privacy} (${targetTrust[e.target]})`);
     if (c.maxCost != null && e.estimatedCost != null && e.estimatedCost > c.maxCost) why.push(`over maxCost (${e.estimatedCost.toFixed(4)} > ${c.maxCost})`);
     if (c.maxLatency != null && e.estimatedLatency != null && e.estimatedLatency > c.maxLatency) why.push(`over maxLatency (${Math.round(e.estimatedLatency)}ms > ${c.maxLatency}ms)`);
     return {

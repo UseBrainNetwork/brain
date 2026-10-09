@@ -48,6 +48,13 @@ export interface BrainRunSummary {
    * layers (services/inference.ts). Present only on network runs.
    */
   network?: NetworkRunSummary | null;
+  /**
+   * Privacy terms as recorded on the receipt: the node the customer designated (null = router's
+   * choice) and whether the coordinator kept the prompt. Absent for upstream and browser runs.
+   */
+  privacyTerms?: ComputeReceipt["privacy"];
+  /** false when the order was stored without prompt or output (PRIVATE). */
+  contentRetained?: boolean;
   /** Retry / fallback policy the order ran under, and every attempt made in order. */
   policy?: ComputeOrder["policy"];
   attempts?: ComputeOrder["attempts"];
@@ -94,6 +101,8 @@ export async function summarize(order: ComputeOrder, t0: number, mode: RoutingMo
       verified: receipt ? receipt.verificationMethod !== "unverified-provider-response" && receipt.verificationMethod !== "node-reported" : false,
       usage: receipt?.tokens ? { inputUnits: receipt.tokens.prompt, outputUnits: receipt.tokens.completion } : undefined,
       node: receipt?.route?.target === "NATIVE_NETWORK" ? await nodeBlock(receipt) : undefined,
+      privacyTerms: receipt?.privacy,
+      contentRetained: order.privacy !== "PRIVATE",
       policy: order.policy,
       attempts: order.attempts,
       status: order.status,

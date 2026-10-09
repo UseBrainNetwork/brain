@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExecutionEstimate, ExecutionRequest, ExecutionResult, ExecutionTarget, ProviderHealth } from "@/domain/economy";
 import { MemoryStore } from "@/services/store";
-import { executePlan, getPlan, placeOrder, placeStreamingOrder } from "./orders";
+import { executePlan, getOrder, getPlan, placeOrder, placeStreamingOrder } from "./orders";
 import { isCooling, resetProviderHealth } from "./policy";
 import { compoundPlan, makeStep } from "./plan";
 import type { IntelligenceProvider } from "./providers";
@@ -188,6 +188,26 @@ describe("orders", () => {
     const o = await placeOrder({ request: chat, privacy: "PRIVATE" }, "cust", [ext]);
     expect(o.status).toBe("REJECTED");
     expect(o.error).toMatch(/privacy PRIVATE/);
+  });
+
+  it("PRIVATE orders are stored without prompt or output; the caller still gets the answer", async () => {
+    const a = fake("a", "CLOUD_GPU", { estimatedCost: 0.01 }, async () => ok("a", "CLOUD_GPU", "the secret answer"));
+    const o = await placeOrder({ request: chat, privacy: "PRIVATE" }, "cust", [a]);
+    expect(o.status).toBe("COMPLETED");
+    expect(o.output).toBe("the secret answer");
+    const stored = await getOrder(o.orderId);
+    expect(stored?.contentRetained).toBe(false);
+    expect(stored?.output).toBeUndefined();
+    expect(stored?.request.kind === "chat" && stored.request.messages).toEqual([]);
+    expect(stored?.request.kind === "chat" && stored.request.messageCount).toBe(1);
+    expect(JSON.stringify(stored)).not.toContain("secret answer");
+    expect(JSON.stringify(stored)).not.toContain('"hi"');
+    const plan = await getPlan(o.planId!);
+    expect(JSON.stringify(plan)).not.toContain("secret answer");
+    expect(plan?.steps[0].result?.ok).toBe(true);
+    // STANDARD orders keep their content as before.
+    const s = await placeOrder({ request: chat }, "cust", [a]);
+    expect((await getOrder(s.orderId))?.output).toBe("the secret answer");
   });
 
   it("plan total cost is UNKNOWN when any step cost is unknown", async () => {

@@ -82,6 +82,15 @@ export function ReceiptView({ receipt: r, job, decision }: { receipt: ComputeRec
               Integrity digest over the ordered, server-verified outputs. Anyone holding the same outputs can recompute it. It is <span className="text-chalk/80">not</span> a cryptographic proof of execution.
             </p>
           </Panel>
+          {r.privacy && (
+            <Panel title="Privacy terms" right={r.privacy.level}>
+              <div className="font-mono text-[12.5px] text-chalk">{r.privacy.pinnedNode ? `designated node ${r.privacy.pinnedNode}` : "node chosen by the router"}</div>
+              <p className="mt-2 text-[12px] leading-relaxed text-chalk/50">
+                {r.privacy.pinnedNode ? "The customer named this node. It was the only eligible target: no fallback, no shadow re-run on another machine. " : ""}
+                {r.privacy.promptRetained ? "Prompt and output are retained in the coordinator's job record." : "Prompt and output were removed from the coordinator's records after delivery; request and response hashes remain."}
+              </p>
+            </Panel>
+          )}
           <Panel title="Attestation" right={r.attestation.kind}>
             {r.attestation.kind === "signature" ? (
               <>

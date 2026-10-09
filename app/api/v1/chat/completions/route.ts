@@ -18,6 +18,17 @@ import { bearer, json, tooMany } from "@/services/security";
 export const dynamic = "force-dynamic";
 
 const PRIVACY = new Set<PrivacyRequirement>(["PUBLIC", "STANDARD", "PRIVATE"]);
+const NODE_ID = /^N-[A-F0-9]{8}$/;
+
+/** `node` from the body or its `brain` object: undefined when absent, false when malformed. */
+function designatedNode(raw: Record<string, unknown>): string | undefined | false {
+  const b = raw.brain && typeof raw.brain === "object" ? (raw.brain as Record<string, unknown>) : {};
+  const v = raw.node ?? b.node;
+  if (v == null || v === "") return undefined;
+  if (typeof v !== "string") return false;
+  const id = v.trim().toUpperCase();
+  return NODE_ID.test(id) ? id : false;
+}
 
 /**
  * OpenAI-compatible: POST /v1/chat/completions (rewritten from /v1/*).
@@ -26,6 +37,8 @@ const PRIVACY = new Set<PrivacyRequirement>(["PUBLIC", "STANDARD", "PRIVATE"]);
  *   mode: "auto" | "cheap" | "fast" | "quality" | "browser_only"   (BRAIN AUTO routing; `priority` accepted as an alias)
  *   privacy: "public" | "standard" | "private"
  *   retries: 0..2, fallback: true|false, timeout_ms: n   (gateway policy; also accepted inside a `brain` object)
+ *   node: "N-XXXXXXXX"   private tier: the request goes to that Brain Node or nowhere. STANDARD/PRIVATE allowed;
+ *                        PRIVATE additionally stores no prompt or output anywhere (hashes only).
  *   Response carries a `brain` object (route, model, cost, latency, verification, receipt id) and an `x-brain-receipt` header.
  *   Streaming responses emit the same object as a final `event: brain` SSE message after the last token.
  *
@@ -48,9 +61,13 @@ export const POST = nodeRoute(async (req) => {
   // prompt. Naming one is choosing that; the default privacy for such a request is PUBLIC and the
   // response says so. Asking for STANDARD/PRIVATE with a node model is a contradiction, not a fallback.
   const nodeModel = isAllowedModel(chat.model);
-  const privacyRaw = String(raw.privacy ?? (nodeModel ? "public" : "standard")).toUpperCase() as PrivacyRequirement;
+  const designated = designatedNode(raw);
+  if (designated === false) return json({ error: { code: "invalid_request", message: 'node must be a Brain Node id like "N-1A2B3C4D".' } }, 400);
+  const privacyRaw = String(raw.privacy ?? (nodeModel && !designated ? "public" : "standard")).toUpperCase() as PrivacyRequirement;
   const privacy = PRIVACY.has(privacyRaw) ? privacyRaw : "STANDARD";
-  if (nodeModel && privacy !== "PUBLIC") return json({ error: { code: "privacy_conflict", message: `${chat.model} runs on community Brain Nodes whose operators can read prompts. Send privacy: "public" (the default for this model), or use brain/auto with your privacy level.` } }, 400);
+  // Naming a node is naming who may read the prompt, so the node-model privacy rule does not apply to designated requests.
+  if (nodeModel && !designated && privacy !== "PUBLIC") return json({ error: { code: "privacy_conflict", message: `${chat.model} runs on community Brain Nodes whose operators can read prompts. Send privacy: "public" (the default for this model), use brain/auto with your privacy level, or designate a node you trust with node: "N-…".` } }, 400);
+  if (designated && chat.tools?.length) return json({ error: { code: "invalid_request", message: "Tool calling is not offered on Brain Nodes yet; drop tools or the node designation." } }, 400);
   if (account) {
     const plan = planById(account.plan);
     if (!plan.modes.includes(mode)) return json({ error: { code: "mode_not_in_plan", message: `${mode} routing is not included in the ${plan.name} plan.` } }, 403);
@@ -64,7 +81,7 @@ export const POST = nodeRoute(async (req) => {
   const t0 = Date.now();
   const chatId = `chatcmpl-${randomBytes(10).toString("hex")}`;
   const policy = parsePolicy(raw);
-  const request = { kind: "chat" as const, model: chat.model, messages: chat.messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy, tools: chat.tools, tool_choice: chat.tool_choice, response_format: chat.response_format, stop: chat.stop };
+  const request = { kind: "chat" as const, model: chat.model, messages: chat.messages, maxTokens: chat.max_tokens, temperature: chat.temperature, privacy, tools: chat.tools, tool_choice: chat.tool_choice, response_format: chat.response_format, stop: chat.stop, ...(designated ? { node: designated } : {}) };
 
   const record = async (order: ComputeOrder, s: Awaited<ReturnType<typeof finalize>>) => {
     if (account && s.receipt) await consumeForReceipt(account, s.receipt, { orderId: order.orderId, inputUnits: s.brain.usage?.inputUnits, outputUnits: s.brain.usage?.outputUnits });

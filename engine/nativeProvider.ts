@@ -4,7 +4,7 @@ import type { ExecutionEstimate, ExecutionRequest, ExecutionResult, ProviderHeal
 import { priceForTokens, tokenListPricePer1MUsd } from "@/lib/pricing";
 import { MODEL_ALLOWLIST, isAllowedModel } from "@/node/models";
 import type { ChatTurn } from "@/node/protocol";
-import { createInferenceJob, failUnmatched, matchJob, observeJob, type InferenceJob } from "@/services/coordinator/jobs";
+import { createInferenceJob, failUnmatched, matchJob, observeJob, scrubInferenceJob, type InferenceJob } from "@/services/coordinator/jobs";
 import { routableNativeNodes } from "@/services/coordinator/registry";
 import { getReceipt } from "@/services/receipts";
 import { routeToNativeNode } from "@/services/router/select";
@@ -32,9 +32,9 @@ export class NativeNetworkExecutionProvider implements IntelligenceProvider {
    * Which allowlisted model a request maps to. A native id is used as is. `brain/*` aliases pick
    * the first allowlisted model some routable node serves, preferring real models over the mock.
    */
-  async resolveModel(requested: string): Promise<string | null> {
+  async resolveModel(requested: string, onlyNode?: string): Promise<string | null> {
     if (isAllowedModel(requested)) return requested;
-    const nodes = await routableNativeNodes();
+    const nodes = (await routableNativeNodes()).filter((n) => !onlyNode || n.nodeId === onlyNode);
     const served = new Set(nodes.flatMap((n) => n.reported.capabilities.supportedModels));
     const real = MODEL_ALLOWLIST.find((m) => !m.mock && served.has(m.id));
     if (real) return real.id;
@@ -60,7 +60,7 @@ export class NativeNetworkExecutionProvider implements IntelligenceProvider {
       return empty(null, isAllowedModel(req.model), false);
     }
     if (model === "brain/mock") notes.push("mock model: development nodes only, output is not a language model");
-    const r = await routeToNativeNode(model);
+    const r = await routeToNativeNode(model, req.node ? { only: req.node, allowUnmeasured: true } : {});
     if (!r.selected) {
       notes.push(r.reason);
       return empty(model, true, false);
@@ -95,13 +95,26 @@ export class NativeNetworkExecutionProvider implements IntelligenceProvider {
   }
 
   private async start(req: Extract<ExecutionRequest, { kind: "chat" }>, ctx: ExecutionContext): Promise<InferenceJob> {
-    const model = await this.resolveModel(req.model);
-    if (!model) throw new Error("native network: no node serves an allowlisted model");
+    const model = await this.resolveModel(req.model, req.node);
+    if (!model) throw new Error(req.node ? `native network: designated node ${req.node} serves no allowlisted model` : "native network: no node serves an allowlisted model");
     const messages: ChatTurn[] = req.messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" }));
     // Consumer cards decode at tens of tokens a second; a request written for an upstream model's
     // 4096-token budget is bounded here so it finishes inside the job deadline.
     const maxTokens = Math.min(req.maxTokens ?? 512, NATIVE_MAX_TOKENS);
-    const job = await createInferenceJob({ requesterId: ctx.customerId, model, messages, maxTokens, temperature: req.temperature ?? 0.7, ...(req.stop?.length ? { stop: req.stop } : {}), orderId: ctx.orderId, decisionId: ctx.decisionId });
+    const job = await createInferenceJob({
+      requesterId: ctx.customerId,
+      model,
+      messages,
+      maxTokens,
+      temperature: req.temperature ?? 0.7,
+      ...(req.stop?.length ? { stop: req.stop } : {}),
+      orderId: ctx.orderId,
+      decisionId: ctx.decisionId,
+      ...(req.node ? { pinnedNode: req.node, customerPinned: true } : {}),
+      ...(req.privacy ? { privacy: req.privacy } : {}),
+      // PRIVATE: the coordinator keeps hashes, not content, once the answer has been delivered.
+      ...(req.privacy === "PRIVATE" ? { ephemeral: true } : {}),
+    });
     const matched = await matchJob(job.jobId);
     if (matched.state !== "ASSIGNED") {
       const reason = matched.routing?.reason ?? "no capable node";
@@ -142,7 +155,9 @@ export class NativeNetworkExecutionProvider implements IntelligenceProvider {
     const job = await this.start(req, ctx);
     let last = job;
     for await (const { job: j } of observeJob(job.jobId)) last = j;
-    return this.result(last, t0);
+    const r = await this.result(last, t0);
+    if (job.ephemeral) void scrubInferenceJob(job.jobId).catch(() => undefined);
+    return r;
   }
 
   /** OpenAI-shaped SSE built from job progress. The receipt is issued by the coordinator on completion. */
@@ -177,6 +192,7 @@ export class NativeNetworkExecutionProvider implements IntelligenceProvider {
           ctl.error(e);
         } finally {
           resolveDone(await self.result(last, t0));
+          if (job.ephemeral) void scrubInferenceJob(job.jobId).catch(() => undefined);
         }
       },
     });

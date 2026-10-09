@@ -102,6 +102,8 @@ export async function maybeShadow(primaryJobId: string, now = Date.now(), force 
   try {
     const p = await getInferenceJob(primaryJobId);
     if (!p || p.state !== "COMPLETED" || isProbeJob(p) || p.verifyOf || p.verification) return null;
+    // A customer-designated node is the only party allowed to see this prompt; it is never re-run elsewhere.
+    if (p.customerPinned || p.ephemeral) return null;
     if (p.request.temperature !== 0) return null;
     if (!p.assignedNode) return null;
     const primaryNode = await getNativeNode(p.assignedNode);

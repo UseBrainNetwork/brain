@@ -95,6 +95,12 @@ export interface ComputeReceipt {
   /** Chat receipts: token usage as the upstream reported it, or estimated from characters. */
   tokens?: { prompt: number; completion: number; basis: "provider-reported" | "estimated-from-chars" | "node-reported" };
   /**
+   * Native-node receipts: the privacy terms the request ran under. `pinnedNode` is the node the
+   * customer designated (null = router's choice). `promptRetained: false` means the coordinator
+   * scrubbed prompt and output from its records once the answer was delivered; only hashes remain.
+   */
+  privacy?: { level: PrivacyRequirement; pinnedNode: string | null; promptRetained: boolean };
+  /**
    * Set on receipts for compute attached to a chat/inference request. The nodes on this receipt ran a
    * verification workload sized by that request; they did not produce the request's answer.
    */
@@ -179,7 +185,23 @@ export interface RequestConstraints {
 
 export type ExecutionRequest =
   | { kind: "compute"; workload: "matmul_u32"; size: "small" | "medium" | "large"; unitsPerNode?: number; redundancy?: 1 | 2; privacy?: PrivacyRequirement }
-  | ({ kind: "chat"; model: string; messages: ChatMessage[]; maxTokens?: number; temperature?: number; privacy?: PrivacyRequirement } & ChatOptions);
+  | ({
+      kind: "chat";
+      model: string;
+      messages: ChatMessage[];
+      maxTokens?: number;
+      temperature?: number;
+      privacy?: PrivacyRequirement;
+      /**
+       * Customer-designated Brain Node (N-XXXXXXXX). The request goes to that node or nowhere: no
+       * fallback to other nodes or to upstream providers. Choosing the node is choosing who may read
+       * the prompt, so STANDARD and PRIVATE are allowed here where node models otherwise require PUBLIC.
+       */
+      node?: string;
+      /** Set on stored copies of PRIVATE requests: messages is [] and messageCount says how many there were. */
+      contentRedacted?: boolean;
+      messageCount?: number;
+    } & ChatOptions);
 
 /** What BRAIN AUTO decided the request needs, before looking at any provider. */
 export interface RequestClassification {
@@ -368,6 +390,8 @@ export interface ComputeOrder {
   error?: string;
   /** Every execution attempt across the plan, in order. Retries and fallbacks are visible here. */
   attempts?: ExecutionAttempt[];
+  /** false on stored PRIVATE orders: prompt and output were not written to the database. */
+  contentRetained?: boolean;
   /** Chat only: the returned text. */
   output?: string;
   /** Chat only: tool calls the model made instead of (or alongside) text. */

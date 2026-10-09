@@ -39,13 +39,40 @@ export interface PlaceOrderInput {
 
 const id = (p: string) => `${p}-${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
 
-async function save(order: ComputeOrder) {
-  await getStore().putDoc("order", order.orderId, order, { at: order.createdAt, key: order.customerId });
-  eventBus.publish({ type: "order.updated", at: Date.now(), order });
+/**
+ * PRIVATE orders are stored without their content: the prompt is replaced by its message count,
+ * the output and tool calls are dropped. Routing facts, receipt and attempts stay. The in-memory
+ * order the caller holds is untouched, so the answer still reaches the customer.
+ */
+function storable(order: ComputeOrder): ComputeOrder {
+  if (order.privacy !== "PRIVATE") return order;
+  const { output: _o, toolCalls: _t, ...rest } = order;
+  void _o;
+  void _t;
+  const request: ExecutionRequest = order.request.kind === "chat" ? { ...order.request, messages: [], tools: undefined, contentRedacted: true, messageCount: order.request.messages.length } as ExecutionRequest : order.request;
+  return { ...rest, request, contentRetained: false };
 }
 
-async function savePlan(p: ExecutionPlan) {
-  await getStore().putDoc("plan", p.planId, p, { at: p.createdAt, key: p.orderId });
+function storablePlan(p: ExecutionPlan, order: ComputeOrder): ExecutionPlan {
+  if (order.privacy !== "PRIVATE") return p;
+  return {
+    ...p,
+    steps: p.steps.map((s) => ({
+      ...s,
+      request: s.request.kind === "chat" ? ({ ...s.request, messages: [], tools: undefined, contentRedacted: true, messageCount: s.request.messages.length } as ExecutionRequest) : s.request,
+      result: s.result ? { ...s.result, content: undefined, toolCalls: undefined, receipt: undefined } : s.result,
+    })),
+  };
+}
+
+async function save(order: ComputeOrder) {
+  const doc = storable(order);
+  await getStore().putDoc("order", order.orderId, doc, { at: order.createdAt, key: order.customerId });
+  eventBus.publish({ type: "order.updated", at: Date.now(), order: doc });
+}
+
+async function savePlan(p: ExecutionPlan, order?: ComputeOrder) {
+  await getStore().putDoc("plan", p.planId, order ? storablePlan(p, order) : p, { at: p.createdAt, key: p.orderId });
 }
 
 export interface DecideConstraints {
@@ -58,7 +85,8 @@ export interface DecideConstraints {
 export async function decide(request: ExecutionRequest, mode: RoutingMode, c: DecideConstraints, ps: IntelligenceProvider[] = executionProviders(), cls: RequestClassification = classify(request)): Promise<RouteDecision> {
   const estimates = await Promise.all(ps.map((p) => p.estimate(request)));
   const privacy = c.privacy ?? cls.privacy;
-  const { ranked, selected, reason } = scoreEstimates(estimates, mode, { maxCost: c.maxCost, maxLatency: c.maxLatency, privacy, carriesPlaintext: carriesPlaintext(request) });
+  const designatedNode = request.kind === "chat" ? request.node : undefined;
+  const { ranked, selected, reason } = scoreEstimates(estimates, mode, { maxCost: c.maxCost, maxLatency: c.maxLatency, privacy, carriesPlaintext: carriesPlaintext(request), designatedNode });
   const decision: RouteDecision = {
     decisionId: id("d"),
     at: Date.now(),
@@ -249,7 +277,7 @@ export async function placeOrder(input: PlaceOrderInput, customerId: string, ps:
   const p = makePlan({ orderId: order.orderId, request: order.request, mode: order.mode, maxCost: order.maxCost, maxLatency: order.maxLatency, privacy: order.privacy, newId: id });
   order.planId = p.planId;
   order.status = "EXECUTING";
-  const pending = [background("order.create", save(order)), background("plan.create", savePlan(p))];
+  const pending = [background("order.create", save(order)), background("plan.create", savePlan(p, order))];
   try {
     const { final, executions } = await executePlan(p, { customerId, policy: order.policy }, ps);
     finish(order, p, final, executions.get(final.stepId));
@@ -260,7 +288,7 @@ export async function placeOrder(input: PlaceOrderInput, customerId: string, ps:
     order.completedAt = Date.now();
   }
   await Promise.allSettled(pending);
-  await Promise.all([savePlan(p), save(order)]);
+  await Promise.all([savePlan(p, order), save(order)]);
   return order;
 }
 
@@ -277,7 +305,7 @@ export async function placeStreamingOrder(input: PlaceOrderInput & { request: Ex
   order.status = "EXECUTING";
   // Initial bookkeeping runs concurrently with routing and the upstream call. Terminal state is
   // written after, in order, so a reader never sees a stale status outlive the run.
-  const pending: Promise<unknown>[] = [background("order.create", save(order)), background("plan.create", savePlan(p))];
+  const pending: Promise<unknown>[] = [background("order.create", save(order)), background("plan.create", savePlan(p, order))];
 
   let resolveStream!: (s: { stream: ReadableStream<Uint8Array> | null; decision: RouteDecision; provider: IntelligenceProvider }) => void;
   const firstByte = new Promise<{ stream: ReadableStream<Uint8Array> | null; decision: RouteDecision; provider: IntelligenceProvider }>((r) => (resolveStream = r));
@@ -305,7 +333,7 @@ export async function placeStreamingOrder(input: PlaceOrderInput & { request: Ex
       if (!handed) resolveStream({ stream: null, decision: ex!.decision, provider: ps.find((x) => x.id === ex?.result?.provider) ?? ps[0] });
       resolveDone({ order, receipt: ex?.result?.receipt ?? null });
       await Promise.allSettled(pending);
-      await Promise.all([savePlan(p), save(order)]);
+      await Promise.all([savePlan(p, order), save(order)]);
       return order;
     } catch (e) {
       // Never leave an order parked in ROUTING/EXECUTING because a store write or planner call threw.

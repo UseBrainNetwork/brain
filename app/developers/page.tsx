@@ -149,6 +149,17 @@ curl https://brainnetwork.app/v1/chat/completions \
 
 # → brain-node-id: N-3A4F…   brain-region: eu-north   brain-latency: 1184`;
 
+const PRIVATE_CURL = `# Your own Brain Node, your prompt never stored.
+curl https://brainnetwork.app/v1/chat/completions \\
+  -H "Authorization: Bearer $BRAIN_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model": "qwen/qwen2.5-32b-instruct", "node": "N-1A2B3C4D", "privacy": "private",
+       "messages": [{"role": "user", "content": "Summarise the attached contract."}]}'
+
+# → brain.privacyTerms: { "level": "PRIVATE", "pinnedNode": "N-1A2B3C4D", "promptRetained": false }
+#   brain.contentRetained: false   brain-node-id: N-1A2B3C4D   x-brain-receipt: r-ij-…
+# Node offline or not serving the model → 503 no_provider_available. Nothing else takes it.`;
+
 const AUDIT_CURL = `# Your requests for September, one row each, signatures re-checked, as CSV.
 curl "https://brainnetwork.app/v1/receipts?from=2026-09-01&to=2026-10-01&format=csv&verify=1" \\
   -H "Authorization: Bearer $BRAIN_API_KEY" -o brain-2026-09.csv
@@ -341,6 +352,18 @@ export default function DevelopersPage() {
               </div>
             </div>
             <CodeBlock lang="bash" title="node model · response headers" code={NODE_CURL} />
+          </div>
+          <div className="mt-16 grid gap-10 lg:grid-cols-[360px_1fr]">
+            <div>
+              <h3 className="display-md text-[26px] md:text-[34px]">Private tier: your node, our network</h3>
+              <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
+                Run a Brain Node on hardware you control and send requests with <span className="font-mono text-chalk">node: &quot;N-…&quot;</span>. The request goes to that node or nowhere: no fallback to other nodes or to upstream providers, and never a shadow re-run elsewhere. With <span className="font-mono text-chalk">privacy: &quot;private&quot;</span> the coordinator keeps request and response hashes, token counts and timings, and removes the prompt and output from its records once the answer is delivered; the order is stored without them from the start.
+              </p>
+              <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
+                The signed receipt carries <span className="font-mono text-chalk">privacy.pinnedNode</span> and <span className="font-mono text-chalk">privacy.promptRetained</span>, so the path is provable after the fact. What it does not do, said plainly: the gateway still sees plaintext in transit, the node&apos;s operator can read it, and nothing runs inside a TEE yet.
+              </p>
+            </div>
+            <CodeBlock lang="bash" title="private · designated node" code={PRIVATE_CURL} />
           </div>
           <div className="mt-16 grid gap-10 lg:grid-cols-[360px_1fr]">
             <div>

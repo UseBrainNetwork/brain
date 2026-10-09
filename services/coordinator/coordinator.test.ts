@@ -8,7 +8,7 @@ import { MemoryStore } from "@/services/store";
 import { authenticateSigned, checkReplay, nodeIdFor, verifyNodeSignature, type SignedRequest } from "./auth";
 import { classify, scheduleBenchmark } from "./benchmark";
 import { CANARIES, CANARY_TTL_MS, MATCH_THRESHOLD, maybeShadow, scheduleCanary, similarity } from "./verify";
-import { TRANSITIONS, createInferenceJob, getInferenceJob, matchJob, observeJob, publicInferenceJob, reportCompleted, reportFailed, reportProgress, reportStarted, sweepInferenceJobs, transition, type InferenceJob } from "./jobs";
+import { TRANSITIONS, createInferenceJob, getInferenceJob, matchJob, observeJob, publicInferenceJob, reportCompleted, reportFailed, reportProgress, reportStarted, scrubInferenceJob, sweepInferenceJobs, transition, type InferenceJob } from "./jobs";
 import { canonicalJson, receiptHash, verifyReceipt } from "./receipts";
 import { nativeComputeUnits } from "./work";
 import { getNativeNode, heartbeatNativeNode, listNativeNodes, registerNativeNode, reliabilityScore, sweepNativeNodes, updateNativeNode } from "./registry";
@@ -424,6 +424,43 @@ describe("verification probes", () => {
     expect(sw).toMatchObject({ source: "native-verify", assignedTo: other, status: "completed", verified: true });
     expect(sw.computeUnits).toBeGreaterThan(0);
     expect((await g.__brainStore!.getWork(job.jobId))!.verified).toBe(true);
+  });
+
+  it("customer-designated and ephemeral jobs are never shadowed, and ephemeral jobs scrub to hashes", async () => {
+    const a = await registerMock(false);
+    await registerMock(false);
+    const t = Date.now();
+    const job = await createInferenceJob({ requesterId: "cust", model: "qwen/qwen2.5-7b-instruct", messages: [{ role: "user", content: "my private prompt" }], maxTokens: 64, temperature: 0, pinnedNode: a.n.nodeId, customerPinned: true, privacy: "PRIVATE", ephemeral: true }, t);
+    const m = await matchJob(job.jobId, t);
+    expect(m.assignedNode).toBe(a.n.nodeId);
+    await runJob(a.n.nodeId, m, "Private answer.", t);
+    expect(await maybeShadow(job.jobId, t + 400, true)).toBeNull();
+    const done = (await getInferenceJob(job.jobId))!;
+    expect(done.state).toBe("COMPLETED");
+    const receipt = (await g.__brainStore!.getDoc<ComputeReceipt>("receipt", done.receiptId!))!;
+    expect(receipt.privacy).toEqual({ level: "PRIVATE", pinnedNode: a.n.nodeId, promptRetained: false });
+    expect(await scrubInferenceJob(job.jobId, t + 500)).toBe(true);
+    const scrubbed = (await getInferenceJob(job.jobId))!;
+    expect(scrubbed.request.messages).toEqual([]);
+    expect(scrubbed.output).toBe("");
+    expect(scrubbed.scrubbedAt).toBe(t + 500);
+    expect(scrubbed.responseHash).toBe(done.responseHash);
+    expect(scrubbed.requestHash).toBe(done.requestHash);
+    expect(JSON.stringify(scrubbed)).not.toContain("private prompt");
+    expect(await scrubInferenceJob(job.jobId, t + 600)).toBe(false);
+  });
+
+  it("the sweep scrubs ephemeral jobs the requester left behind", async () => {
+    const a = await registerMock(false);
+    const t = Date.now();
+    const job = await createInferenceJob({ requesterId: "cust", model: "qwen/qwen2.5-7b-instruct", messages: [{ role: "user", content: "left behind" }], maxTokens: 64, temperature: 0, pinnedNode: a.n.nodeId, customerPinned: true, ephemeral: true }, t);
+    await runJob(a.n.nodeId, await matchJob(job.jobId, t), "answer", t);
+    g.__brainNJobSweep = 0;
+    await sweepInferenceJobs(t + 60_000);
+    expect((await getInferenceJob(job.jobId))!.scrubbedAt).toBeUndefined();
+    g.__brainNJobSweep = 0;
+    await sweepInferenceJobs(t + 200_000);
+    expect((await getInferenceJob(job.jobId))!.scrubbedAt).toBe(t + 200_000);
   });
 
   it("records a mismatch against both nodes and lowers both reliability scores", async () => {
