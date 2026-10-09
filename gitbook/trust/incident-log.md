@@ -40,6 +40,14 @@ A long day. Three distinct problems, in sequence.
 
 **Fix.** Self-generated job pacing raised from 3 s to 15 s per node (reward shares between nodes are unchanged; everyone is paced the same). Hourly cron removes browser job rows older than 24 hours in small batches, keeping native work records; 1.74 million rows were removed by hand first. Heartbeats went from every 10 s to every 20 s. An external check now probes the site every five minutes and pages on failure. This page is now also rendered on [/status](https://brainnetwork.app/status). Still open on the operator's side: a larger database tier and credential rotation.
 
+## 2026-10-09 — Native nodes dropped offline
+
+**Impact.** From roughly 04:00 to 12:30 UTC the GPU nodes running the Brain Node agent could not stay registered. Register, heartbeat and work-poll calls timed out from the agent's side, nodes were marked offline, canary jobs failed on deadline, and operators who restarted saw no benchmark arrive. Browser nodes were unaffected. The explorer shows the window as failed `cj-` canaries with no node attached.
+
+**Cause.** The primary database role's pooler pool was poisoned again (the same *"reconnect with fresh credentials"* symptom as on the 7th and 8th). The lane failover from the 8th worked, but each cold serverless instance first waited out the primary lane's 8 s connect timeout plus one retry before cooling it down and moving to the healthy role. On an I/O-bound database that put the first query on every new instance at 8–16 s. The node agent gives a coordinator call 15 s, so from the agent's point of view the coordinator was gone. Browser nodes tolerate slow replies and kept instances warm, which is why they looked fine.
+
+**Fix.** The store takes a `BRAIN_PG_LANE_ORDER` setting and production now tries the healthy role first; `/api/status` reports the lane order and that nothing is cooling. Coordinator routes returned to under two seconds on cold instances. A node agent that is still running reconnects by itself: heartbeats from an offline node bring it back online and the agent retries register and heartbeat indefinitely. Agents that had been stopped need to be started again. Still open on the operator's side: the larger database tier, which is the actual fix for the I/O load, and credential rotation.
+
 ## How incidents are recorded
 
 This page is maintained by hand after each incident and is deliberately specific. The lesson from the first week is that the crowd is the robust part of BRAIN and the single database behind it is the fragile part, and the roadmap in [What changes as it grows](../scale/what-changes-as-it-grows.md) reflects that.
