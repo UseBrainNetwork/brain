@@ -116,6 +116,15 @@ export class PgStore implements NetworkStore {
       sessionUrl.port = "5432";
       this.lanes.push(lane("session", "session", sessionUrl.toString(), { max: 1, lockMax: 1, idleTimeoutMillis: 3_000 }));
     }
+    // BRAIN_PG_LANE_ORDER="alternate,primary" puts a known-good lane first. Every cold serverless
+    // instance otherwise pays the poisoned primary's connect timeout (and a retry) before it learns
+    // to cool it down, which is a 8–16 s first query on each new instance; node agents heartbeating
+    // on a 15 s budget read that as the coordinator being gone.
+    const order = (process.env.BRAIN_PG_LANE_ORDER ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+    if (order.length) {
+      const rank = (l: Lane) => (order.indexOf(l.name) === -1 ? order.length : order.indexOf(l.name));
+      this.lanes.sort((a, b) => rank(a) - rank(b));
+    }
     this.ready = this.migrate();
   }
 

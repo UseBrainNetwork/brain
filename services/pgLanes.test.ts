@@ -47,6 +47,22 @@ describe("PgStore lanes", () => {
     process.env.BRAIN_SKIP_MIGRATE = "true";
   });
 
+  it("BRAIN_PG_LANE_ORDER puts the named lanes first and leaves the rest in default order", async () => {
+    process.env.BRAIN_PG_LANE_ORDER = "alternate";
+    try {
+      const { PgStore } = await import("./pgStore");
+      const s = new PgStore(PRIMARY, ALT);
+      expect(s.laneStatus().map((l) => l.name)).toEqual(["alternate", "primary", "session"]);
+      scripts.set(ALT, marker);
+      scripts.set(PRIMARY, () => poisoned());
+      scripts.set(SESSION, marker);
+      await s.getNodes([]);
+      expect(s.laneStatus().every((l) => l.coolingDownSec === 0)).toBe(true); // primary never touched
+    } finally {
+      delete process.env.BRAIN_PG_LANE_ORDER;
+    }
+  });
+
   it("builds primary, alternate and session lanes from a Supabase pooler URL", async () => {
     const { PgStore } = await import("./pgStore");
     const s = new PgStore(PRIMARY, ALT);
