@@ -628,20 +628,46 @@ export class PgStore implements NetworkStore {
     // Small batches, each its own short statement: a single DELETE of a day of rows would hold
     // locks and WAL for minutes and trip the pool's statement timeout. Oldest first via the
     // submitted_at index; the ctid subquery keeps each batch to one index range scan.
-    const batch = Math.max(100, Math.min(opts.batch ?? 5_000, 20_000));
+    const batch = Math.max(100, Math.min(opts.batch ?? 2_000, 20_000));
     const deadline = Date.now() + (opts.deadlineMs ?? 60_000);
+    // On a disk-bound database one batch can take tens of seconds. Each runs in its own transaction
+    // so SET LOCAL statement_timeout reaches the backend through the transaction pooler (the pool's
+    // connection-level setting does not), and the client waits a little longer than the server so a
+    // cancelled statement is reported here rather than left running. One instance prunes at a time.
+    const BATCH_TIMEOUT_S = 90;
+    await this.ready;
+    const c = await this.breaker.run(() => this.viaLane((lane) => lane.pool.connect()));
+    let failed: Error | undefined;
     let deleted = 0;
-    for (;;) {
-      const r = await this.q(
-        `/* pruneJobs */ DELETE FROM brain_jobs WHERE ctid = ANY(ARRAY(
-           SELECT ctid FROM brain_jobs
-            WHERE submitted_at < $1 AND coalesce(data->>'source', '') NOT LIKE 'native%'
-            ORDER BY submitted_at LIMIT $2))`,
-        [olderThan, batch],
-      );
-      deleted += r.rowCount ?? 0;
-      if ((r.rowCount ?? 0) < batch) return { deleted, done: true };
-      if (Date.now() >= deadline) return { deleted, done: false };
+    try {
+      for (;;) {
+        await c.query("BEGIN");
+        const lock = await c.query<{ ok: boolean }>("SELECT pg_try_advisory_xact_lock(hashtext('brain:prune')) AS ok");
+        if (!lock.rows[0]?.ok) {
+          await c.query("ROLLBACK");
+          return { deleted, done: false };
+        }
+        await c.query(`SET LOCAL statement_timeout = '${BATCH_TIMEOUT_S}s'`);
+        const cfg: QueryConfig & { query_timeout: number } = {
+          text: `/* pruneJobs */ DELETE FROM brain_jobs WHERE ctid = ANY(ARRAY(
+                   SELECT ctid FROM brain_jobs
+                    WHERE submitted_at < $1 AND coalesce(data->>'source', '') NOT LIKE 'native%'
+                    ORDER BY submitted_at LIMIT $2))`,
+          values: [olderThan, batch],
+          query_timeout: BATCH_TIMEOUT_S * 1000 + 2_000,
+        };
+        const r = await c.query(cfg);
+        await c.query("COMMIT");
+        deleted += r.rowCount ?? 0;
+        if ((r.rowCount ?? 0) < batch) return { deleted, done: true };
+        if (Date.now() >= deadline) return { deleted, done: false };
+      }
+    } catch (e) {
+      failed = e instanceof Error ? e : new Error(String(e));
+      await c.query("ROLLBACK").catch(() => undefined);
+      throw e;
+    } finally {
+      c.release(failed);
     }
   }
   async getEpoch(id: string) {
