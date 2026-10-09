@@ -1,7 +1,7 @@
 import "server-only";
 import type { ComputeClass } from "@/node/models";
 import { filterAllowed } from "@/node/models";
-import { DEFAULTS, NODE_ID_RE, type HardwareReport, type NodeCapabilities, type NodeState, type RegisterBody, type Telemetry } from "@/node/protocol";
+import { DEFAULTS, GPU_SOURCES, isBackend, NODE_ID_RE, type HardwareReport, type NodeCapabilities, type NodeState, type RegisterBody, type Telemetry } from "@/node/protocol";
 import { eventBus } from "@/services/eventBus";
 import { NodeError } from "@/services/nodes";
 import { getStore } from "@/services/store";
@@ -162,7 +162,7 @@ export function listNativeNodes(maxAgeMs = 2_000): Promise<NativeNode[]> {
 const invalidate = () => (cache.__brainNNodes = undefined);
 
 const sanitizeCaps = (c: NodeCapabilities): NodeCapabilities => ({
-  backend: c.backend === "vllm" ? "vllm" : "mock",
+  backend: isBackend(c.backend) ? c.backend : "mock",
   supportedModels: filterAllowed(Array.isArray(c.supportedModels) ? c.supportedModels.map(String) : []).slice(0, 32),
   loadedModels: filterAllowed(Array.isArray(c.loadedModels) ? c.loadedModels.map(String) : []).slice(0, 32),
   maxConcurrency: Math.max(1, Math.min(16, Math.floor(Number(c.maxConcurrency) || 1))),
@@ -185,7 +185,7 @@ function sanitizeHardware(h: HardwareReport): HardwareReport {
     powerW: num(g?.powerW),
     driverVersion: str(g?.driverVersion, 32) || null,
     cudaVersion: str(g?.cudaVersion, 16) || null,
-    source: (["nvidia-smi", "nvml", "mock", "none"] as const).includes(g?.source) ? g.source : "none",
+    source: GPU_SOURCES.includes(g?.source) ? g.source : "none",
   }));
   return {
     os: { platform: str(h?.os?.platform, 24), release: str(h?.os?.release, 48), arch: str(h?.os?.arch, 16) },

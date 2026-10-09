@@ -34,7 +34,7 @@ Live at [brainnetwork.app](https://brainnetwork.app). Docs: [docs.brainnetwork.a
 
 ## Run a Node
 
-A Brain Node is an outbound-only agent. It generates an ed25519 identity, reports its hardware, heartbeats every 15 s, long-polls for work, and runs allowlisted open-weight models in an isolated vLLM container. It opens no ports.
+A Brain Node is an outbound-only agent. It generates an ed25519 identity, reports its hardware, heartbeats every 15 s, long-polls for work, and serves allowlisted open-weight models through an inference engine on the same machine: vLLM in an isolated container (NVIDIA, managed by the agent), or a llama.cpp, Ollama, mlx-lm or exo server you run (any GPU, any OS). It opens no ports.
 
 ```bash
 git clone https://github.com/UseBrainNetwork/brain && cd brain && npm install
@@ -43,6 +43,11 @@ git clone https://github.com/UseBrainNetwork/brain && cd brain && npm install
 # First start pulls the vLLM image (~10 GB) and the model weights; the agent prints progress.
 npm run node
 
+# AMD, Apple silicon, Windows, or any GPU llama.cpp supports: run the engine yourself, point the agent at it
+ollama pull qwen2.5:1.5b-instruct && BRAIN_NODE_MODE=ollama npm run node
+# or: llama-server -m model.gguf --alias qwen2.5-1.5b-instruct --port 8080 && BRAIN_NODE_MODE=llamacpp npm run node
+# or: mlx_lm.server --model mlx-community/Qwen2.5-7B-Instruct-4bit --port 8080 && BRAIN_NODE_MODE=mlx npm run node
+
 # Any machine, no GPU: a labelled mock node that only ever serves brain/mock
 BRAIN_NODE_MODE=mock npm run node
 ```
@@ -50,7 +55,8 @@ BRAIN_NODE_MODE=mock npm run node
 | Variable | Effect |
 | --- | --- |
 | `BRAIN_COORDINATOR_URL` | Coordinator to join (default `https://brainnetwork.app`) |
-| `BRAIN_NODE_MODE` | `vllm` or `mock` (auto: vllm when `nvidia-smi` is present) |
+| `BRAIN_NODE_MODE` | `vllm`, `llamacpp`, `ollama`, `mlx`, `exo` or `mock` (auto: vllm when `nvidia-smi` is present, else mock) |
+| `BRAIN_NODE_BACKEND_URL` | Local server base URL for the non-vLLM modes (defaults to the engine's usual loopback port) |
 | `BRAIN_NODE_MODELS` | Comma-separated subset of the allowlist to serve (default: everything the reported VRAM fits) |
 | `BRAIN_NODE_REGION` | Operator label shown to developers, e.g. `eu-north` |
 | `BRAIN_NODE_CONCURRENCY` | Parallel jobs (1–16) |

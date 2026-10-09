@@ -54,3 +54,21 @@ export const modelSpec = (id: string): ModelSpec | undefined => byId.get(id);
 export const isAllowedModel = (id: string) => byId.has(id);
 /** Ids a node may advertise, in list order, dropping anything not allowlisted. */
 export const filterAllowed = (ids: readonly string[]) => MODEL_ALLOWLIST.filter((m) => ids.includes(m.id)).map((m) => m.id);
+
+/**
+ * Local inference servers name models their own way: Ollama "qwen2.5:1.5b-instruct", llama.cpp
+ * whatever alias the GGUF was started under ("Qwen2.5-1.5B-Instruct-Q4_K_M"), mlx-lm
+ * "mlx-community/Qwen2.5-1.5B-Instruct-4bit". Stripped of separators and case they all contain the
+ * allowlisted id's own name, so a served name maps to at most one allowlisted model. An operator
+ * can still pin the mapping explicitly (BRAIN_NODE_MODEL_MAP); this is the fallback.
+ */
+const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+export function matchServedModel(servedName: string): ModelSpec | undefined {
+  const k = key(servedName);
+  if (!k) return undefined;
+  // Longest allowlisted name first so "qwen2.5-7b-instruct-awq" is not taken for "qwen2.5-7b-instruct".
+  const candidates = MODEL_ALLOWLIST.filter((m) => !m.mock)
+    .map((m) => ({ m, core: key(m.id.split("/").pop() ?? m.id) }))
+    .sort((a, b) => b.core.length - a.core.length);
+  return candidates.find((c) => c.core && k.includes(c.core))?.m;
+}

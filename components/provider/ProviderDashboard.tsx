@@ -79,7 +79,10 @@ BRAIN_NODE_MODE=mock npm run node
 
 # NVIDIA GPU + Docker: serves allowlisted open-weight models via vLLM
 # first start downloads the vLLM image (~10 GB) plus model weights
-npm run node`}</pre>
+npm run node
+
+# AMD, Apple silicon, Windows: run Ollama / llama.cpp / mlx-lm yourself, point the agent at it
+BRAIN_NODE_MODE=ollama npm run node`}</pre>
         </div>
       </Panel>
     );

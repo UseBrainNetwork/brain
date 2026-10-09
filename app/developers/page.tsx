@@ -301,7 +301,7 @@ export default function DevelopersPage() {
             <div>
               <h2 className="display-md text-[32px] md:text-[48px]">Brain Nodes</h2>
               <p className="mt-4 max-w-[460px] text-[14.5px] leading-relaxed text-chalk/55">
-                Machines running the Brain Node agent serve open-weight models through vLLM. Ask for one of these model ids and the router picks a node by capability, availability, measured speed, reliability and ask price; there is no silent substitution. If no node can serve it you get <span className="font-mono text-chalk">503</span> with the reason. Which nodes are online right now is on{" "}
+                Machines running the Brain Node agent serve open-weight models through vLLM, llama.cpp, Ollama, mlx-lm or exo. Ask for one of these model ids and the router picks a node by capability, availability, measured speed, reliability and ask price; there is no silent substitution. If no node can serve it you get <span className="font-mono text-chalk">503</span> with the reason. Which nodes are online right now is on{" "}
                 <Link href="/models" className="text-chalk underline decoration-chalk/25 underline-offset-4">
                   /models
                 </Link>
@@ -334,7 +334,7 @@ export default function DevelopersPage() {
             <div>
               <h3 className="display-md text-[26px] md:text-[34px]">Node agent protocol</h3>
               <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
-                <span className="font-mono text-chalk">npm run node</span> on a machine with an NVIDIA GPU and Docker; <span className="font-mono text-chalk">BRAIN_NODE_MODE=mock</span> anywhere to exercise the network without a GPU. Mock nodes are labelled and only ever serve <span className="font-mono text-chalk">brain/mock</span>.
+                <span className="font-mono text-chalk">npm run node</span> on a machine with an NVIDIA GPU and Docker (vLLM, managed by the agent); <span className="font-mono text-chalk">BRAIN_NODE_MODE=ollama</span>, <span className="font-mono text-chalk">llamacpp</span>, <span className="font-mono text-chalk">mlx</span> or <span className="font-mono text-chalk">exo</span> on AMD, Apple silicon or Windows with a server you run; <span className="font-mono text-chalk">BRAIN_NODE_MODE=mock</span> anywhere to exercise the network without a GPU. Mock nodes are labelled and only ever serve <span className="font-mono text-chalk">brain/mock</span>.
               </p>
             </div>
             <div className="font-mono text-[12.5px]">

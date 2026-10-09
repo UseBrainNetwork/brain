@@ -28,7 +28,13 @@ export const signingString = (method: string, pathname: string, ts: number, body
 
 /* ----------------------------------------------------------------- hardware */
 
-export type GpuSource = "nvidia-smi" | "nvml" | "mock" | "none";
+/**
+ * Where a GPU report came from. "rocm-smi" is AMD on Linux; "system_profiler" is Apple silicon,
+ * whose "VRAM" is the unified memory pool and is reported as such. Each is a tool's reading, not a
+ * coordinator measurement.
+ */
+export type GpuSource = "nvidia-smi" | "nvml" | "rocm-smi" | "system_profiler" | "mock" | "none";
+export const GPU_SOURCES: readonly GpuSource[] = ["nvidia-smi", "nvml", "rocm-smi", "system_profiler", "mock", "none"];
 
 export interface GpuReport {
   index: number;
@@ -56,7 +62,15 @@ export interface HardwareReport {
   mock: boolean;
 }
 
-export type Backend = "mock" | "vllm";
+/**
+ * Inference engines a node can drive. "vllm" is launched by the agent in Docker (NVIDIA). The
+ * others are OpenAI-compatible servers the operator runs on the same machine and the agent talks to
+ * over loopback: llama.cpp `llama-server` (any GPU, any OS), Ollama (NVIDIA, AMD, Apple), mlx-lm
+ * (Apple silicon), exo (a cluster of home devices presented as one endpoint).
+ */
+export type Backend = "mock" | "vllm" | "llamacpp" | "ollama" | "mlx" | "exo";
+export const BACKENDS: readonly Backend[] = ["mock", "vllm", "llamacpp", "ollama", "mlx", "exo"];
+export const isBackend = (s: unknown): s is Backend => typeof s === "string" && (BACKENDS as readonly string[]).includes(s);
 
 export interface NodeCapabilities {
   backend: Backend;

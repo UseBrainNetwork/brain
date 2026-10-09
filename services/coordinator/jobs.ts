@@ -1,7 +1,7 @@
 import "server-only";
 import type { Money } from "@/domain/economy";
 import { modelSpec } from "@/node/models";
-import { DEFAULTS, type Backend, type ChatTurn, type CompletedBody, type FailedBody, type JobPayload, type JobState, type ProgressBody, type StartedBody } from "@/node/protocol";
+import { DEFAULTS, isBackend, type Backend, type ChatTurn, type CompletedBody, type FailedBody, type JobPayload, type JobState, type ProgressBody, type StartedBody } from "@/node/protocol";
 import { eventBus } from "@/services/eventBus";
 import { NodeError } from "@/services/nodes";
 import { routeToNativeNode } from "@/services/router/select";
@@ -296,7 +296,7 @@ export async function reportStarted(nodeId: string, jobId: string, body: Started
   return locked(jobId, async () => {
     const j = await owned(jobId, nodeId);
     if (j.state !== "ASSIGNED") return j;
-    j.backend = body.backend === "vllm" ? "vllm" : "mock";
+    j.backend = isBackend(body.backend) ? body.backend : "mock";
     j.modelLoaded = body.loaded === true;
     j.startedAt = now;
     transition(j, "STARTING", now, body.loaded ? "model loaded on demand" : undefined);
