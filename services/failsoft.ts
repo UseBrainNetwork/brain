@@ -92,12 +92,22 @@ export function isConnectivityError(e: unknown): boolean {
  * password is 28P01 without the pooler's sentence and is not matched here.
  */
 export function isPoolerRejection(e: unknown): boolean {
+  return poolerRejectionKind(e) !== null;
+}
+
+/**
+ * Why the pooler refused: "saturated" (client cap, clears in seconds as connections close) or
+ * "poisoned" (the pooler's cached credentials for this role are wedged; stays broken for minutes to
+ * hours). Callers back off differently: a saturated lane is retried soon, a poisoned one is parked.
+ */
+export function poolerRejectionKind(e: unknown): "saturated" | "poisoned" | null {
   const err = e as { code?: string; message?: string } | null;
-  if (!err) return false;
+  if (!err) return null;
   const msg = String(err.message ?? "");
   // "max client connections reached" (transaction mode), "MaxClientsInSessionMode … max clients reached" (session mode).
-  if (/max client connections reached|max clients reached|MaxClientsInSessionMode|EMAXCONN/i.test(msg)) return true;
-  return String(err.code ?? "") === "28P01" && /restore pool functionality|reconnect with fresh credentials/i.test(msg);
+  if (/max client connections reached|max clients reached|MaxClientsInSessionMode|EMAXCONN/i.test(msg)) return "saturated";
+  if (String(err.code ?? "") === "28P01" && /restore pool functionality|reconnect with fresh credentials/i.test(msg)) return "poisoned";
+  return null;
 }
 
 export interface BreakerOptions {

@@ -107,6 +107,19 @@ describe("PgStore lanes", () => {
     expect(s2.laneStatus().every((l) => l.coolingDownSec > 0)).toBe(true);
   });
 
+  it("parks a poisoned lane for minutes but retries a saturated lane within seconds", async () => {
+    const { PgStore } = await import("./pgStore");
+    scripts.set(PRIMARY, () => saturated());
+    scripts.set(ALT, () => poisoned());
+    scripts.set(SESSION, (t) => marker(t));
+    const s = new PgStore(PRIMARY, ALT);
+    expect(await s.getEpoch("e1")).toBeNull();
+    const [primary, alt] = s.laneStatus();
+    expect(primary.coolingDownSec).toBeGreaterThan(0);
+    expect(primary.coolingDownSec).toBeLessThanOrEqual(15);
+    expect(alt.coolingDownSec).toBeGreaterThan(500);
+  });
+
   it("does not fail over on ordinary statement errors", async () => {
     const { PgStore } = await import("./pgStore");
     let altCalls = 0;

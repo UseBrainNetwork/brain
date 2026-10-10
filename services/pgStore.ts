@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { Pool, type QueryConfig } from "pg";
 import type { DistributedJob, RewardAllocation, RewardClaim, RewardEpoch } from "@/domain/types";
-import { Breaker, StoreConflictError, StoreUnavailableError, isPoolerRejection } from "./failsoft";
+import { Breaker, StoreConflictError, StoreUnavailableError, isPoolerRejection, poolerRejectionKind } from "./failsoft";
 import { KeyedMutex, MONOTONIC_NODE_COUNTERS, type DocKind, type DocQuery, type NetworkStore, type StoredChallenge, type StoredJob, type StoredNode, type WorkAggregate, type WorkRecord } from "./store";
 
 /** `(jsonb->>'k')::numeric`, 0 when absent. Only ever called with the fixed counter names above. */
@@ -59,6 +59,8 @@ export class PgStore implements NetworkStore {
    */
   private lanes: Lane[];
   private static readonly LANE_COOLDOWN_MS = 10 * 60_000;
+  /** A lane that merely hit the client cap is retried soon; the cap clears as other instances release connections. */
+  private static readonly LANE_SATURATED_MS = 15_000;
   /** How long withLock keeps retrying the advisory lock before proceeding under the in-process lock only. */
   private static readonly LOCK_WAIT_MS = 8_000;
   private ready: Promise<void>;
@@ -236,9 +238,11 @@ export class PgStore implements NetworkStore {
       try {
         return await retryPoolerRejection(() => run(lane));
       } catch (e) {
-        if (!isPoolerRejection(e)) throw e;
-        lane.badUntil = Date.now() + PgStore.LANE_COOLDOWN_MS;
-        console.warn(`[pgStore] ${lane.name} lane (${lane.mode} pooler) rejecting connections; cooling down ${PgStore.LANE_COOLDOWN_MS / 1000}s:`, (e as Error).message.slice(0, 100));
+        const kind = poolerRejectionKind(e);
+        if (!kind) throw e;
+        const cooldown = kind === "poisoned" ? PgStore.LANE_COOLDOWN_MS : PgStore.LANE_SATURATED_MS;
+        lane.badUntil = Date.now() + cooldown;
+        console.warn(`[pgStore] ${lane.name} lane (${lane.mode} pooler) ${kind}; cooling down ${cooldown / 1000}s:`, (e as Error).message.slice(0, 100));
         last = e;
       }
     }
