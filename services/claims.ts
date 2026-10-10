@@ -26,6 +26,8 @@ export function payoutStatus(): PayoutStatus {
     maxLamports: maxClaimLamports(),
     cluster: process.env.BRAIN_SOLANA_CLUSTER ?? "mainnet-beta",
   };
+  // Operator notice: claims paused with a stated reason (e.g. payouts moving to another payer).
+  if (process.env.BRAIN_PAYOUTS_NOTICE) return { ...base, enabled: false, reason: process.env.BRAIN_PAYOUTS_NOTICE };
   if (process.env.BRAIN_PAYOUTS_ENABLED !== "true") return { ...base, enabled: false, reason: "Payouts open once the protocol payout wallet is connected." };
   if (!process.env.SOLANA_RPC_URL || !process.env.BRAIN_PAYOUT_SECRET_KEY) return { ...base, enabled: false, reason: "Payout wallet is not configured." };
   const sender = getSender();
