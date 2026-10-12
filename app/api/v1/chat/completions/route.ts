@@ -13,6 +13,7 @@ import { balance, consumeForReceipt, ensureMonthlyGrant, mayConsume } from "@/se
 import { MISSING_KEY, authenticate, customerRateLimit, openAccess, recordRequest } from "@/services/customers";
 import { communityFirstFor, planById } from "@/lib/plans";
 import { isAllowedModel } from "@/node/models";
+import { syncImportedModels } from "@/services/modelImports";
 import { PaymentError } from "@/services/payments";
 import { attachCallResult, budgetTokens, isPayCurrency, parsePaymentHeader, paymentRequired, quoteCall, redeemCall, type CallQuote } from "@/services/payPerCall";
 import { bearer, json, tooMany } from "@/services/security";
@@ -55,6 +56,8 @@ function designatedNode(raw: Record<string, unknown>): string | undefined | fals
 export const POST = nodeRoute(async (req) => {
   const auth = await authenticate(bearer(req));
   const raw = await body<Record<string, unknown>>(req, 128 * 1024);
+  // Imported `hf/…` models are checked against the synced table like allowlisted ids.
+  await syncImportedModels();
 
   // Pay per call, no account (x402 shape): a quote header asks for a 402 with the price; a payment
   // header redeems a paid quote. Both are ignored when a valid API key is present.

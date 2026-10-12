@@ -24,6 +24,9 @@ import { isBackend, type Backend } from "../protocol";
  *   BRAIN_NODE_WALLET       Solana address for payouts (optional, verified later via /earn)
  *   BRAIN_NODE_CONCURRENCY  parallel jobs (default 1 mock, 4 vllm, 2 local servers)
  *   BRAIN_NODE_ASK_USD_PER_1M  your ask per 1M output tokens (optional)
+ *   BRAIN_NODE_IMPORTS      1 to serve imported models (hf/<org>/<repo>): the coordinator asks this node to
+ *                           pull GGUFs developers imported; Ollama pulls them itself, other servers are told what to load
+ *   BRAIN_NODE_IMPORT_DISK_GB  disk the pulls may use in total (default 50)
  *   BRAIN_NODE_HOME         identity directory (default ~/.brain-node)
  *   HF_TOKEN                forwarded to vLLM for gated models
  */
@@ -49,6 +52,7 @@ async function main() {
   const mock = kind === "mock";
   if (kind === "vllm" && !nvidia.length) throw new Error("BRAIN_NODE_MODE=vllm needs an NVIDIA GPU (nvidia-smi). For AMD or Apple silicon run llama.cpp, Ollama or mlx-lm and set BRAIN_NODE_MODE accordingly; BRAIN_NODE_MODE=mock runs a simulated node.");
   const models = (process.env.BRAIN_NODE_MODELS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const imports = process.env.BRAIN_NODE_IMPORTS === "1" ? { diskBudgetGb: Math.max(1, Number(process.env.BRAIN_NODE_IMPORT_DISK_GB) || 50) } : null;
 
   let backend: InferenceBackend;
   if (mock) backend = new MockBackend();
@@ -56,8 +60,8 @@ async function main() {
   else {
     const local = new LocalServerBackend({ kind, baseUrl: process.env.BRAIN_NODE_BACKEND_URL || `http://127.0.0.1:${DEFAULT_PORTS[kind]}`, models: models.length ? models : undefined, modelMap: parseModelMap(process.env.BRAIN_NODE_MODEL_MAP), log });
     const served = await local.discover();
-    if (!served.length) throw new Error(`${kind}: no allowlisted model is served at ${process.env.BRAIN_NODE_BACKEND_URL || `http://127.0.0.1:${DEFAULT_PORTS[kind]}`}. Start the server with one of the models on /models (see node/README.md), or pin a name with BRAIN_NODE_MODEL_MAP.`);
-    log(`${kind}: serving ${served.join(", ")}`);
+    if (!served.length && !imports) throw new Error(`${kind}: no allowlisted model is served at ${process.env.BRAIN_NODE_BACKEND_URL || `http://127.0.0.1:${DEFAULT_PORTS[kind]}`}. Start the server with one of the models on /models (see node/README.md), pin a name with BRAIN_NODE_MODEL_MAP, or set BRAIN_NODE_IMPORTS=1 to serve imported models.`);
+    log(`${kind}: serving ${served.join(", ") || "nothing yet (waiting for imported models)"}`);
     backend = local;
   }
   const concurrency = Number(process.env.BRAIN_NODE_CONCURRENCY) || (mock ? 1 : kind === "vllm" ? 4 : 2);
@@ -72,7 +76,8 @@ async function main() {
     maxConcurrency: concurrency,
     askUsdPer1MTokens: ask != null && Number.isFinite(ask) ? ask : null,
     models: models.length ? models : undefined,
-    agentVersion: "0.2.0",
+    imports,
+    agentVersion: "0.3.0",
   });
   const stop = () => void agent.stop().then(() => process.exit(0));
   process.on("SIGINT", stop);

@@ -1,6 +1,7 @@
 import "server-only";
 import { inferenceModels } from "@/services/mock/mockData";
-import { MODEL_ALLOWLIST } from "@/node/models";
+import { MODEL_ALLOWLIST, isAllowedModel, isImportedId } from "@/node/models";
+import { listImportedModels } from "@/services/modelImports";
 import { routableNativeNodes } from "@/services/coordinator/registry";
 import type { ChatMessage, ChatRequest } from "@/providers/types";
 import { chatChars, type ResponseFormat, type ToolChoice, type ToolDefinition } from "@/domain/chat";
@@ -104,7 +105,11 @@ export function validateChat(body: unknown): ChatRequest {
   if (!body || typeof body !== "object") throw new GatewayError(400, "invalid_request", "Body must be a JSON object.");
   const b = body as Record<string, unknown>;
   const model = typeof b.model === "string" ? b.model : "brain/auto";
-  if (!MODEL_IDS.has(model)) throw new GatewayError(404, "model_not_found", `Unknown model '${model}'.`);
+  // Imported ids are checked against the synced table (the route calls syncImportedModels first).
+  if (!MODEL_IDS.has(model) && !isAllowedModel(model)) {
+    if (isImportedId(model)) throw new GatewayError(404, "model_not_found", `${model} is not imported yet. POST /v1/models/import with the Hugging Face repository to add it.`);
+    throw new GatewayError(404, "model_not_found", `Unknown model '${model}'.`);
+  }
   if (!Array.isArray(b.messages) || b.messages.length === 0 || b.messages.length > MAX_MESSAGES) {
     throw new GatewayError(400, "invalid_request", `messages must be an array of 1–${MAX_MESSAGES} items.`);
   }
@@ -205,9 +210,29 @@ export async function listModels() {
       license: m.license,
     };
   });
+  const imported = (await listImportedModels().catch(() => [])).map((m) => {
+    const serving = live.filter((n) => n.reported.capabilities.supportedModels.includes(m.id));
+    return {
+      id: m.id,
+      object: "model",
+      owned_by: `huggingface:${m.repo.split("/")[0]}`,
+      source: `https://huggingface.co/${m.repo}`,
+      file: m.file.file,
+      size_bytes: m.file.sizeBytes,
+      context_length: m.context,
+      status: serving.length ? "available" : "waiting_for_node",
+      available: serving.length > 0,
+      nodes_online: serving.length,
+      nodes_loaded: serving.filter((n) => n.reported.capabilities.loadedModels.includes(m.id)).length,
+      min_vram_mb: m.minVramMb,
+      params: m.params,
+      license: m.license,
+      imported_at: m.createdAt,
+    };
+  });
   return {
     object: "list",
-    data: [...inferenceModels.map((m) => ({ id: m.id, object: "model", owned_by: "brain", context_length: m.context, status: m.status })), ...native],
+    data: [...inferenceModels.map((m) => ({ id: m.id, object: "model", owned_by: "brain", context_length: m.context, status: m.status })), ...native, ...imported],
   };
 }
 

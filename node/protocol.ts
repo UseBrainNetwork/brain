@@ -83,6 +83,34 @@ export interface NodeCapabilities {
   region: string | null;
   /** Provider's ask, USD per 1M output tokens. null = no ask; routing treats it as unknown. */
   askUsdPer1MTokens: number | null;
+  /**
+   * Set when the operator opted in to imported models (BRAIN_NODE_IMPORTS=1): the coordinator may
+   * ask this node to pull `hf/<org>/<repo>` GGUFs up to this many gigabytes of disk. Absent = never.
+   */
+  imports?: { diskBudgetGb: number } | null;
+}
+
+/** An imported model the coordinator asks an opted-in node to fetch through its own inference server. */
+export interface ImportOffer {
+  /** `hf/<org>/<repo>` */
+  model: string;
+  repo: string;
+  file: string;
+  quant: string;
+  sizeBytes: number;
+}
+
+/** The imported-model table as the agent needs it: enough to map served names and size pulls. Mirrors node/models ModelSpec. */
+export interface ImportedSpec {
+  id: string;
+  repo: string;
+  file: string;
+  quant: string;
+  sizeBytes: number;
+  params: string;
+  context: number;
+  minVramMb: number;
+  license: string;
 }
 
 export interface Telemetry {
@@ -123,6 +151,8 @@ export interface RegisterReply {
   workPollMs: number;
   /** Models the coordinator will route to this node (intersection with the allowlist). */
   acceptedModels: string[];
+  /** Imported models the coordinator knows (so the agent can map served names onto `hf/…` ids). */
+  imports?: ImportedSpec[];
 }
 
 export interface HeartbeatBody {
@@ -136,6 +166,10 @@ export interface HeartbeatReply {
   serverTime: number;
   /** Set when the coordinator wants the node to stop taking work (operator drain, ban, version). */
   instruction?: "drain" | "stop";
+  /** Imported-model table (see RegisterReply.imports). Sent on every heartbeat; small. */
+  imports?: ImportedSpec[];
+  /** Imported models this node should pull now, within its disk budget. Only for nodes that opted in. */
+  pull?: ImportOffer[];
 }
 
 export type JobState = "QUEUED" | "MATCHING" | "ASSIGNED" | "STARTING" | "RUNNING" | "VERIFYING" | "COMPLETED" | "FAILED" | "CANCELLED";

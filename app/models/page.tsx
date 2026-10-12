@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHead, Shell, SourceBadge } from "@/components/economy/parts";
+import { ImportedModels } from "@/components/network/ImportedModels";
 import { ModelMarket } from "@/components/network/ModelMarket";
 
-export const metadata: Metadata = { title: "Models", description: "Open-weight models Brain Nodes can serve, with how many nodes have each one online right now." };
+export const metadata: Metadata = { title: "Models", description: "Open-weight models Brain Nodes can serve, including any Hugging Face GGUF you import, with how many nodes have each one online right now." };
 export const dynamic = "force-dynamic";
 
 export default function ModelsPage() {
@@ -27,9 +28,10 @@ export default function ModelsPage() {
           </div>
         }
       >
-        The allowlist of models a Brain Node may run, and which of them have a node online this minute. Availability comes from the coordinator&apos;s registry; VRAM figures are requirements, not measurements. Prices shown are node ask prices when operators set one; otherwise the network list price applies.
+        The allowlist of models a Brain Node may run, models developers imported from Hugging Face, and which of them have a node online this minute. Availability comes from the coordinator&apos;s registry; VRAM figures are requirements, not measurements. Prices shown are node ask prices when operators set one; otherwise the network list price applies.
       </PageHead>
-      <div className="mt-10">
+      <div className="mt-10 space-y-5">
+        <ImportedModels />
         <ModelMarket />
       </div>
     </Shell>

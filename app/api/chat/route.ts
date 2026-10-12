@@ -9,6 +9,7 @@ import { normalizeMode } from "@/domain/economy";
 import { withTimeout } from "@/lib/async";
 import { communityFirstFor, planById } from "@/lib/plans";
 import { isAllowedModel } from "@/node/models";
+import { syncImportedModels } from "@/services/modelImports";
 import { ensureAccount } from "@/services/accounts";
 import { balance, consumeForReceipt, ensureMonthlyGrant, mayConsume } from "@/services/credits";
 import { recordRequest } from "@/services/customers";
@@ -48,6 +49,7 @@ export const POST = nodeRoute(async (req, { ip }) => {
   if (!rateLimit(limitKey, plan.rateLimit).ok) return json({ error: { code: "rate_limited", message: `Your plan allows ${plan.rateLimit} requests per minute.` } }, 429);
 
   const raw = await body<Record<string, unknown>>(req, 128 * 1024);
+  await syncImportedModels();
   const chat = validateChat({ ...raw, stream: true });
   const requestedMode = normalizeMode(String(raw.mode ?? "auto"));
   if (!plan.modes.includes(requestedMode)) return json({ error: { code: "mode_not_in_plan", message: `${requestedMode} routing is not included in the ${plan.name} plan.` } }, 403);

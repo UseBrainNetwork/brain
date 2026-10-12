@@ -191,7 +191,7 @@ export interface PaidClaimTotals {
   lastAt: number | null;
 }
 
-export type DocKind = "nnode" | "njob" | "receipt" | "accounting" | "order" | "decision" | "plan" | "customer" | "apikey" | "request" | "treasury" | "epochv2" | "metric" | "account" | "credit" | "session" | "interest" | "notify" | "meta" | "shard" | "hop" | "isession" | "payment";
+export type DocKind = "nnode" | "njob" | "receipt" | "accounting" | "order" | "decision" | "plan" | "customer" | "apikey" | "request" | "treasury" | "epochv2" | "metric" | "account" | "credit" | "session" | "interest" | "notify" | "meta" | "shard" | "hop" | "isession" | "payment" | "model";
 
 export interface DocQuery {
   limit?: number;

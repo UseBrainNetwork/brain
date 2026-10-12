@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { filterAllowed } from "../models";
-import { DEFAULTS, PROTOCOL_VERSION, type HeartbeatReply, type JobPayload, type NodeCapabilities, type RegisterReply, type WorkReply } from "../protocol";
+import { filterAllowed, setImportedModels, type ModelSpec } from "../models";
+import { DEFAULTS, PROTOCOL_VERSION, type HeartbeatReply, type ImportedSpec, type JobPayload, type NodeCapabilities, type RegisterReply, type WorkReply } from "../protocol";
 import type { InferenceBackend } from "./backends/types";
 import { detectHardware, sampleTelemetry } from "./hardware";
 import type { Identity } from "./identity";
@@ -14,6 +14,8 @@ export interface AgentConfig {
   askUsdPer1MTokens: number | null;
   /** Restrict advertised models to this subset of what the backend supports. */
   models?: string[];
+  /** Opt in to imported models: the coordinator may ask this node to pull `hf/…` GGUFs up to this much disk. */
+  imports?: { diskBudgetGb: number } | null;
   agentVersion: string;
   log?: (line: string) => void;
 }
@@ -46,8 +48,36 @@ export class Agent {
 
   private capabilities(): NodeCapabilities {
     let supported = filterAllowed(this.backend.supportedModels());
-    if (this.cfg.models?.length) supported = supported.filter((m) => this.cfg.models!.includes(m));
-    return { backend: this.backend.kind, supportedModels: supported, loadedModels: this.backend.loadedModels().filter((m) => supported.includes(m)), maxConcurrency: this.cfg.maxConcurrency, region: this.cfg.region, askUsdPer1MTokens: this.cfg.askUsdPer1MTokens };
+    // BRAIN_NODE_MODELS narrows the allowlist; imported ids are governed by the opt-in flag and what the server serves.
+    if (this.cfg.models?.length) supported = supported.filter((m) => m.startsWith("hf/") || this.cfg.models!.includes(m));
+    return { backend: this.backend.kind, supportedModels: supported, loadedModels: this.backend.loadedModels().filter((m) => supported.includes(m)), maxConcurrency: this.cfg.maxConcurrency, region: this.cfg.region, askUsdPer1MTokens: this.cfg.askUsdPer1MTokens, imports: this.cfg.imports ?? null };
+  }
+
+  private importsKey = "";
+  private pullChain: Promise<unknown> = Promise.resolve();
+
+  /**
+   * The coordinator's imported-model table arrives with every reply. When it changes, the local
+   * model table is updated and the backend re-reads its server so a GGUF the operator loaded (or
+   * Ollama pulled) maps onto its `hf/…` id. Pull offers run one batch at a time in the background.
+   */
+  private async applyImports(reply: { imports?: ImportedSpec[]; pull?: HeartbeatReply["pull"] }) {
+    if (Array.isArray(reply.imports)) {
+      const key = reply.imports.map((m) => m.id).sort().join(",");
+      if (key !== this.importsKey) {
+        this.importsKey = key;
+        const specs: ModelSpec[] = reply.imports.map((m) => ({ id: m.id, name: m.repo, hf: m.repo, params: m.params, context: m.context, minVramMb: m.minVramMb, classes: [], license: m.license, imported: { repo: m.repo, file: m.file, quant: m.quant, sizeBytes: m.sizeBytes, architecture: null } }));
+        setImportedModels(specs);
+        if (this.backend.discover) await this.backend.discover().catch(() => undefined);
+      }
+    }
+    if (this.cfg.imports && reply.pull?.length && this.backend.pullImports) {
+      const offers = reply.pull;
+      this.pullChain = this.pullChain.then(async () => {
+        const got = await this.backend.pullImports!(offers, this.log).catch(() => [] as string[]);
+        if (got.length) await this.heartbeat().catch(() => undefined);
+      });
+    }
   }
 
   async register(): Promise<RegisterReply> {
@@ -57,6 +87,7 @@ export class Agent {
     const gpu = hardware.gpus[0];
     this.log(`registered as ${reply.nodeId} (${reply.state}) · ${gpu ? `${gpu.model}${gpu.vramTotalMb ? ` ${Math.round(gpu.vramTotalMb / 1024)} GB` : ""} via ${gpu.source}` : "no GPU detected"} · models ${reply.acceptedModels.join(", ") || "none accepted"}`);
     if (!reply.acceptedModels.length) this.log("warning: the coordinator accepted none of this node's models; it will not receive work");
+    await this.applyImports(reply);
     return reply;
   }
 
@@ -70,6 +101,7 @@ export class Agent {
       this.log("coordinator asked this node to stop");
       void this.stop();
     } else if (reply.instruction === "drain") this.draining = true;
+    await this.applyImports(reply);
     return reply;
   }
 

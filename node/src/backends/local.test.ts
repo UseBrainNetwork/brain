@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { matchServedModel } from "../../models";
+import { matchServedModel, setImportedModels } from "../../models";
 import type { JobPayload } from "../../protocol";
 import { LocalServerBackend } from "./local";
 
@@ -94,6 +94,35 @@ describe("LocalServerBackend", () => {
     expect(await b.discover()).toEqual(["qwen/qwen2.5-1.5b-instruct"]);
     expect(await b.ensureLoaded("qwen/qwen2.5-1.5b-instruct", new AbortController().signal)).toBe(true);
     expect(s.calls).toContain("POST /api/pull");
+  });
+
+  it("serves imported models: maps hf.co names once the table is known, pulls offers on Ollama, only logs them elsewhere", async () => {
+    const spec = { id: "hf/ggml-org/gpt-oss-20b-gguf", name: "ggml-org/gpt-oss-20b-GGUF", hf: "ggml-org/gpt-oss-20b-GGUF", params: "20.9B", context: 32768, minVramMb: 14000, classes: [], license: "apache-2.0", imported: { repo: "ggml-org/gpt-oss-20b-GGUF", file: "gpt-oss-20b-MXFP4.gguf", quant: "MXFP4", sizeBytes: 12e9, architecture: "gpt-oss" } };
+    const offer = { model: spec.id, repo: spec.imported.repo, file: spec.imported.file, quant: "MXFP4", sizeBytes: 12e9 };
+    const s = server(["hf.co/ggml-org/gpt-oss-20b-GGUF:MXFP4", "qwen2.5:1.5b-instruct"]);
+    const b = new LocalServerBackend({ kind: "ollama", baseUrl: "http://127.0.0.1:11434", models: ["qwen/qwen2.5-1.5b-instruct"], fetchImpl: s.fetchImpl });
+    // Before the coordinator has sent the table the hf.co name maps to nothing.
+    expect(await b.discover()).toEqual(["qwen/qwen2.5-1.5b-instruct"]);
+    setImportedModels([spec]);
+    expect(await b.discover()).toEqual(["qwen/qwen2.5-1.5b-instruct", "hf/ggml-org/gpt-oss-20b-gguf"]);
+    // Already served: nothing to pull.
+    expect(await b.pullImports([offer], () => undefined)).toEqual([]);
+    expect(s.calls.filter((c) => c === "POST /api/pull")).toHaveLength(0);
+    // A fresh Ollama pulls the offer under the hf.co name; llama.cpp is told instead.
+    const s2 = server([]);
+    const fresh = new LocalServerBackend({ kind: "ollama", baseUrl: "http://127.0.0.1:11434", fetchImpl: s2.fetchImpl });
+    expect(await fresh.pullImports([offer], () => undefined)).toEqual(["hf/ggml-org/gpt-oss-20b-gguf"]);
+    expect(s2.calls).toContain("POST /api/pull");
+    expect(fresh.supportedModels()).toEqual(["hf/ggml-org/gpt-oss-20b-gguf"]);
+    const lines: string[] = [];
+    const s3 = server([]);
+    const llama = new LocalServerBackend({ kind: "llamacpp", baseUrl: "http://127.0.0.1:8080", fetchImpl: s3.fetchImpl });
+    expect(await llama.pullImports([offer], (l) => lines.push(l))).toEqual([]);
+    expect(lines[0]).toMatch(/cannot pull on request/);
+    expect(s3.calls).not.toContain("POST /api/pull");
+    // Table replaced without the model: it is no longer advertised.
+    setImportedModels([]);
+    expect(await b.discover()).toEqual(["qwen/qwen2.5-1.5b-instruct"]);
   });
 
   it("refuses a model the server does not serve rather than guessing a name", async () => {

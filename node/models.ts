@@ -6,6 +6,12 @@
  * Minimum VRAM figures are the published weights size plus KV-cache headroom at the given context,
  * rounded up. They gate routing (a node reporting less VRAM is never selected) and are shown on
  * /models as the requirement, not as a measurement.
+ *
+ * Imported models (`hf/<org>/<repo>`) sit beside the allowlist. They are not launched by the agent
+ * from arbitrary input either: the coordinator resolves a public Hugging Face GGUF repository
+ * once, records exactly one file and its size (services/modelImports.ts), and both sides consult
+ * that record through `setImportedModels`. A node only ever pulls the named file through its own
+ * inference server; the request body still never reaches a command line.
  */
 
 export type ComputeClass = "EDGE" | "CONSUMER" | "PRO" | "DATACENTER";
@@ -26,7 +32,34 @@ export interface ModelSpec {
   mock?: boolean;
   /** Extra vLLM args. Images and ports are fixed in node/src/backends/vllm.ts. */
   vllmArgs?: string[];
+  /** Present on imported models: the one GGUF file a node serves for this id. */
+  imported?: ImportedFile;
 }
+
+export interface ImportedFile {
+  /** Hugging Face repository, original casing, e.g. "ggml-org/gpt-oss-20b-GGUF". */
+  repo: string;
+  /** File inside the repository, e.g. "gpt-oss-20b-MXFP4.gguf". */
+  file: string;
+  /** Quantisation label taken from the file name, e.g. "Q4_K_M", "MXFP4". Ollama's tag for hf.co pulls. */
+  quant: string;
+  sizeBytes: number;
+  /** Architecture string from the GGUF header, as Hugging Face reports it. */
+  architecture: string | null;
+}
+
+/** `hf/<org>/<repo>`, lower-cased. Characters Hugging Face allows in repo ids, nothing else. */
+export const IMPORTED_ID_RE = /^hf\/[a-z0-9][a-z0-9._-]{0,95}\/[a-z0-9][a-z0-9._-]{0,127}$/;
+export const isImportedId = (id: string) => IMPORTED_ID_RE.test(id);
+export const importedIdFor = (repo: string) => `hf/${repo.toLowerCase()}`;
+
+/** Process-wide imported-model table. The server fills it from the store; the agent from the coordinator's replies. */
+const imported = new Map<string, ModelSpec>();
+export function setImportedModels(specs: readonly ModelSpec[]) {
+  imported.clear();
+  for (const s of specs) if (s.imported && isImportedId(s.id)) imported.set(s.id, s);
+}
+export const importedModels = (): ModelSpec[] => [...imported.values()];
 
 export const MODEL_ALLOWLIST: readonly ModelSpec[] = [
   {
@@ -65,10 +98,10 @@ export const MODEL_ALLOWLIST: readonly ModelSpec[] = [
 
 const byId = new Map(MODEL_ALLOWLIST.map((m) => [m.id, m]));
 
-export const modelSpec = (id: string): ModelSpec | undefined => byId.get(id);
-export const isAllowedModel = (id: string) => byId.has(id);
-/** Ids a node may advertise, in list order, dropping anything not allowlisted. */
-export const filterAllowed = (ids: readonly string[]) => MODEL_ALLOWLIST.filter((m) => ids.includes(m.id)).map((m) => m.id);
+export const modelSpec = (id: string): ModelSpec | undefined => byId.get(id) ?? imported.get(id);
+export const isAllowedModel = (id: string) => byId.has(id) || imported.has(id);
+/** Ids a node may advertise, in list order, dropping anything not allowlisted or imported. */
+export const filterAllowed = (ids: readonly string[]) => [...MODEL_ALLOWLIST.filter((m) => ids.includes(m.id)).map((m) => m.id), ...new Set(ids.filter((id) => imported.has(id) && !byId.has(id)))];
 
 /**
  * Local inference servers name models their own way: Ollama "qwen2.5:1.5b-instruct", llama.cpp
@@ -81,6 +114,14 @@ const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 export function matchServedModel(servedName: string): ModelSpec | undefined {
   const k = key(servedName);
   if (!k) return undefined;
+  // Imported models first and exactly: Ollama lists an hf.co pull as "hf.co/<org>/<repo>:<quant>",
+  // llama.cpp lists the alias or file name it was started with. Match on the repo path, then on the
+  // file name without its extension; an imported id never matches by a shorter substring.
+  const served = servedName.toLowerCase().replace(/^(hf\.co|huggingface\.co)\//, "").replace(/:latest$/, "");
+  for (const m of imported.values()) {
+    const repo = m.imported!.repo.toLowerCase();
+    if (served === repo || served.startsWith(`${repo}:`) || key(served.replace(/\.gguf$/i, "")) === key(m.imported!.file.replace(/\.gguf$/i, ""))) return m;
+  }
   // Longest allowlisted name first so "qwen2.5-7b-instruct-awq" is not taken for "qwen2.5-7b-instruct".
   const candidates = MODEL_ALLOWLIST.filter((m) => !m.mock)
     .map((m) => ({ m, core: key(m.id.split("/").pop() ?? m.id) }))

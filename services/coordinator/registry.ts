@@ -168,6 +168,7 @@ const sanitizeCaps = (c: NodeCapabilities): NodeCapabilities => ({
   maxConcurrency: Math.max(1, Math.min(16, Math.floor(Number(c.maxConcurrency) || 1))),
   region: typeof c.region === "string" && c.region ? c.region.slice(0, 32).toLowerCase() : null,
   askUsdPer1MTokens: typeof c.askUsdPer1MTokens === "number" && Number.isFinite(c.askUsdPer1MTokens) && c.askUsdPer1MTokens >= 0 ? c.askUsdPer1MTokens : null,
+  imports: c.imports && typeof c.imports === "object" && Number.isFinite(Number(c.imports.diskBudgetGb)) && Number(c.imports.diskBudgetGb) > 0 ? { diskBudgetGb: Math.min(4_000, Math.floor(Number(c.imports.diskBudgetGb))) } : null,
 });
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);

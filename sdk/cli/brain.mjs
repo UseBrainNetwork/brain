@@ -107,7 +107,22 @@ function summary(b) {
 async function models() {
   const res = await api("/v1/models");
   if (!res.r.ok) return fail(res);
-  for (const m of res.body.data ?? []) process.stdout.write(`${m.id}\n`);
+  for (const m of res.body.data ?? []) process.stdout.write(`${m.id}${m.status && m.status !== "available" ? `  (${m.status})` : ""}\n`);
+}
+
+/** brain import <huggingface url | org/repo> [--file Q4_K_M] */
+async function importModel() {
+  const source = positional[0];
+  if (!source) die("usage: brain import <huggingface url | org/repo> [--file <gguf or quant>]");
+  const res = await api("/v1/models/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source, ...(flags.file ? { file: flags.file } : {}) }) });
+  if (!res.r.ok) {
+    const e = res.body.error ?? {};
+    process.stderr.write(`${e.code ?? res.r.status}: ${e.message ?? ""}\n`);
+    if (e.suggestions?.length) process.stderr.write(`try: ${e.suggestions.map((s) => `brain import ${s.repo}`).join("\n     ")}\n`);
+    process.exit(1);
+  }
+  const m = res.body.model;
+  process.stdout.write(`${m.id}  ${res.body.created ? "imported" : "already imported"}\n${m.file.file}  ${(m.file.sizeBytes / 1e9).toFixed(1)} GB  ${m.params} params  needs ${Math.ceil(m.minVramMb / 1024)} GB\n${m.status}: ${res.body.note}\n\n${res.body.use.curl}\n`);
 }
 
 async function stats() {
@@ -164,6 +179,7 @@ const HELP = `brain <command> [options]
                        --mode auto|cheap|fast|quality --privacy standard|private --node N-XXXXXXXX
                        --retries 0..2 --fallback true|false --timeout ms --no-stream --quiet
   models               list model ids
+  import <repo>        bring your own model: a Hugging Face URL or org/repo (--file Q4_K_M)
   receipt <id>         fetch a receipt and verify its signature locally
   receipts             export your requests (--days 31 --limit 1000 --csv --verify)
   quote <prompt>       pay-per-call quote for this request (--currency sol|usdc), no key needed
@@ -172,6 +188,6 @@ const HELP = `brain <command> [options]
 env: BRAIN_API_KEY, BRAIN_HOST (default https://brainnetwork.app)
 `;
 
-const run = { chat, models, receipt, receipts, quote, stats }[cmd];
+const run = { chat, models, import: importModel, receipt, receipts, quote, stats }[cmd];
 if (!run || flags.help) (process.stdout.write(HELP), process.exit(run ? 0 : cmd ? 1 : 0));
 else run().catch((e) => die(e?.message ?? String(e)));

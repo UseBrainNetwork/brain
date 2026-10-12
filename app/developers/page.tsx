@@ -249,6 +249,21 @@ curl https://brainnetwork.app/v1/chat/completions \
 
 # → brain-node-id: N-3A4F…   brain-region: eu-north   brain-latency: 1184`;
 
+const IMPORT_CURL = `# 1. Point the network at a public Hugging Face GGUF repository. No key needed.
+curl -s https://brainnetwork.app/v1/models/import \\
+  -H 'content-type: application/json' \\
+  -d '{"source":"https://huggingface.co/ggml-org/gpt-oss-20b-GGUF"}'
+# → 201 { model: { id: "hf/ggml-org/gpt-oss-20b-gguf", file: "gpt-oss-20b-MXFP4.gguf",
+#          params: "20.9B", minVramMb: …, status: "waiting_for_node" | "available", nodes_online: N }, … }
+# A repository without GGUF files answers 422 with the quantisations of it to import instead.
+
+# 2. Call it like any node model. It goes only to nodes serving that file; nothing substitutes.
+curl -s https://brainnetwork.app/v1/chat/completions \\
+  -H 'content-type: application/json' \\
+  -d '{"model":"hf/ggml-org/gpt-oss-20b-gguf","messages":[{"role":"user","content":"hello"}]}'
+
+# Or: npx brain import ggml-org/gpt-oss-20b-GGUF`;
+
 const PAY_CURL = `# 1. Ask with no key; get a quote for exactly this request.
 curl -s https://brainnetwork.app/v1/chat/completions -H "x-brain-pay: sol" \\
   -H "Content-Type: application/json" \\
@@ -500,6 +515,18 @@ export default function DevelopersPage() {
               </div>
             </div>
             <CodeBlock lang="bash" title="node model · response headers" code={NODE_CURL} />
+          </div>
+          <div className="mt-16 grid gap-10 lg:grid-cols-[360px_1fr]">
+            <div>
+              <h3 className="display-md text-[26px] md:text-[34px]">Bring your own model</h3>
+              <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
+                Any public text model on Hugging Face with a single-file GGUF and a chat template can be imported. <span className="font-mono text-chalk">POST /v1/models/import</span> with the repository; the coordinator resolves it once to one file, records size, parameter count, context and license as Hugging Face reports them, and from then on routes <span className="font-mono text-chalk">hf/&lt;org&gt;/&lt;repo&gt;</span> like any node model. Nodes that opted in are asked to pull the file; <a href="/models" className="text-chalk underline-offset-4 hover:underline">/models</a> shows how many serve it this minute.
+              </p>
+              <p className="mt-4 text-[14.5px] leading-relaxed text-chalk/55">
+                Said plainly: importing is a request, not a guarantee. Until a node with enough memory picks the model up, requests naming it are refused with the routing reason; they are never answered by a different model. Receipts for imported models are node-reported like every node model, and the same canaries and redundant checks apply.
+              </p>
+            </div>
+            <CodeBlock lang="bash" title="any hugging face gguf" code={IMPORT_CURL} />
           </div>
           <div className="mt-16 grid gap-10 lg:grid-cols-[360px_1fr]">
             <div>

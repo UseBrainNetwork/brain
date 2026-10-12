@@ -75,6 +75,8 @@ A mock node may only serve `brain/mock`, says so in every token, and is refused 
 | `BRAIN_NODE_BACKEND_URL` | Base URL of your local server (defaults: llama.cpp/mlx `:8080`, Ollama `:11434`, exo `:52415`) |
 | `BRAIN_NODE_MODELS` | Comma-separated subset of the allowlist to serve |
 | `BRAIN_NODE_MODEL_MAP` | Pin allowlisted id → served name, e.g. `qwen/qwen2.5-3b-instruct=my-quant` |
+| `BRAIN_NODE_IMPORTS` | `1` to serve models developers imported from Hugging Face (`hf/<org>/<repo>`); see below |
+| `BRAIN_NODE_IMPORT_DISK_GB` | Disk the imported pulls may use in total (default 50) |
 | `BRAIN_NODE_REGION` | Label shown to developers, e.g. `eu-north` |
 | `BRAIN_NODE_CONCURRENCY` | Parallel jobs, 1 to 16 |
 | `BRAIN_NODE_ASK_USD_PER_1M` | Optional ask price per 1M tokens; the price term of the routing score |
@@ -105,6 +107,21 @@ BRAIN_NODE_MODE=ollama BRAIN_NODE_MODELS=qwen/qwen2.5-32b-instruct npm run node
 ```
 
 Plain ids (`qwen/qwen2.5-32b-instruct`) mean the model at whatever precision your server runs; `-awq` ids are the vLLM 4-bit builds with their own VRAM floor. The allowlist includes 14B, 32B, Coder 32B and 72B Qwen2.5, DeepSeek R1 distills (8B, 32B) and Llama 3.3 70B; see the full list with VRAM floors and licenses on `/models`. Units for the hourly epoch scale with parameters × tokens, so a served 32B request counts about twenty times a 1.5B one.
+
+## Serving imported models
+
+Developers can import any public Hugging Face GGUF (see [Use the API](use-the-api.md#bring-your-own-model)). Those models reach only nodes that opted in:
+
+```bash
+# Ollama: the agent pulls what the coordinator offers, straight from Hugging Face, up to the disk budget.
+BRAIN_NODE_MODE=ollama BRAIN_NODE_IMPORTS=1 BRAIN_NODE_IMPORT_DISK_GB=100 npm run node
+
+# llama.cpp / mlx-lm / exo: the agent cannot pull; it logs which file was offered. Load it yourself:
+llama-server -hf ggml-org/gpt-oss-20b-GGUF:MXFP4 --port 8080
+BRAIN_NODE_MODE=llamacpp BRAIN_NODE_IMPORTS=1 npm run node
+```
+
+Every heartbeat carries the import table, so a GGUF your server lists under its repository or file name maps onto its `hf/…` id by itself; pin it with `BRAIN_NODE_MODEL_MAP="hf/org/repo=<served name>"` if the name is something else. The coordinator offers a node only models whose memory requirement fits what the node reports (GPU memory, or system RAM when there is none) and whose file fits the disk budget, most recently requested first, three at a time. Imported models are benchmarked, canaried and settled like allowlisted ones; the parameter count that sizes the units comes from the GGUF header as Hugging Face reports it.
 
 ## Getting paid
 

@@ -1,5 +1,5 @@
-import { matchServedModel, modelSpec } from "../../models";
-import type { Backend, JobPayload } from "../../protocol";
+import { isImportedId, matchServedModel, modelSpec } from "../../models";
+import type { Backend, ImportOffer, JobPayload } from "../../protocol";
 import type { GenerateResult, InferenceBackend } from "./types";
 
 /**
@@ -18,6 +18,11 @@ import type { GenerateResult, InferenceBackend } from "./types";
  *
  * Ollama can pull a missing allowlisted model on request; the other servers must already have the
  * model loaded, so ensureLoaded only confirms it is listed.
+ *
+ * Imported models (`hf/<org>/<repo>`): Ollama pulls them as `hf.co/<org>/<repo>:<quant>` when the
+ * coordinator offers one and the operator opted in (pullImports). The other servers serve the
+ * GGUF the operator started them with; its name maps onto the imported id by repository or file
+ * name (matchServedModel), or is pinned with BRAIN_NODE_MODEL_MAP="hf/org/repo=<served name>".
  */
 export const DEFAULT_PORTS: Record<Exclude<Backend, "mock" | "vllm">, number> = { llamacpp: 8080, ollama: 11434, mlx: 8080, exo: 52415 };
 
@@ -62,11 +67,17 @@ export class LocalServerBackend implements InferenceBackend {
     this.base = opts.baseUrl.replace(/\/$/, "");
     this.log = opts.log ?? (() => undefined);
     this.fetch = opts.fetchImpl ?? fetch;
-    for (const [id, name] of Object.entries(opts.modelMap ?? {})) if (modelSpec(id) && !modelSpec(id)?.mock) this.served.set(id, name);
+    this.applyPins();
   }
 
-  /** Reads /v1/models and maps what the server serves onto the allowlist. Safe to call repeatedly. */
+  /** Operator pins. Imported ids pinned before the coordinator has sent the table are applied on the next discover(). */
+  private applyPins() {
+    for (const [id, name] of Object.entries(this.opts.modelMap ?? {})) if (modelSpec(id) && !modelSpec(id)?.mock && !this.served.has(id)) this.served.set(id, name);
+  }
+
+  /** Reads /v1/models and maps what the server serves onto the allowlist and the imported table. Safe to call repeatedly. */
   async discover(): Promise<string[]> {
+    this.applyPins();
     let names: string[] = [];
     try {
       const r = await this.fetch(`${this.base}/v1/models`, { signal: AbortSignal.timeout(4_000) });
@@ -81,9 +92,12 @@ export class LocalServerBackend implements InferenceBackend {
       // Ollama tags like "deepseek-r1:32b" do not carry the allowlisted name; the known-tag table covers them.
       const spec = matchServedModel(name) ?? (this.kind === "ollama" ? modelSpec(OLLAMA_IDS[name.replace(/:latest$/, "")] ?? "") : undefined);
       if (!spec || this.served.has(spec.id)) continue;
-      if (this.opts.models && !this.opts.models.includes(spec.id)) continue;
+      // BRAIN_NODE_MODELS restricts allowlisted ids; imported models are governed by the opt-in flag instead.
+      if (this.opts.models && !spec.imported && !this.opts.models.includes(spec.id)) continue;
       this.served.set(spec.id, name);
     }
+    // An imported model whose record disappeared from the coordinator's table is no longer routable; stop advertising it.
+    for (const id of this.served.keys()) if (isImportedId(id) && !modelSpec(id)) this.served.delete(id);
     // Ollama can fetch what is not there yet; advertise the requested allowlisted ids it knows names for.
     if (this.kind === "ollama") for (const id of this.opts.models ?? []) if (!this.served.has(id) && OLLAMA_NAMES[id]) this.served.set(id, OLLAMA_NAMES[id]);
     return this.supportedModels();
@@ -124,6 +138,40 @@ export class LocalServerBackend implements InferenceBackend {
     const id = model ?? this.supportedModels()[0];
     if (!id) return;
     void this.ensureLoaded(id, new AbortController().signal).catch(() => undefined);
+  }
+
+  private pulling = new Set<string>();
+
+  /**
+   * Imported models the coordinator asked this node to fetch. Ollama pulls straight from Hugging
+   * Face as `hf.co/<org>/<repo>:<quant>`; one pull at a time, each a request to the operator's own
+   * Ollama with a repository path and a quantisation tag the coordinator resolved. Other servers
+   * cannot fetch on request; the offer is logged so the operator can load the file themselves.
+   */
+  async pullImports(offers: ImportOffer[], log: (line: string) => void): Promise<string[]> {
+    const done: string[] = [];
+    for (const o of offers) {
+      if (this.served.has(o.model) || this.pulling.has(o.model) || !modelSpec(o.model)) continue;
+      if (this.kind !== "ollama") {
+        log(`import offered: ${o.model} (${o.file}, ${(o.sizeBytes / 1e9).toFixed(1)} GB). ${this.kind} cannot pull on request; load it yourself and pin BRAIN_NODE_MODEL_MAP="${o.model}=<served name>".`);
+        continue;
+      }
+      const name = `hf.co/${o.repo}:${o.quant}`;
+      this.pulling.add(o.model);
+      try {
+        log(`ollama: pulling ${name} for ${o.model} (${(o.sizeBytes / 1e9).toFixed(1)} GB)`);
+        const r = await this.fetch(`${this.base}/api/pull`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: name, stream: false }), signal: AbortSignal.timeout(2 * 3_600_000) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+        this.served.set(o.model, name);
+        done.push(o.model);
+        log(`ollama: ${o.model} ready as ${name}`);
+      } catch (e) {
+        log(`ollama: pull of ${name} failed: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        this.pulling.delete(o.model);
+      }
+    }
+    return done;
   }
 
   async generate(job: JobPayload, onDelta: (delta: string, tokens: number) => void, signal: AbortSignal): Promise<GenerateResult> {

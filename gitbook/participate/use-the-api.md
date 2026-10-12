@@ -53,6 +53,7 @@ console.log(r.choices[0].message.content);
 ## Choosing a model
 
 * A **node model id** from [/models](https://brainnetwork.app/models), such as `qwen/qwen2.5-1.5b-instruct`, runs on Brain Nodes and nowhere else. The page shows live node counts and measured speed per model.
+* An **imported model id**, `hf/<org>/<repo>`, is a Hugging Face GGUF someone imported (see below). Same rule: Brain Nodes serving that file, or nowhere.
 * **`brain/auto`** lets BRAIN AUTO choose across browser compute, Brain Nodes, operator cloud and external models by the published score.
 
 Optional fields:
@@ -65,6 +66,22 @@ Optional fields:
 | `retries` / `fallback` / `timeout_ms` | Gateway policy; see [Routing](../how/routing.md#when-an-attempt-fails) |
 | `maxCost` | USD ceiling; excludes classes whose known cost exceeds it |
 | `maxLatency` | ms ceiling; excludes classes whose known latency exceeds it |
+
+## Bring your own model
+
+Any public text model on Hugging Face with a single-file GGUF and a chat template can be imported:
+
+```bash
+curl -s https://brainnetwork.app/v1/models/import \
+  -H 'content-type: application/json' \
+  -d '{"source":"https://huggingface.co/ggml-org/gpt-oss-20b-GGUF"}'
+```
+
+The answer is the record the coordinator keeps: the id to call (`hf/<org>/<repo>`, lower-cased), the one GGUF file it resolved (4-bit K-quants preferred; name another with `"file": "Q8_0"`), its size, the parameter count and context from the GGUF header, the license tag, the memory a node needs (derived from file size, a requirement rather than a measurement), and `status`: `available` with `nodes_online`, or `waiting_for_node`. No key is needed; ten imports per hour per address.
+
+What is refused, with the reason: repositories without GGUF files (the answer lists GGUF quantisations of that model to import instead, so `openai/gpt-oss-20b` points you at `ggml-org/gpt-oss-20b-GGUF` and the like), multi-part GGUFs, gated or private repositories, non-text pipelines (image, audio, embeddings), and base models without a chat template.
+
+Importing is a request, not a guarantee. The coordinator asks nodes that opted in (`BRAIN_NODE_IMPORTS=1`) and have the memory to pull the file; until one does, a request naming the model is refused with the routing reason, never answered by a different model. Once served, the model behaves like every node model: coordinator-timed speed, canaries, redundant execution on a sample, node-reported receipts, list price. [/models](https://brainnetwork.app/models) shows the import table with live node counts, and `npx brain import <repo>` does the same from a terminal.
 
 ## Pay per call, no account
 

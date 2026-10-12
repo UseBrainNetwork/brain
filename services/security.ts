@@ -40,7 +40,7 @@ const g = globalThis as typeof globalThis & { __brainRl?: Map<string, Bucket> };
 const buckets = (g.__brainRl ??= new Map());
 
 /** Fixed-window limiter. In-process; move to Redis for multi-instance deployments. */
-export function rateLimit(key: string, limit: number, windowMs = networkConfig.rateLimit.windowMs) {
+export function rateLimit(key: string, limit: number, windowMs: number = networkConfig.rateLimit.windowMs) {
   const now = Date.now();
   let b = buckets.get(key);
   if (!b || b.resetAt < now) {
