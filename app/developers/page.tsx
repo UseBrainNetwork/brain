@@ -257,9 +257,10 @@ curl -s https://brainnetwork.app/v1/models/import \\
 #          params: "20.9B", minVramMb: …, status: "waiting_for_node" | "available", nodes_online: N }, … }
 # A repository without GGUF files answers 422 with the quantisations of it to import instead.
 
-# 2. Call it like any node model. It goes only to nodes serving that file; nothing substitutes.
+# 2. Call it like any node model (API key, or x-brain-pay for pay per call). It goes only to
+#    nodes serving that file; nothing substitutes.
 curl -s https://brainnetwork.app/v1/chat/completions \\
-  -H 'content-type: application/json' \\
+  -H "authorization: Bearer $BRAIN_API_KEY" -H 'content-type: application/json' \\
   -d '{"model":"hf/ggml-org/gpt-oss-20b-gguf","messages":[{"role":"user","content":"hello"}]}'
 
 # Or: npx brain import ggml-org/gpt-oss-20b-GGUF`;

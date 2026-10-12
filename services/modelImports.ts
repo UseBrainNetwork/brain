@@ -318,7 +318,7 @@ export async function importView(m: ImportedModel, created: boolean) {
     created,
     use: {
       model: m.id,
-      curl: `curl -s https://brainnetwork.app/v1/chat/completions -H 'content-type: application/json' -d '{"model":"${m.id}","messages":[{"role":"user","content":"hello"}]}'`,
+      curl: `curl -s https://brainnetwork.app/v1/chat/completions -H "authorization: Bearer $BRAIN_API_KEY" -H 'content-type: application/json' -d '{"model":"${m.id}","messages":[{"role":"user","content":"hello"}]}'`,
     },
     note:
       status === "available"
